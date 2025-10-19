@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MangaSuperb - AI Manga Generator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            width: 100%;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .config-section {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-top: 15px;
+        }
+
+        .config-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        label {
+            font-size: 12px;
+            color: #666;
+            font-weight: 600;
+        }
+
+        select, input[type="password"], input[type="text"] {
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 5px;
+            font-size: 14px;
+            min-width: 200px;
+        }
+
+        select:focus, input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        button {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background 0.3s;
+        }
+
+        button:hover {
+            background: #5568d3;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .content-area {
+            flex: 1;
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            overflow-y: auto;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            min-height: 400px;
+        }
+
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #999;
+            text-align: center;
+        }
+
+        .empty-state svg {
+            width: 100px;
+            height: 100px;
+            margin-bottom: 20px;
+            opacity: 0.3;
+        }
+
+        .manga-output {
+            display: none;
+        }
+
+        .manga-output.active {
+            display: block;
+        }
+
+        .manga-title {
+            font-size: 28px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .manga-summary {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            line-height: 1.6;
+        }
+
+        .panels-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .panel {
+            background: #fafafa;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            transition: transform 0.2s;
+        }
+
+        .panel:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .panel-header {
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+
+        .panel-image {
+            width: 100%;
+            background: #f0f0f0;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            min-height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .panel-image img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .panel-image .placeholder {
+            color: #999;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .panel-scene {
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        .panel-dialogue {
+            background: white;
+            padding: 10px;
+            border-left: 3px solid #667eea;
+            margin-bottom: 8px;
+            font-style: italic;
+        }
+
+        .panel-notes {
+            font-size: 12px;
+            color: #666;
+        }
+
+        .download-btn {
+            background: #10b981;
+            padding: 5px 10px;
+            font-size: 12px;
+            margin-top: 10px;
+            width: 100%;
+        }
+
+        .download-btn:hover {
+            background: #059669;
+        }
+
+        .input-section {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .input-controls {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+
+        .input-group {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 5px;
+            font-size: 14px;
+            font-family: inherit;
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+            color: #667eea;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            background: #fee;
+            color: #c33;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .error-message.active {
+            display: block;
+        }
+
+        .actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .regenerate-btn {
+            background: #f59e0b;
+        }
+
+        .regenerate-btn:hover {
+            background: #d97706;
+        }
+
+        .info-text {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .api-status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            margin-left: 10px;
+        }
+
+        .api-status.valid {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .api-status.invalid {
+            background: #fee;
+            color: #c33;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎨 MangaSuperb</h1>
+            <p>AI-Powered Manga Generation</p>
+
+            <div class="config-section">
+                <div class="config-group">
+                    <label for="model-select">AI Model</label>
+                    <select id="model-select">
+                        <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                    </select>
+                </div>
+
+                <div class="config-group">
+                    <label for="api-key">Google Gemini API Key</label>
+                    <input type="password" id="api-key" placeholder="Enter your API key">
+                    <span class="api-status" id="api-status"></span>
+                </div>
+
+                <button id="save-config-btn" style="align-self: flex-end;">Save Configuration</button>
+            </div>
+
+            <p class="info-text">
+                ℹ️ Your API key is stored locally in your browser and never sent to our servers.
+                Get your free API key at <a href="https://makersuite.google.com/app/apikey" target="_blank">Google AI Studio</a>
+            </p>
+        </header>
+
+        <div class="content-area" id="content-area">
+            <div class="empty-state" id="empty-state">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                </svg>
+                <h3>Start Creating Your Manga!</h3>
+                <p>Enter a story idea below to generate your manga script and panels.</p>
+            </div>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Generating your manga... This may take a moment.</p>
+            </div>
+
+            <div class="manga-output" id="manga-output">
+                <div class="actions">
+                    <button class="regenerate-btn" id="regenerate-btn">🔄 Regenerate</button>
+                    <button id="download-all-btn">⬇️ Download All Images</button>
+                </div>
+
+                <h2 class="manga-title" id="manga-title"></h2>
+                <div class="manga-summary" id="manga-summary"></div>
+
+                <div class="panels-grid" id="panels-grid"></div>
+            </div>
+
+            <div class="error-message" id="error-message"></div>
+        </div>
+
+        <div class="input-section">
+            <div class="input-controls">
+                <div class="input-group">
+                    <label for="prompt-input">Your Story Idea</label>
+                    <textarea id="prompt-input" placeholder="Example: A young ninja discovers they have the power to control time, but must face an ancient evil that threatens their village..."></textarea>
+                </div>
+                <button id="generate-btn">Generate Manga</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // LocalStorage keys
+        const STORAGE_KEYS = {
+            API_KEY: 'mangasuperb_api_key',
+            MODEL: 'mangasuperb_model',
+            LAST_PROMPT: 'mangasuperb_last_prompt',
+            LAST_RESULT: 'mangasuperb_last_result'
+        };
+
+        // DOM elements
+        const modelSelect = document.getElementById('model-select');
+        const apiKeyInput = document.getElementById('api-key');
+        const saveConfigBtn = document.getElementById('save-config-btn');
+        const promptInput = document.getElementById('prompt-input');
+        const generateBtn = document.getElementById('generate-btn');
+        const regenerateBtn = document.getElementById('regenerate-btn');
+        const downloadAllBtn = document.getElementById('download-all-btn');
+        const emptyState = document.getElementById('empty-state');
+        const loading = document.getElementById('loading');
+        const mangaOutput = document.getElementById('manga-output');
+        const errorMessage = document.getElementById('error-message');
+        const apiStatus = document.getElementById('api-status');
+
+        // Load saved configuration
+        function loadConfig() {
+            const savedApiKey = localStorage.getItem(STORAGE_KEYS.API_KEY);
+            const savedModel = localStorage.getItem(STORAGE_KEYS.MODEL);
+            const savedPrompt = localStorage.getItem(STORAGE_KEYS.LAST_PROMPT);
+            const savedResult = localStorage.getItem(STORAGE_KEYS.LAST_RESULT);
+
+            if (savedApiKey) {
+                apiKeyInput.value = savedApiKey;
+                updateApiStatus(true);
+            }
+            if (savedModel) {
+                modelSelect.value = savedModel;
+            }
+            if (savedPrompt) {
+                promptInput.value = savedPrompt;
+            }
+            if (savedResult) {
+                try {
+                    const result = JSON.parse(savedResult);
+                    displayMangaResult(result);
+                } catch (e) {
+                    console.error('Failed to load saved result:', e);
+                }
+            }
+        }
+
+        // Save configuration
+        function saveConfig() {
+            localStorage.setItem(STORAGE_KEYS.API_KEY, apiKeyInput.value);
+            localStorage.setItem(STORAGE_KEYS.MODEL, modelSelect.value);
+            showMessage('Configuration saved!', 'success');
+        }
+
+        // Update API status indicator
+        function updateApiStatus(isValid) {
+            if (isValid) {
+                apiStatus.textContent = '✓ Valid';
+                apiStatus.className = 'api-status valid';
+            } else if (apiKeyInput.value) {
+                apiStatus.textContent = '✗ Invalid';
+                apiStatus.className = 'api-status invalid';
+            } else {
+                apiStatus.textContent = '';
+                apiStatus.className = 'api-status';
+            }
+        }
+
+        // Show error message
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.classList.add('active');
+            setTimeout(() => {
+                errorMessage.classList.remove('active');
+            }, 5000);
+        }
+
+        // Show message
+        function showMessage(message, type = 'info') {
+            alert(message);
+        }
+
+        // Generate manga
+        async function generateManga() {
+            const prompt = promptInput.value.trim();
+            const apiKey = apiKeyInput.value.trim();
+            const model = modelSelect.value;
+
+            if (!prompt) {
+                showError('Please enter a story idea!');
+                return;
+            }
+
+            if (!apiKey) {
+                showError('Please configure your API key first!');
+                return;
+            }
+
+            // Show loading state
+            emptyState.style.display = 'none';
+            mangaOutput.classList.remove('active');
+            loading.classList.add('active');
+            errorMessage.classList.remove('active');
+            generateBtn.disabled = true;
+
+            try {
+                const response = await fetch('/api/generate-manga', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        model: model,
+                        api_key: apiKey
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to generate manga');
+                }
+
+                // Save to localStorage
+                localStorage.setItem(STORAGE_KEYS.LAST_PROMPT, prompt);
+                localStorage.setItem(STORAGE_KEYS.LAST_RESULT, JSON.stringify(data));
+
+                // Display result
+                displayMangaResult(data);
+                updateApiStatus(true);
+
+            } catch (error) {
+                showError(error.message);
+                updateApiStatus(false);
+            } finally {
+                loading.classList.remove('active');
+                generateBtn.disabled = false;
+            }
+        }
+
+        // Display manga result
+        function displayMangaResult(data) {
+            const { script, images } = data;
+
+            // Set title and summary
+            document.getElementById('manga-title').textContent = script.title || 'Untitled Manga';
+            document.getElementById('manga-summary').textContent = script.summary || '';
+
+            // Clear and populate panels
+            const panelsGrid = document.getElementById('panels-grid');
+            panelsGrid.innerHTML = '';
+
+            script.panels.forEach((panel, index) => {
+                const panelDiv = document.createElement('div');
+                panelDiv.className = 'panel';
+
+                const imageData = images[index];
+                let imageHTML = '';
+
+                if (imageData && imageData.image_data) {
+                    imageHTML = `<img src="data:image/png;base64,${imageData.image_data}" alt="Panel ${panel.panel_number}">`;
+                } else {
+                    imageHTML = `<div class="placeholder">
+                        <p>📸 Image generation unavailable</p>
+                        ${imageData?.error ? `<small>${imageData.error}</small>` : ''}
+                    </div>`;
+                }
+
+                panelDiv.innerHTML = `
+                    <div class="panel-header">Panel ${panel.panel_number}</div>
+                    <div class="panel-image" id="panel-image-${panel.panel_number}">
+                        ${imageHTML}
+                    </div>
+                    <div class="panel-scene"><strong>Scene:</strong> ${panel.scene}</div>
+                    <div class="panel-dialogue">${panel.dialogue || 'No dialogue'}</div>
+                    <div class="panel-notes"><strong>Notes:</strong> ${panel.visual_notes}</div>
+                    ${imageData?.image_data ? `<button class="download-btn" onclick="downloadImage(${panel.panel_number}, '${imageData.image_data}')">Download Image</button>` : ''}
+                `;
+
+                panelsGrid.appendChild(panelDiv);
+            });
+
+            // Show manga output
+            emptyState.style.display = 'none';
+            mangaOutput.classList.add('active');
+        }
+
+        // Download single image
+        function downloadImage(panelNumber, base64Data) {
+            const link = document.createElement('a');
+            link.href = `data:image/png;base64,${base64Data}`;
+            link.download = `manga-panel-${panelNumber}.png`;
+            link.click();
+        }
+
+        // Download all images
+        function downloadAllImages() {
+            const savedResult = localStorage.getItem(STORAGE_KEYS.LAST_RESULT);
+            if (!savedResult) return;
+
+            try {
+                const result = JSON.parse(savedResult);
+                result.images.forEach((img, index) => {
+                    if (img.image_data) {
+                        setTimeout(() => {
+                            downloadImage(img.panel_number, img.image_data);
+                        }, index * 500);
+                    }
+                });
+            } catch (e) {
+                showError('Failed to download images');
+            }
+        }
+
+        // Event listeners
+        saveConfigBtn.addEventListener('click', saveConfig);
+        generateBtn.addEventListener('click', generateManga);
+        regenerateBtn.addEventListener('click', generateManga);
+        downloadAllBtn.addEventListener('click', downloadAllImages);
+
+        // Allow Enter to submit (with Shift+Enter for new line)
+        promptInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                generateManga();
+            }
+        });
+
+        // Load configuration on page load
+        loadConfig();
+
+        // Make downloadImage available globally
+        window.downloadImage = downloadImage;
+    </script>
+</body>
+</html>
