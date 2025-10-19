@@ -1,0 +1,2 @@
+# MangaSuperb
+LLM Manga generation
