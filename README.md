@@ -22,7 +22,7 @@ An AI-powered manga generation tool that uses Google's Gemini API to create mang
 
 1. Clone the repository:
 ```bash
-git clone <repository-url>
+git clone https://github.com/DanielZhang17/MangaSuperb
 cd MangaSuperb
 ```
 
@@ -49,19 +49,13 @@ http://localhost:5000
 4. **Generate**: Click "Generate Manga" or press Enter to create your manga
 5. **Download**: Download individual panels or all images at once
 
-## Supported Models
+## Supported Scripting Models
 
-- **Gemini 2.0 Flash (Experimental)**: Fast, experimental model
-- **Gemini 1.5 Pro**: Production-ready model with high quality output
+- **Gemini 2.5 Pro**: Production-ready model with high quality output for script generatiom
 
-## Data Storage
+## Supported Image Generation Models
 
-All data is stored locally in your browser:
-- API keys (localStorage)
-- Model preferences (localStorage)
-- Generated manga content (localStorage)
-
-No data is sent to any external servers except Google's Gemini API.
+- **Gemini 2.5 Flash Image (Nano Banana)**: Production-ready model with high quality image generation
 
 ## Development
 

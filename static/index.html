@@ -369,7 +369,6 @@
             </div>
 
             <p class="info-text">
-                ℹ️ Your API key is stored locally in your browser and never sent to our servers.
                 Get your free API key at <a href="https://makersuite.google.com/app/apikey" target="_blank">Google AI Studio</a>
             </p>
         </header>
@@ -523,6 +522,7 @@
             generateBtn.disabled = true;
 
             try {
+                console.log('Sending request to generate manga...');
                 const response = await fetch('/api/generate-manga', {
                     method: 'POST',
                     headers: {
@@ -535,10 +535,32 @@
                     })
                 });
 
+                console.log('Response status:', response.status);
                 const data = await response.json();
+                console.log('Response data:', data);
 
                 if (!response.ok) {
                     throw new Error(data.error || 'Failed to generate manga');
+                }
+
+                // Check if we have valid data
+                if (!data.script || !data.script.panels) {
+                    throw new Error('Invalid response format: missing script or panels');
+                }
+
+                console.log('Number of panels:', data.script.panels.length);
+                console.log('Number of images:', data.images ? data.images.length : 0);
+
+                // Log image data info
+                if (data.images) {
+                    data.images.forEach((img, idx) => {
+                        console.log(`Image ${idx}:`, {
+                            panel_number: img.panel_number,
+                            has_data: !!img.image_data,
+                            data_length: img.image_data ? img.image_data.length : 0,
+                            error: img.error
+                        });
+                    });
                 }
 
                 // Save to localStorage
@@ -547,11 +569,21 @@
 
                 // Display result
                 displayMangaResult(data);
+
+                // Keep API status as valid since generation succeeded
                 updateApiStatus(true);
 
             } catch (error) {
+                console.error('Generation error:', error);
                 showError(error.message);
-                updateApiStatus(false);
+                emptyState.style.display = 'none';
+                // Only mark API as invalid if it's actually an auth error
+                if (error.message.includes('401') || error.message.includes('403') || error.message.includes('API_KEY_INVALID')) {
+                    updateApiStatus(false);
+                } else {
+                    // Keep the API status as valid if the error is not auth-related
+                    updateApiStatus(true);
+                }
             } finally {
                 loading.classList.remove('active');
                 generateBtn.disabled = false;
@@ -560,7 +592,14 @@
 
         // Display manga result
         function displayMangaResult(data) {
+            console.log('displayMangaResult called with:', data);
             const { script, images } = data;
+
+            if (!script || !script.panels) {
+                console.error('Invalid script data:', script);
+                showError('Invalid manga data received');
+                return;
+            }
 
             // Set title and summary
             document.getElementById('manga-title').textContent = script.title || 'Untitled Manga';
@@ -570,19 +609,37 @@
             const panelsGrid = document.getElementById('panels-grid');
             panelsGrid.innerHTML = '';
 
+            console.log('Creating panels for', script.panels.length, 'panels');
+
             script.panels.forEach((panel, index) => {
+                console.log(`Processing panel ${index}:`, panel);
                 const panelDiv = document.createElement('div');
                 panelDiv.className = 'panel';
 
-                const imageData = images[index];
-                let imageHTML = '';
+                const imageData = images && images[index] ? images[index] : null;
+                console.log(`Panel ${index} imageData:`, imageData);
 
-                if (imageData && imageData.image_data) {
-                    imageHTML = `<img src="data:image/png;base64,${imageData.image_data}" alt="Panel ${panel.panel_number}">`;
+                let imageHTML = '';
+                let hasImage = false;
+                let imageUrl = '';
+
+                if (imageData && imageData.image_url) {
+                    console.log(`Panel ${index}: Using image_url:`, imageData.image_url);
+                    imageUrl = imageData.image_url;
+                    hasImage = true;
+                    imageHTML = `<img src="${imageUrl}" alt="Panel ${panel.panel_number}" onerror="console.error('Image failed to load from URL for panel ${panel.panel_number}'); this.parentElement.innerHTML='<div class=\\'placeholder\\'>❌ Image load failed</div>'">`;
+                } else if (imageData && imageData.image_data) {
+                    console.log(`Panel ${index}: Has image data, length: ${imageData.image_data.length}`);
+                    // Try both base64 with and without data URI prefix
+                    const base64Data = imageData.image_data;
+                    imageUrl = base64Data.startsWith('data:') ? base64Data : `data:image/png;base64,${base64Data}`;
+                    hasImage = true;
+                    imageHTML = `<img src="${imageUrl}" alt="Panel ${panel.panel_number}" onerror="console.error('Image failed to load for panel ${panel.panel_number}'); this.parentElement.innerHTML='<div class=\\'placeholder\\'>❌ Image load failed</div>'">`;
                 } else {
+                    console.log(`Panel ${index}: No image data available. Error:`, imageData?.error);
                     imageHTML = `<div class="placeholder">
                         <p>📸 Image generation unavailable</p>
-                        ${imageData?.error ? `<small>${imageData.error}</small>` : ''}
+                        ${imageData?.error ? `<small style="color: #999;">${imageData.error}</small>` : ''}
                     </div>`;
                 }
 
@@ -594,18 +651,29 @@
                     <div class="panel-scene"><strong>Scene:</strong> ${panel.scene}</div>
                     <div class="panel-dialogue">${panel.dialogue || 'No dialogue'}</div>
                     <div class="panel-notes"><strong>Notes:</strong> ${panel.visual_notes}</div>
-                    ${imageData?.image_data ? `<button class="download-btn" onclick="downloadImage(${panel.panel_number}, '${imageData.image_data}')">Download Image</button>` : ''}
+                    ${hasImage ? `<button class="download-btn" onclick="downloadImageFromUrl('${imageUrl}', ${panel.panel_number})">Download Image</button>` : ''}
                 `;
 
                 panelsGrid.appendChild(panelDiv);
             });
+
+            console.log('Panels rendered, showing manga output');
 
             // Show manga output
             emptyState.style.display = 'none';
             mangaOutput.classList.add('active');
         }
 
-        // Download single image
+        // Download single image from URL or base64
+        function downloadImageFromUrl(imageUrl, panelNumber) {
+            const link = document.createElement('a');
+            link.href = imageUrl;
+            link.download = `manga-panel-${panelNumber}.png`;
+            link.target = '_blank';
+            link.click();
+        }
+
+        // Download single image (legacy function for base64)
         function downloadImage(panelNumber, base64Data) {
             const link = document.createElement('a');
             link.href = `data:image/png;base64,${base64Data}`;
@@ -621,11 +689,13 @@
             try {
                 const result = JSON.parse(savedResult);
                 result.images.forEach((img, index) => {
-                    if (img.image_data) {
-                        setTimeout(() => {
+                    setTimeout(() => {
+                        if (img.image_url) {
+                            downloadImageFromUrl(img.image_url, img.panel_number);
+                        } else if (img.image_data) {
                             downloadImage(img.panel_number, img.image_data);
-                        }, index * 500);
-                    }
+                        }
+                    }, index * 500);
                 });
             } catch (e) {
                 showError('Failed to download images');
@@ -649,8 +719,9 @@
         // Load configuration on page load
         loadConfig();
 
-        // Make downloadImage available globally
+        // Make download functions available globally
         window.downloadImage = downloadImage;
+        window.downloadImageFromUrl = downloadImageFromUrl;
     </script>
 </body>
 </html>
