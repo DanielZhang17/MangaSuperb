@@ -124,6 +124,32 @@
             opacity: 0.3;
         }
 
+        .script-editor {
+            display: none;
+        }
+
+        .script-editor.active {
+            display: block;
+        }
+
+        .script-json {
+            width: 100%;
+            min-height: 300px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            margin: 20px 0;
+            background: #f9f9f9;
+        }
+
+        .script-json:focus {
+            outline: none;
+            border-color: #667eea;
+            background: white;
+        }
+
         .manga-output {
             display: none;
         }
@@ -148,75 +174,23 @@
             line-height: 1.6;
         }
 
-        .panels-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            margin-top: 20px;
-        }
-
-        .panel {
-            background: #fafafa;
+        .manga-page-image {
+            width: 100%;
+            max-width: 800px;
+            margin: 20px auto;
+            display: block;
             border: 2px solid #e0e0e0;
             border-radius: 8px;
-            padding: 15px;
-            transition: transform 0.2s;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
 
-        .panel:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
-        }
-
-        .panel-header {
-            font-weight: bold;
-            color: #667eea;
-            margin-bottom: 10px;
-            font-size: 16px;
-        }
-
-        .panel-image {
-            width: 100%;
+        .image-placeholder {
             background: #f0f0f0;
-            border-radius: 5px;
-            margin-bottom: 10px;
-            min-height: 200px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .panel-image img {
-            width: 100%;
-            height: auto;
-            display: block;
-        }
-
-        .panel-image .placeholder {
-            color: #999;
+            padding: 60px;
             text-align: center;
-            padding: 20px;
-        }
-
-        .panel-scene {
-            font-weight: 600;
-            margin-bottom: 8px;
-            color: #333;
-        }
-
-        .panel-dialogue {
-            background: white;
-            padding: 10px;
-            border-left: 3px solid #667eea;
-            margin-bottom: 8px;
-            font-style: italic;
-        }
-
-        .panel-notes {
-            font-size: 12px;
-            color: #666;
+            color: #999;
+            border-radius: 8px;
+            margin: 20px 0;
         }
 
         .download-btn {
@@ -384,19 +358,35 @@
 
             <div class="loading" id="loading">
                 <div class="spinner"></div>
-                <p>Generating your manga... This may take a moment.</p>
+                <p id="loading-message">Generating your manga script... This may take a moment.</p>
+            </div>
+
+            <div class="script-editor" id="script-editor">
+                <h2 class="manga-title" id="script-title">Script Generated!</h2>
+                <p style="color: #666; margin-bottom: 15px;">Review and edit the script below, then generate the manga page image.</p>
+
+                <label for="script-json" style="font-weight: 600; color: #333; display: block; margin-bottom: 5px;">
+                    Manga Script (JSON):
+                </label>
+                <textarea class="script-json" id="script-json" placeholder="Script will appear here..."></textarea>
+
+                <div class="actions">
+                    <button id="generate-image-btn">🎨 Generate Manga Page</button>
+                    <button class="regenerate-btn" id="regenerate-script-btn">🔄 Regenerate Script</button>
+                </div>
             </div>
 
             <div class="manga-output" id="manga-output">
                 <div class="actions">
-                    <button class="regenerate-btn" id="regenerate-btn">🔄 Regenerate</button>
-                    <button id="download-all-btn">⬇️ Download All Images</button>
+                    <button id="edit-script-btn">✏️ Edit Script</button>
+                    <button class="regenerate-btn" id="regenerate-image-btn">🔄 Regenerate Image</button>
+                    <button id="download-image-btn">⬇️ Download Page</button>
                 </div>
 
                 <h2 class="manga-title" id="manga-title"></h2>
                 <div class="manga-summary" id="manga-summary"></div>
 
-                <div class="panels-grid" id="panels-grid"></div>
+                <div id="manga-page-container"></div>
             </div>
 
             <div class="error-message" id="error-message"></div>
@@ -419,8 +409,12 @@
             API_KEY: 'mangasuperb_api_key',
             MODEL: 'mangasuperb_model',
             LAST_PROMPT: 'mangasuperb_last_prompt',
-            LAST_RESULT: 'mangasuperb_last_result'
+            LAST_SCRIPT: 'mangasuperb_last_script',
+            LAST_IMAGE: 'mangasuperb_last_image'
         };
+
+        // Current state
+        let currentScript = null;
 
         // DOM elements
         const modelSelect = document.getElementById('model-select');
@@ -428,11 +422,17 @@
         const saveConfigBtn = document.getElementById('save-config-btn');
         const promptInput = document.getElementById('prompt-input');
         const generateBtn = document.getElementById('generate-btn');
-        const regenerateBtn = document.getElementById('regenerate-btn');
-        const downloadAllBtn = document.getElementById('download-all-btn');
         const emptyState = document.getElementById('empty-state');
         const loading = document.getElementById('loading');
+        const loadingMessage = document.getElementById('loading-message');
+        const scriptEditor = document.getElementById('script-editor');
+        const scriptJson = document.getElementById('script-json');
+        const generateImageBtn = document.getElementById('generate-image-btn');
+        const regenerateScriptBtn = document.getElementById('regenerate-script-btn');
         const mangaOutput = document.getElementById('manga-output');
+        const editScriptBtn = document.getElementById('edit-script-btn');
+        const regenerateImageBtn = document.getElementById('regenerate-image-btn');
+        const downloadImageBtn = document.getElementById('download-image-btn');
         const errorMessage = document.getElementById('error-message');
         const apiStatus = document.getElementById('api-status');
 
@@ -441,7 +441,8 @@
             const savedApiKey = localStorage.getItem(STORAGE_KEYS.API_KEY);
             const savedModel = localStorage.getItem(STORAGE_KEYS.MODEL);
             const savedPrompt = localStorage.getItem(STORAGE_KEYS.LAST_PROMPT);
-            const savedResult = localStorage.getItem(STORAGE_KEYS.LAST_RESULT);
+            const savedScript = localStorage.getItem(STORAGE_KEYS.LAST_SCRIPT);
+            const savedImage = localStorage.getItem(STORAGE_KEYS.LAST_IMAGE);
 
             if (savedApiKey) {
                 apiKeyInput.value = savedApiKey;
@@ -453,12 +454,17 @@
             if (savedPrompt) {
                 promptInput.value = savedPrompt;
             }
-            if (savedResult) {
+            if (savedScript) {
                 try {
-                    const result = JSON.parse(savedResult);
-                    displayMangaResult(result);
+                    currentScript = JSON.parse(savedScript);
+                    if (savedImage) {
+                        const imageData = JSON.parse(savedImage);
+                        displayMangaPage(currentScript, imageData);
+                    } else {
+                        displayScriptEditor(currentScript);
+                    }
                 } catch (e) {
-                    console.error('Failed to load saved result:', e);
+                    console.error('Failed to load saved data:', e);
                 }
             }
         }
@@ -498,8 +504,17 @@
             alert(message);
         }
 
-        // Generate manga
-        async function generateManga() {
+        // Hide all content sections
+        function hideAllSections() {
+            emptyState.style.display = 'none';
+            loading.classList.remove('active');
+            scriptEditor.classList.remove('active');
+            mangaOutput.classList.remove('active');
+            errorMessage.classList.remove('active');
+        }
+
+        // Generate script only
+        async function generateScript() {
             const prompt = promptInput.value.trim();
             const apiKey = apiKeyInput.value.trim();
             const model = modelSelect.value;
@@ -515,15 +530,14 @@
             }
 
             // Show loading state
-            emptyState.style.display = 'none';
-            mangaOutput.classList.remove('active');
+            hideAllSections();
             loading.classList.add('active');
-            errorMessage.classList.remove('active');
+            loadingMessage.textContent = 'Generating your manga script... This may take a moment.';
             generateBtn.disabled = true;
 
             try {
-                console.log('Sending request to generate manga...');
-                const response = await fetch('/api/generate-manga', {
+                console.log('Sending request to generate script...');
+                const response = await fetch('/api/generate-script', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -540,48 +554,32 @@
                 console.log('Response data:', data);
 
                 if (!response.ok) {
-                    throw new Error(data.error || 'Failed to generate manga');
+                    throw new Error(data.error || 'Failed to generate script');
                 }
 
-                // Check if we have valid data
                 if (!data.script || !data.script.panels) {
                     throw new Error('Invalid response format: missing script or panels');
                 }
 
-                console.log('Number of panels:', data.script.panels.length);
-                console.log('Number of images:', data.images ? data.images.length : 0);
-
-                // Log image data info
-                if (data.images) {
-                    data.images.forEach((img, idx) => {
-                        console.log(`Image ${idx}:`, {
-                            panel_number: img.panel_number,
-                            has_data: !!img.image_data,
-                            data_length: img.image_data ? img.image_data.length : 0,
-                            error: img.error
-                        });
-                    });
-                }
+                currentScript = data.script;
 
                 // Save to localStorage
                 localStorage.setItem(STORAGE_KEYS.LAST_PROMPT, prompt);
-                localStorage.setItem(STORAGE_KEYS.LAST_RESULT, JSON.stringify(data));
+                localStorage.setItem(STORAGE_KEYS.LAST_SCRIPT, JSON.stringify(currentScript));
+                localStorage.removeItem(STORAGE_KEYS.LAST_IMAGE); // Clear old image
 
-                // Display result
-                displayMangaResult(data);
+                // Display script editor
+                displayScriptEditor(currentScript);
 
-                // Keep API status as valid since generation succeeded
                 updateApiStatus(true);
 
             } catch (error) {
-                console.error('Generation error:', error);
+                console.error('Script generation error:', error);
                 showError(error.message);
-                emptyState.style.display = 'none';
-                // Only mark API as invalid if it's actually an auth error
+                hideAllSections();
                 if (error.message.includes('401') || error.message.includes('403') || error.message.includes('API_KEY_INVALID')) {
                     updateApiStatus(false);
                 } else {
-                    // Keep the API status as valid if the error is not auth-related
                     updateApiStatus(true);
                 }
             } finally {
@@ -590,138 +588,152 @@
             }
         }
 
-        // Display manga result
-        function displayMangaResult(data) {
-            console.log('displayMangaResult called with:', data);
-            const { script, images } = data;
+        // Display script editor
+        function displayScriptEditor(script) {
+            hideAllSections();
+            scriptEditor.classList.add('active');
+            document.getElementById('script-title').textContent = script.title || 'Script Generated!';
+            scriptJson.value = JSON.stringify(script, null, 2);
+        }
 
-            if (!script || !script.panels) {
-                console.error('Invalid script data:', script);
-                showError('Invalid manga data received');
+        // Generate image from current script
+        async function generateImage() {
+            const apiKey = apiKeyInput.value.trim();
+            const model = modelSelect.value;
+
+            // Try to parse edited script
+            try {
+                currentScript = JSON.parse(scriptJson.value);
+            } catch (e) {
+                showError('Invalid JSON format! Please fix the script syntax.');
                 return;
             }
 
-            // Set title and summary
+            if (!apiKey) {
+                showError('Please configure your API key first!');
+                return;
+            }
+
+            // Show loading state
+            hideAllSections();
+            loading.classList.add('active');
+            loadingMessage.textContent = 'Generating manga page image... This may take a moment.';
+            generateImageBtn.disabled = true;
+
+            try {
+                console.log('Sending request to generate image...');
+                const response = await fetch('/api/generate-image', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        script: currentScript,
+                        model: model,
+                        api_key: apiKey
+                    })
+                });
+
+                console.log('Response status:', response.status);
+                const data = await response.json();
+                console.log('Response data:', data);
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to generate image');
+                }
+
+                // Save updated script and image
+                localStorage.setItem(STORAGE_KEYS.LAST_SCRIPT, JSON.stringify(currentScript));
+                localStorage.setItem(STORAGE_KEYS.LAST_IMAGE, JSON.stringify(data.image));
+
+                // Display manga page
+                displayMangaPage(currentScript, data.image);
+
+                updateApiStatus(true);
+
+            } catch (error) {
+                console.error('Image generation error:', error);
+                showError(error.message);
+                // Go back to script editor on error
+                displayScriptEditor(currentScript);
+            } finally {
+                loading.classList.remove('active');
+                generateImageBtn.disabled = false;
+            }
+        }
+
+        // Display manga page with image
+        function displayMangaPage(script, imageData) {
+            hideAllSections();
+            mangaOutput.classList.add('active');
+
             document.getElementById('manga-title').textContent = script.title || 'Untitled Manga';
             document.getElementById('manga-summary').textContent = script.summary || '';
 
-            // Clear and populate panels
-            const panelsGrid = document.getElementById('panels-grid');
-            panelsGrid.innerHTML = '';
+            const container = document.getElementById('manga-page-container');
+            container.innerHTML = '';
 
-            console.log('Creating panels for', script.panels.length, 'panels');
-
-            script.panels.forEach((panel, index) => {
-                console.log(`Processing panel ${index}:`, panel);
-                const panelDiv = document.createElement('div');
-                panelDiv.className = 'panel';
-
-                const imageData = images && images[index] ? images[index] : null;
-                console.log(`Panel ${index} imageData:`, imageData);
-
-                let imageHTML = '';
-                let hasImage = false;
-                let imageUrl = '';
-
-                if (imageData && imageData.image_url) {
-                    console.log(`Panel ${index}: Using image_url:`, imageData.image_url);
-                    imageUrl = imageData.image_url;
-                    hasImage = true;
-                    imageHTML = `<img src="${imageUrl}" alt="Panel ${panel.panel_number}" onerror="console.error('Image failed to load from URL for panel ${panel.panel_number}'); this.parentElement.innerHTML='<div class=\\'placeholder\\'>❌ Image load failed</div>'">`;
-                } else if (imageData && imageData.image_data) {
-                    console.log(`Panel ${index}: Has image data, length: ${imageData.image_data.length}`);
-                    // Try both base64 with and without data URI prefix
-                    const base64Data = imageData.image_data;
-                    imageUrl = base64Data.startsWith('data:') ? base64Data : `data:image/png;base64,${base64Data}`;
-                    hasImage = true;
-                    imageHTML = `<img src="${imageUrl}" alt="Panel ${panel.panel_number}" onerror="console.error('Image failed to load for panel ${panel.panel_number}'); this.parentElement.innerHTML='<div class=\\'placeholder\\'>❌ Image load failed</div>'">`;
-                } else {
-                    console.log(`Panel ${index}: No image data available. Error:`, imageData?.error);
-                    imageHTML = `<div class="placeholder">
-                        <p>📸 Image generation unavailable</p>
-                        ${imageData?.error ? `<small style="color: #999;">${imageData.error}</small>` : ''}
-                    </div>`;
-                }
-
-                panelDiv.innerHTML = `
-                    <div class="panel-header">Panel ${panel.panel_number}</div>
-                    <div class="panel-image" id="panel-image-${panel.panel_number}">
-                        ${imageHTML}
-                    </div>
-                    <div class="panel-scene"><strong>Scene:</strong> ${panel.scene}</div>
-                    <div class="panel-dialogue">${panel.dialogue || 'No dialogue'}</div>
-                    <div class="panel-notes"><strong>Notes:</strong> ${panel.visual_notes}</div>
-                    ${hasImage ? `<button class="download-btn" onclick="downloadImageFromUrl('${imageUrl}', ${panel.panel_number})">Download Image</button>` : ''}
-                `;
-
-                panelsGrid.appendChild(panelDiv);
-            });
-
-            console.log('Panels rendered, showing manga output');
-
-            // Show manga output
-            emptyState.style.display = 'none';
-            mangaOutput.classList.add('active');
+            if (imageData && imageData.image_url) {
+                const img = document.createElement('img');
+                img.src = imageData.image_url;
+                img.alt = script.title || 'Manga Page';
+                img.className = 'manga-page-image';
+                img.onerror = function() {
+                    console.error('Image failed to load');
+                    container.innerHTML = '<div class="image-placeholder">❌ Image failed to load</div>';
+                };
+                container.appendChild(img);
+            } else {
+                container.innerHTML = `<div class="image-placeholder">
+                    <p>📸 Image generation unavailable</p>
+                    ${imageData?.error ? `<small style="color: #999;">${imageData.error}</small>` : ''}
+                </div>`;
+            }
         }
 
-        // Download single image from URL or base64
-        function downloadImageFromUrl(imageUrl, panelNumber) {
-            const link = document.createElement('a');
-            link.href = imageUrl;
-            link.download = `manga-panel-${panelNumber}.png`;
-            link.target = '_blank';
-            link.click();
+        // Edit script again
+        function editScript() {
+            displayScriptEditor(currentScript);
         }
 
-        // Download single image (legacy function for base64)
-        function downloadImage(panelNumber, base64Data) {
-            const link = document.createElement('a');
-            link.href = `data:image/png;base64,${base64Data}`;
-            link.download = `manga-panel-${panelNumber}.png`;
-            link.click();
-        }
-
-        // Download all images
-        function downloadAllImages() {
-            const savedResult = localStorage.getItem(STORAGE_KEYS.LAST_RESULT);
-            if (!savedResult) return;
+        // Download manga page
+        function downloadMangaPage() {
+            const savedImage = localStorage.getItem(STORAGE_KEYS.LAST_IMAGE);
+            if (!savedImage) return;
 
             try {
-                const result = JSON.parse(savedResult);
-                result.images.forEach((img, index) => {
-                    setTimeout(() => {
-                        if (img.image_url) {
-                            downloadImageFromUrl(img.image_url, img.panel_number);
-                        } else if (img.image_data) {
-                            downloadImage(img.panel_number, img.image_data);
-                        }
-                    }, index * 500);
-                });
+                const imageData = JSON.parse(savedImage);
+                if (imageData.image_url) {
+                    const link = document.createElement('a');
+                    link.href = imageData.image_url;
+                    link.download = `manga-page-${Date.now()}.png`;
+                    link.target = '_blank';
+                    link.click();
+                }
             } catch (e) {
-                showError('Failed to download images');
+                showError('Failed to download image');
             }
         }
 
         // Event listeners
         saveConfigBtn.addEventListener('click', saveConfig);
-        generateBtn.addEventListener('click', generateManga);
-        regenerateBtn.addEventListener('click', generateManga);
-        downloadAllBtn.addEventListener('click', downloadAllImages);
+        generateBtn.addEventListener('click', generateScript);
+        generateImageBtn.addEventListener('click', generateImage);
+        regenerateScriptBtn.addEventListener('click', generateScript);
+        editScriptBtn.addEventListener('click', editScript);
+        regenerateImageBtn.addEventListener('click', generateImage);
+        downloadImageBtn.addEventListener('click', downloadMangaPage);
 
         // Allow Enter to submit (with Shift+Enter for new line)
         promptInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                generateManga();
+                generateScript();
             }
         });
 
         // Load configuration on page load
         loadConfig();
-
-        // Make download functions available globally
-        window.downloadImage = downloadImage;
-        window.downloadImageFromUrl = downloadImageFromUrl;
     </script>
 </body>
 </html>

@@ -23,10 +23,10 @@ CORS(app)
 def index():
     return send_from_directory('static', 'index.html')
 
-@app.route('/api/generate-manga', methods=['POST'])
-def generate_manga():
+@app.route('/api/generate-script', methods=['POST'])
+def generate_script():
     """
-    Generate manga script and images using Google Gemini API
+    Generate manga script only (no images)
     """
     try:
         data = request.json
@@ -34,7 +34,7 @@ def generate_manga():
         model_name = data.get('model', 'gemini-2.5-pro')
         api_key = data.get('api_key', '')
 
-        logger.info(f"=== Manga Generation Request ===")
+        logger.info(f"=== Script Generation Request ===")
         logger.info(f"Model: {model_name}")
         logger.info(f"Prompt length: {len(prompt)} characters")
 
@@ -92,174 +92,9 @@ Format your response as JSON with this structure:
         logger.info(f"Script parsed successfully. Title: {manga_script.get('title', 'N/A')}")
         logger.info(f"Number of panels: {len(manga_script.get('panels', []))}")
 
-        # Create images directory if it doesn't exist
-        images_dir = os.path.join('static', 'generated_images')
-        os.makedirs(images_dir, exist_ok=True)
-        logger.info(f"Images directory ready: {images_dir}")
-
-        # Generate images for each panel using Gemini image generation model
-        images = []
-        image_model_name = 'gemini-2.5-flash-image'
-
-        try:
-            # Use GenerativeModel with image generation capabilities
-            logger.info(f"Initializing image generation model: {image_model_name}")
-            image_model = genai.GenerativeModel(image_model_name)
-            logger.info("Image model initialized successfully")
-
-            for panel in manga_script.get('panels', []):
-                panel_num = panel['panel_number']
-                logger.info(f"--- Generating image for panel {panel_num} ---")
-
-                image_prompt = f"""Generate a manga panel image:
-Scene: {panel['scene']}
-Visual style: {manga_script.get('style_notes', 'black and white manga style')}
-Details: {panel['visual_notes']}
-Style: Clean manga linework, dramatic angles, expressive characters."""
-
-                logger.info(f"Panel {panel_num} prompt: {image_prompt[:100]}...")
-
-                try:
-                    # Generate image using the model
-                    logger.info(f"Calling generate_content for panel {panel_num}...")
-                    result = image_model.generate_content(image_prompt)
-                    logger.info(f"Panel {panel_num}: API call completed")
-
-                    # Log response structure for debugging
-                    logger.info(f"Panel {panel_num}: Response has {len(result.candidates)} candidate(s)")
-
-                    # Extract image data from response parts
-                    img_base64 = None
-                    if result.candidates and len(result.candidates) > 0:
-                        candidate = result.candidates[0]
-                        logger.info(f"Panel {panel_num}: Candidate finish_reason: {candidate.finish_reason}")
-
-                        if candidate.content and candidate.content.parts:
-                            logger.info(f"Panel {panel_num}: Found {len(candidate.content.parts)} part(s)")
-
-                            for idx, part in enumerate(candidate.content.parts):
-                                logger.info(f"Panel {panel_num}: Part {idx} - has inline_data: {hasattr(part, 'inline_data')}")
-
-                                # Check if this part contains image data
-                                if hasattr(part, 'inline_data') and part.inline_data:
-                                    logger.info(f"Panel {panel_num}: Found inline_data with mime_type: {part.inline_data.mime_type}")
-
-                                    # Get image data
-                                    image_data = part.inline_data.data
-                                    logger.info(f"Panel {panel_num}: Image data type: {type(image_data)}")
-
-                                    # Check if data is already base64 string or raw bytes
-                                    if isinstance(image_data, str):
-                                        logger.info(f"Panel {panel_num}: Data is string (likely already base64)")
-                                        img_base64 = image_data
-                                        # Decode for file saving
-                                        try:
-                                            file_data = base64.b64decode(image_data)
-                                            logger.info(f"Panel {panel_num}: Decoded size: {len(file_data)} bytes")
-                                        except Exception as decode_err:
-                                            logger.error(f"Panel {panel_num}: Failed to decode base64: {decode_err}")
-                                            file_data = image_data.encode('utf-8')
-                                    else:
-                                        logger.info(f"Panel {panel_num}: Data is bytes, size: {len(image_data)} bytes")
-                                        img_base64 = base64.b64encode(image_data).decode('utf-8')
-                                        file_data = image_data
-
-                                    # Save to file
-                                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                                    filename = f"panel_{panel_num}_{timestamp}.png"
-                                    filepath = os.path.join(images_dir, filename)
-
-                                    with open(filepath, 'wb') as f:
-                                        f.write(file_data)
-                                    logger.info(f"Panel {panel_num}: Image saved to {filepath} ({len(file_data)} bytes)")
-
-                                    break
-                                elif hasattr(part, 'mime_type') and 'image' in str(part.mime_type):
-                                    logger.info(f"Panel {panel_num}: Part has image mime_type: {part.mime_type}")
-                                    # Alternative way to get image data
-                                    if hasattr(part, 'data'):
-                                        image_data = part.data
-                                        logger.info(f"Panel {panel_num}: Image data type: {type(image_data)}")
-
-                                        # Check if data is already base64 string or raw bytes
-                                        if isinstance(image_data, str):
-                                            logger.info(f"Panel {panel_num}: Data is string (likely already base64)")
-                                            img_base64 = image_data
-                                            # Decode for file saving
-                                            try:
-                                                file_data = base64.b64decode(image_data)
-                                                logger.info(f"Panel {panel_num}: Decoded size: {len(file_data)} bytes")
-                                            except Exception as decode_err:
-                                                logger.error(f"Panel {panel_num}: Failed to decode base64: {decode_err}")
-                                                file_data = image_data.encode('utf-8')
-                                        else:
-                                            logger.info(f"Panel {panel_num}: Data is bytes, size: {len(image_data)} bytes")
-                                            img_base64 = base64.b64encode(image_data).decode('utf-8')
-                                            file_data = image_data
-
-                                        # Save to file
-                                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                                        filename = f"panel_{panel_num}_{timestamp}.png"
-                                        filepath = os.path.join(images_dir, filename)
-
-                                        with open(filepath, 'wb') as f:
-                                            f.write(file_data)
-                                        logger.info(f"Panel {panel_num}: Image saved to {filepath} ({len(file_data)} bytes)")
-
-                                        break
-                                else:
-                                    # Log part contents for debugging
-                                    logger.info(f"Panel {panel_num}: Part {idx} - text content: {hasattr(part, 'text')}")
-                                    if hasattr(part, 'text') and part.text:
-                                        logger.info(f"Panel {panel_num}: Part {idx} text preview: {part.text[:100]}")
-                        else:
-                            logger.warning(f"Panel {panel_num}: No content or parts in candidate")
-
-                    if img_base64:
-                        logger.info(f"Panel {panel_num}: Image generation successful")
-                        images.append({
-                            'panel_number': panel_num,
-                            'image_url': f"/static/generated_images/{filename}",
-                            'prompt': image_prompt
-                        })
-                    else:
-                        logger.warning(f"Panel {panel_num}: No image data found in response")
-                        images.append({
-                            'panel_number': panel_num,
-                            'image_data': None,
-                            'prompt': image_prompt,
-                            'error': 'No image data in response'
-                        })
-                except Exception as img_err:
-                    logger.error(f"Panel {panel_num}: Image generation error: {type(img_err).__name__}: {str(img_err)}")
-                    logger.exception(f"Full traceback for panel {panel_num}:")
-                    images.append({
-                        'panel_number': panel_num,
-                        'image_data': None,
-                        'prompt': image_prompt,
-                        'error': str(img_err)
-                    })
-
-        except Exception as model_err:
-            logger.error(f"Image model initialization error: {type(model_err).__name__}: {str(model_err)}")
-            logger.exception("Full traceback for image model error:")
-            # Continue without images
-            for panel in manga_script.get('panels', []):
-                images.append({
-                    'panel_number': panel['panel_number'],
-                    'image_data': None,
-                    'error': f'Image generation not available: {str(model_err)}'
-                })
-
-        logger.info(f"=== Generation Complete ===")
-        logger.info(f"Script panels: {len(manga_script.get('panels', []))}")
-        logger.info(f"Images generated: {len([img for img in images if img.get('image_data')])}")
-        logger.info(f"Images failed: {len([img for img in images if not img.get('image_data')])}")
-
         return jsonify({
             'success': True,
-            'script': manga_script,
-            'images': images
+            'script': manga_script
         })
 
     except json.JSONDecodeError as je:
@@ -268,6 +103,213 @@ Style: Clean manga linework, dramatic angles, expressive characters."""
             'error': f'Failed to parse manga script: {str(je)}',
             'raw_response': script_text
         }), 500
+    except Exception as e:
+        logger.error(f"Unexpected error: {type(e).__name__}: {str(e)}")
+        logger.exception("Full traceback:")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/generate-image', methods=['POST'])
+def generate_image():
+    """
+    Generate a single multi-panel manga page image from a script
+    """
+    try:
+        data = request.json
+        script = data.get('script', {})
+        model_name = data.get('model', 'gemini-2.5-pro')
+        api_key = data.get('api_key', '')
+
+        logger.info(f"=== Image Generation Request ===")
+        logger.info(f"Model: {model_name}")
+        logger.info(f"Script title: {script.get('title', 'N/A')}")
+        logger.info(f"Number of panels: {len(script.get('panels', []))}")
+
+        if not script or not script.get('panels'):
+            logger.error("No script or panels provided")
+            return jsonify({'error': 'Valid script with panels is required'}), 400
+
+        if not api_key:
+            logger.error("No API key provided")
+            return jsonify({'error': 'API key is required'}), 400
+
+        # Configure Gemini API
+        genai.configure(api_key=api_key)
+
+        # Create images directory if it doesn't exist
+        images_dir = os.path.join('static', 'generated_images')
+        os.makedirs(images_dir, exist_ok=True)
+        logger.info(f"Images directory ready: {images_dir}")
+
+        # Generate single multi-panel manga page image using Gemini image generation model
+        image_model_name = 'gemini-2.5-flash-image'
+
+        try:
+            # Build comprehensive prompt for multi-panel page
+            logger.info(f"Initializing image generation model: {image_model_name}")
+            image_model = genai.GenerativeModel(image_model_name)
+            logger.info("Image model initialized successfully")
+
+            # Build detailed prompt for complete manga page
+            panels_description = []
+            for panel in script.get('panels', []):
+                panel_desc = f"Panel {panel['panel_number']}: Scene - {panel['scene']}. "
+                if panel.get('dialogue'):
+                    panel_desc += f"Dialogue - {panel['dialogue']}. "
+                panel_desc += f"Visual details - {panel['visual_notes']}"
+                panels_description.append(panel_desc)
+
+            num_panels = len(script.get('panels', []))
+
+            # Determine layout based on panel count
+            if num_panels <= 3:
+                layout_instruction = "Arrange the panels in a vertical single-column layout, reading top to bottom."
+            elif num_panels == 4:
+                layout_instruction = "Arrange the panels in a 2x2 grid layout, reading order: top-left, top-right, bottom-left, bottom-right."
+            elif num_panels == 5:
+                layout_instruction = "Arrange the panels in a mixed layout: 2 panels on top row, 3 panels on bottom row, reading left to right, top to bottom."
+            else:  # 6 or more
+                layout_instruction = "Arrange the panels in a 2x3 grid layout (2 columns, 3 rows), reading order: top to bottom, left to right in manga style."
+
+            image_prompt = f"""Generate a complete manga page with {num_panels} panels arranged as follows:
+
+{layout_instruction}
+
+Title: {script.get('title', 'Untitled')}
+Overall Style: {script.get('style_notes', 'black and white manga style with clean linework, dramatic angles, and expressive characters')}
+
+Panel Details:
+{chr(10).join(panels_description)}
+
+Requirements:
+- Draw ALL {num_panels} panels on a single manga page
+- Use classic manga/anime art style with clean black and white linework
+- Include panel borders to clearly separate each scene
+- Add dramatic angles and expressive character emotions
+- Maintain visual consistency across all panels
+- Leave space for dialogue text if needed
+- Follow traditional manga composition and layout principles"""
+
+            logger.info(f"Generating multi-panel manga page...")
+            logger.info(f"Prompt preview: {image_prompt[:200]}...")
+
+            result = image_model.generate_content(image_prompt)
+            logger.info(f"API call completed")
+
+            # Log response structure for debugging
+            logger.info(f"Response has {len(result.candidates)} candidate(s)")
+
+            # Extract image data from response parts
+            img_base64 = None
+            filename = None
+
+            if result.candidates and len(result.candidates) > 0:
+                candidate = result.candidates[0]
+                logger.info(f"Candidate finish_reason: {candidate.finish_reason}")
+
+                if candidate.content and candidate.content.parts:
+                    logger.info(f"Found {len(candidate.content.parts)} part(s)")
+
+                    for part in candidate.content.parts:
+                        # Check if this part contains image data
+                        if hasattr(part, 'inline_data') and part.inline_data:
+                            logger.info(f"Found inline_data with mime_type: {part.inline_data.mime_type}")
+
+                            # Get image data
+                            image_data = part.inline_data.data
+                            logger.info(f"Image data type: {type(image_data)}")
+
+                            # Check if data is already base64 string or raw bytes
+                            if isinstance(image_data, str):
+                                logger.info(f"Data is string (likely already base64)")
+                                img_base64 = image_data
+                                # Decode for file saving
+                                try:
+                                    file_data = base64.b64decode(image_data)
+                                    logger.info(f"Decoded size: {len(file_data)} bytes")
+                                except Exception as decode_err:
+                                    logger.error(f"Failed to decode base64: {decode_err}")
+                                    file_data = image_data.encode('utf-8')
+                            else:
+                                logger.info(f"Data is bytes, size: {len(image_data)} bytes")
+                                img_base64 = base64.b64encode(image_data).decode('utf-8')
+                                file_data = image_data
+
+                            # Save to file
+                            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                            filename = f"manga_page_{timestamp}.png"
+                            filepath = os.path.join(images_dir, filename)
+
+                            with open(filepath, 'wb') as f:
+                                f.write(file_data)
+                            logger.info(f"Multi-panel image saved to {filepath} ({len(file_data)} bytes)")
+
+                            break
+
+            if img_base64 and filename:
+                logger.info(f"Multi-panel page generation successful")
+                image_result = {
+                    'image_url': f"/static/generated_images/{filename}",
+                    'prompt': image_prompt
+                }
+            else:
+                logger.warning(f"No image data found in response")
+                image_result = {
+                    'image_url': None,
+                    'error': 'No image data in response'
+                }
+
+        except Exception as img_err:
+            logger.error(f"Image generation error: {type(img_err).__name__}: {str(img_err)}")
+            logger.exception(f"Full traceback:")
+            image_result = {
+                'image_url': None,
+                'error': str(img_err)
+            }
+
+        logger.info(f"=== Generation Complete ===")
+
+        return jsonify({
+            'success': True,
+            'image': image_result
+        })
+
+    except Exception as e:
+        logger.error(f"Unexpected error: {type(e).__name__}: {str(e)}")
+        logger.exception("Full traceback:")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/generate-manga', methods=['POST'])
+def generate_manga():
+    """
+    Legacy endpoint: Generate manga script and images in one call (for backward compatibility)
+    """
+    try:
+        data = request.json
+        model_name = data.get('model', 'gemini-2.5-pro')
+        api_key = data.get('api_key', '')
+
+        # First generate script
+        script_response = generate_script()
+        if script_response[1] != 200:
+            return script_response
+
+        script_data = json.loads(script_response[0].get_data(as_text=True))
+
+        # Then generate image
+        data_with_script = {
+            'script': script_data['script'],
+            'model': model_name,
+            'api_key': api_key
+        }
+
+        # Temporarily update request data
+        from flask import request as flask_request
+        flask_request.json = data_with_script
+
+        image_response = generate_image()
+
+        return image_response
+
     except Exception as e:
         logger.error(f"Unexpected error: {type(e).__name__}: {str(e)}")
         logger.exception("Full traceback:")
