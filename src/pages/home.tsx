@@ -1,12 +1,8 @@
-import { Star } from 'lucide-react'
 import { useState } from 'react'
 
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { ShareCard } from '@/components/common/share-card'
 import {
   Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
 } from '@/components/ui/card'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { cn } from '@/lib/utils'
@@ -117,26 +113,7 @@ export default function HomePage() {
         <h2 className="text-xl font-semibold">创作分享</h2>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {creatorShares.map((share) => (
-            <Card key={share.id} className="flex h-full flex-col gap-4 p-4">
-              <div className="aspect-square w-full rounded-xl bg-muted" />
-              <CardContent className="flex items-start gap-3 p-0">
-                <CardDescription className="text-sm leading-relaxed">
-                  {share.message}
-                </CardDescription>
-              </CardContent>
-              <CardFooter className="mt-auto flex items-center justify-between gap-2 p-0 text-xs text-muted-foreground">
-                <span className='flex items-center justify-center gap-2'>
-                  <Avatar>
-                    <AvatarFallback>{share.name.slice(0, 1)}</AvatarFallback>
-                  </Avatar>
-                  {share.name}
-                </span>
-                <div className="flex items-center gap-3">
-                  <Star className="size-4" />
-                  <span>0</span>
-                </div>
-              </CardFooter>
-            </Card>
+            <ShareCard share={share} key={share.id}/>
           ))}
         </div>
       </section>

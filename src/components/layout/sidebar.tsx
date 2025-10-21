@@ -133,7 +133,7 @@ export function DashboardSidebar({ collapsed, onToggle }: DashboardSidebarProps)
           ))}
         </div>
 
-        <div className="px-5">
+        <div>
           <Badge
             variant="secondary"
             className={cn(
@@ -161,8 +161,8 @@ export function DashboardSidebar({ collapsed, onToggle }: DashboardSidebarProps)
             <PopoverTrigger asChild>
               <Button
                 variant="outline"
-                size={collapsed ? 'icon-lg' : 'lg'}
-                className={cn('w-full justify-center', collapsed && 'px-0')}
+                size={'icon-lg'}
+                className={cn('justify-center', collapsed && 'px-0')}
               >
                 <Megaphone className="size-5" />
               </Button>
