@@ -410,11 +410,16 @@
             MODEL: 'mangasuperb_model',
             LAST_PROMPT: 'mangasuperb_last_prompt',
             LAST_SCRIPT: 'mangasuperb_last_script',
-            LAST_IMAGE: 'mangasuperb_last_image'
+            LAST_IMAGE: 'mangasuperb_last_image',
+            LAST_JOB_ID: 'mangasuperb_last_job_id',
+            LAST_COMIC_ID: 'mangasuperb_last_comic_id'
         };
 
         // Current state
         let currentScript = null;
+        let currentJobId = null;
+        let currentComicId = null;
+        let pollingInterval = null;
 
         // DOM elements
         const modelSelect = document.getElementById('model-select');
@@ -513,7 +518,7 @@
             errorMessage.classList.remove('active');
         }
 
-        // Generate script only
+        // Generate script and start async image generation
         async function generateScript() {
             const prompt = promptInput.value.trim();
             const apiKey = apiKeyInput.value.trim();
@@ -532,12 +537,15 @@
             // Show loading state
             hideAllSections();
             loading.classList.add('active');
-            loadingMessage.textContent = 'Generating your manga script... This may take a moment.';
+            loadingMessage.textContent = 'Creating your manga job... This may take a moment.';
             generateBtn.disabled = true;
 
+            // Stop any existing polling
+            stopPolling();
+
             try {
-                console.log('Sending request to generate script...');
-                const response = await fetch('/api/generate-script', {
+                console.log('Sending request to create job...');
+                const response = await fetch('/api/jobs', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -554,27 +562,28 @@
                 console.log('Response data:', data);
 
                 if (!response.ok) {
-                    throw new Error(data.error || 'Failed to generate script');
+                    throw new Error(data.error || 'Failed to create job');
                 }
 
-                if (!data.script || !data.script.panels) {
-                    throw new Error('Invalid response format: missing script or panels');
-                }
-
+                // Save job and comic IDs
+                currentJobId = data.job_id;
+                currentComicId = data.comic_id;
                 currentScript = data.script;
 
                 // Save to localStorage
                 localStorage.setItem(STORAGE_KEYS.LAST_PROMPT, prompt);
+                localStorage.setItem(STORAGE_KEYS.LAST_JOB_ID, currentJobId);
+                localStorage.setItem(STORAGE_KEYS.LAST_COMIC_ID, currentComicId);
                 localStorage.setItem(STORAGE_KEYS.LAST_SCRIPT, JSON.stringify(currentScript));
-                localStorage.removeItem(STORAGE_KEYS.LAST_IMAGE); // Clear old image
 
-                // Display script editor
-                displayScriptEditor(currentScript);
+                // Start polling for job status
+                loadingMessage.textContent = 'Generating manga page... (Status: pending)';
+                startPolling();
 
                 updateApiStatus(true);
 
             } catch (error) {
-                console.error('Script generation error:', error);
+                console.error('Job creation error:', error);
                 showError(error.message);
                 hideAllSections();
                 if (error.message.includes('401') || error.message.includes('403') || error.message.includes('API_KEY_INVALID')) {
@@ -583,7 +592,6 @@
                     updateApiStatus(true);
                 }
             } finally {
-                loading.classList.remove('active');
                 generateBtn.disabled = false;
             }
         }
@@ -594,6 +602,110 @@
             scriptEditor.classList.add('active');
             document.getElementById('script-title').textContent = script.title || 'Script Generated!';
             scriptJson.value = JSON.stringify(script, null, 2);
+        }
+
+        // Start polling for job status
+        function startPolling() {
+            if (!currentJobId) return;
+
+            console.log('Starting to poll for job status:', currentJobId);
+
+            // Poll immediately
+            pollJobStatus();
+
+            // Then poll every 2 seconds
+            pollingInterval = setInterval(pollJobStatus, 2000);
+        }
+
+        // Stop polling
+        function stopPolling() {
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+                console.log('Stopped polling');
+            }
+        }
+
+        // Poll job status
+        async function pollJobStatus() {
+            if (!currentJobId) return;
+
+            try {
+                const response = await fetch(`/api/jobs/${currentJobId}`);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to get job status');
+                }
+
+                console.log('Job status:', data.comic.status);
+
+                const status = data.comic.status;
+                const comic = data.comic;
+
+                // Update loading message
+                if (status === 'pending') {
+                    loadingMessage.textContent = 'Generating manga page... (Status: queued)';
+                } else if (status === 'processing') {
+                    loadingMessage.textContent = 'Generating manga page... (Status: processing)';
+                } else if (status === 'completed') {
+                    // Stop polling
+                    stopPolling();
+
+                    // Save to localStorage
+                    localStorage.setItem(STORAGE_KEYS.LAST_IMAGE, JSON.stringify(comic));
+
+                    // Display manga page
+                    displayCompletedComic(comic);
+
+                } else if (status === 'failed') {
+                    // Stop polling
+                    stopPolling();
+
+                    // Show error
+                    hideAllSections();
+                    showError(`Image generation failed: ${comic.error_message || 'Unknown error'}`);
+                }
+
+            } catch (error) {
+                console.error('Polling error:', error);
+                // Don't stop polling on transient errors
+            }
+        }
+
+        // Display completed comic
+        function displayCompletedComic(comic) {
+            hideAllSections();
+            mangaOutput.classList.add('active');
+
+            document.getElementById('manga-title').textContent = comic.title || 'Untitled Manga';
+
+            // Get summary from script
+            if (currentScript && currentScript.summary) {
+                document.getElementById('manga-summary').textContent = currentScript.summary;
+            } else {
+                document.getElementById('manga-summary').textContent = '';
+            }
+
+            const container = document.getElementById('manga-page-container');
+            container.innerHTML = '';
+
+            // Display pages
+            if (comic.pages && comic.pages.length > 0) {
+                comic.pages.forEach(page => {
+                    const img = document.createElement('img');
+                    img.src = page.image_url;
+                    img.alt = `Page ${page.page_number}`;
+                    img.className = 'manga-page-image';
+                    img.onerror = function() {
+                        console.error('Image failed to load:', page.image_url);
+                        container.innerHTML = '<div class="image-placeholder">❌ Image failed to load</div>';
+                    };
+                    container.appendChild(img);
+                });
+            } else {
+                container.innerHTML = '<div class="image-placeholder">📸 No images available</div>';
+            }
         }
 
         // Generate image from current script

@@ -1,3 +1,6 @@
 CLAUDE.md
 .venv/
 static/generated_images
+AGENTS.md
+__pycache__/
+.env
