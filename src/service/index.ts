@@ -1,6 +1,7 @@
 import type { AxiosError, AxiosInstance } from 'axios'
-import type { CustomRequestConfig, IApiResponse } from './types'
 import axios from 'axios'
+
+import type { CustomRequestConfig, IApiResponse } from './types'
 
 function request<TRequest = any, TResponse = any>(
   config: CustomRequestConfig<TRequest>,
@@ -17,6 +18,7 @@ function request<TRequest = any, TResponse = any>(
       if (token && config.headers) {
         config.headers.Authorization = `Bearer ${token}`
       }
+
       return config
     },
     (error: AxiosError) => {
@@ -31,12 +33,16 @@ function request<TRequest = any, TResponse = any>(
         if (res.code === 401) {
           console.error('Login expired, please log in again!')
         }
+
         if (config.showError !== false) {
           console.error(res.message || 'Error')
         }
+
         return Promise.reject(new Error(res.message || 'Error'))
       }
+
       response.data = res.data
+
       return response
     },
     (error: AxiosError) => {
