@@ -1,6 +1,7 @@
 import { Clock, Palette, Share2, Sparkles } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -12,6 +13,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { cn } from '@/lib/utils'
 
 const ideasData = [
   {
@@ -37,6 +39,14 @@ const ideasData = [
     summary: '以失忆机械师为主角，通过章节式推进完成长篇连载。',
     tags: ['科幻', '长篇', 'AI 人物'],
     title: '记忆补丁',
+  },
+]
+
+const userNavItems: { href: string; isActive: boolean; label: string }[] = [
+  {
+    href: '#ideas',
+    isActive: true,
+    label: '我的创意',
   },
 ]
 
@@ -92,36 +102,68 @@ export default function IdeasPage() {
   )
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <ToggleGroup
-          type="single"
-          value={activeTab}
-          onValueChange={(value) => value && setActiveTab(value as 'ideas' | 'characters')}
-          variant="outline"
-          spacing={0}
-        >
-          <ToggleGroupItem value="ideas" className="min-w-[120px]">
-            我的创意
-          </ToggleGroupItem>
-          <ToggleGroupItem value="characters" className="min-w-[120px]">
-            我的人物
-          </ToggleGroupItem>
-        </ToggleGroup>
-
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline">导入草稿</Button>
-          <Button>新建草稿</Button>
+    <div className="grid gap-6 lg:grid-cols-[260px,1fr]">
+      <nav className="grid gap-3 rounded-2xl bg-muted/30 p-4" aria-label="个人导航">
+        <div className="flex h-16 items-center justify-center rounded-xl bg-muted text-sm text-muted-foreground">
+          LOGO
         </div>
-      </div>
+        <div className="flex items-center gap-3 rounded-xl bg-background p-3 shadow-sm">
+          <Avatar className="size-12">
+            <AvatarFallback>H</AvatarFallback>
+          </Avatar>
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-foreground">Hu Tao</p>
+            <p className="text-xs text-muted-foreground">漫画创作者</p>
+          </div>
+        </div>
+        <div className="space-y-2">
+          {userNavItems.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              className={cn(
+                'flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors',
+                item.isActive ? 'bg-primary text-primary-foreground' : 'bg-background text-foreground',
+              )}
+            >
+              <span className="flex size-8 items-center justify-center rounded-lg bg-muted" />
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {stats.map((item) => (
-          <StatsCard key={item.label} helper={item.helper} value={item.value} label={item.label} icon={item.icon} />
-        ))}
-      </div>
+      <div className="space-y-8">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <ToggleGroup
+            type="single"
+            value={activeTab}
+            onValueChange={(value) => value && setActiveTab(value as 'ideas' | 'characters')}
+            variant="outline"
+            spacing={0}
+          >
+            <ToggleGroupItem value="ideas" className="min-w-[120px]">
+              我的创意
+            </ToggleGroupItem>
+            <ToggleGroupItem value="characters" className="min-w-[120px]">
+              我的人物
+            </ToggleGroupItem>
+          </ToggleGroup>
 
-      {activeTab === 'ideas' ? <IdeasGrid /> : <CharactersGrid />}
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline">导入草稿</Button>
+            <Button>新建草稿</Button>
+          </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {stats.map((item) => (
+            <StatsCard key={item.label} helper={item.helper} value={item.value} label={item.label} icon={item.icon} />
+          ))}
+        </div>
+
+        {activeTab === 'ideas' ? <IdeasGrid /> : <CharactersGrid />}
+      </div>
     </div>
   )
 }
