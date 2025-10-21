@@ -1,7 +1,9 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@plugin '@egoist/tailwindcss-icons';
 
 @custom-variant dark (&:is(.dark *));
+
 
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
