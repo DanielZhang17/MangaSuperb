@@ -5,18 +5,52 @@ This document captures how requests traverse the modernised backend and the shar
 ## High-level architecture
 
 ```mermaid
-flowchart TD
-    U[User Browser] -->|HTTPS| SPA[Static Frontend]
-    SPA -->|REST / Session| API[Flask API (Blueprints)]
-    API -->|Authenticate via Flask-Login| Session[(Server Session)]
-    API -->|CRUD| DB[(PostgreSQL)]
-    API -->|Enqueue jobs| Queue[(Redis + RQ)]
-    Queue -->|Background work| Worker[RQ Worker]
-    Worker -->|Reads scripts/panels| DB
-    Worker -->|Gemini requests| Gemini[Google Gemini API]
-    Worker -->|Upload assets| R2[Cloudflare R2 Storage]
-    Worker -->|Persist status & pages| DB
-    API -->|Serve URLs| R2
+graph TD
+    subgraph User end
+        A[Browser]
+    end
+
+    subgraph Infrastructure
+        B[Nginx]
+        C[Flask]
+        D[PostgreSQL]
+        E[Redis]
+        F[RQ Worker]
+        G[Cloudflare R2]
+    end
+
+    subgraph External
+        H[Gemini API]
+    end
+
+    A -- HTTP --> B
+    B -- Reverse proxy --> C
+
+    C -- CURD --> D
+    C -- Enqueue Job --> E
+    F -- Dequeue Job --> E
+
+    F -- 1. API Call --> H
+    H -- 2. Return response --> F
+    F -- 3. Upload image --> G
+    F -- 4. Update job status--> D
+
+    C -- Query Job status --> D
+    A -- Get URL --> C
+    A -- Access URL --> G
+
+    linkStyle 0 stroke-width:2px,fill:none,stroke:blue;
+    linkStyle 1 stroke-width:2px,fill:none,stroke:blue;
+    linkStyle 2 stroke-width:2px,fill:none,stroke:orange;
+    linkStyle 3 stroke-width:2px,fill:none,stroke:green;
+    linkStyle 4 stroke-width:2px,fill:none,stroke:green;
+    linkStyle 5 stroke-width:2px,fill:none,stroke:purple;
+    linkStyle 6 stroke-width:2px,fill:none,stroke:purple;
+    linkStyle 7 stroke-width:2px,fill:none,stroke:purple;
+    linkStyle 8 stroke-width:2px,fill:none,stroke:purple;
+    linkStyle 9 stroke-width:2px,fill:none,stroke:orange;
+    linkStyle 10 stroke-width:2px,fill:none,stroke:red;
+    linkStyle 11 stroke-width:2px,fill:none,stroke:red;
 ```
 
 ### Request lifecycle
