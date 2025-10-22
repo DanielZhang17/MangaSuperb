@@ -6,7 +6,7 @@ This document captures how requests traverse the modernised backend and the shar
 
 ```mermaid
 graph TD
-    subgraph User end
+    subgraph User
         A[Browser]
     end
 
