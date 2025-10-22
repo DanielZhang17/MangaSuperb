@@ -1,6 +1,5 @@
 CLAUDE.md
 .venv/
-static/generated_images
-AGENTS.md
+mangasuperb/static/generated_images
 __pycache__/
 .env
