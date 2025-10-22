@@ -1,0 +1,11 @@
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "N"]
+ignore = ["E203"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mangasuperb"]
+combine-as-imports = true

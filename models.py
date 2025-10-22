@@ -1,13 +1,9 @@
-"""
-Database models for MangaSuperb
-Matches schema from init.sql
-"""
-from flask_sqlalchemy import SQLAlchemy
+"""Database models for MangaSuperb."""
 from datetime import datetime
-import json
+
 from flask_login import UserMixin
 
-db = SQLAlchemy()
+from mangasuperb.extensions import db
 
 class User(UserMixin, db.Model):
     """User account information"""
