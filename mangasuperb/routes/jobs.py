@@ -136,7 +136,16 @@ def get_job_status(job_id: str) -> Any:
             }
             return jsonify(response), 200
 
-        return jsonify({"job_id": job_id, "rq_status": rq_status}), 200
+        return (
+            jsonify(
+                {
+                    "error": "Comic for the requested job was not found",
+                    "job_id": job_id,
+                    "rq_status": rq_status,
+                }
+            ),
+            404,
+        )
 
     except Exception as exc:  # pragma: no cover - unexpected failure
         logger.error("Error getting job status: %s", exc)
