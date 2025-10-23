@@ -10,11 +10,7 @@
       ]
     },
     "shadcn": {
-      "command": "npx",
-      "args": [
-        "shadcn@latest",
-        "mcp"
-      ]
+      "url": "https://www.shadcn.io/api/mcp"
     }
   }
 }

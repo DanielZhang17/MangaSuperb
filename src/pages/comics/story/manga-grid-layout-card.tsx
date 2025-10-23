@@ -61,14 +61,18 @@ export function MangaGridLayoutCard() {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="text-center">漫画网格布局</CardTitle>
+      <CardHeader className="p-4">
+        <CardTitle className="text-center text-lg">漫画网格布局</CardTitle>
       </CardHeader>
-      <CardContent>
-        <ToggleGroup type="single" defaultValue="四宫格" className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <CardContent className="p-4 pt-0">
+        <ToggleGroup
+          type="single"
+          defaultValue="四宫格"
+          className="grid grid-cols-2 xl:grid-cols-4 gap-2 w-fit mx-auto"
+        >
           {layouts.map((layout) => (
-            <ToggleGroupItem key={layout} value={layout} className="flex flex-col h-auto p-2">
-              <div className="w-30 h-24 bg-gray-200 rounded-md mb-2 p-2">
+            <ToggleGroupItem key={layout} value={layout} className="flex flex-col h-auto p-1">
+              <div className="w-30 h-20 bg-gray-200 rounded-md mb-2 p-2">
                 <LayoutVisual type={layout} />
               </div>
               <span>{layout}</span>

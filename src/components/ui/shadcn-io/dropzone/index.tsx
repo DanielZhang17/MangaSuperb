@@ -1,4 +1,4 @@
-import { UploadIcon } from 'lucide-react';
+import { Plus, UploadIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { createContext, useContext } from 'react';
 import type { DropEvent, DropzoneOptions, FileRejection } from 'react-dropzone';
@@ -122,7 +122,7 @@ export const DropzoneContent = ({
 }: DropzoneContentProps) => {
   const { src } = useDropzoneContext();
 
-  if (!src) {
+  if (!src || src.length === 0) {
     return null;
   }
 
@@ -160,7 +160,7 @@ export const DropzoneEmptyState = ({
 }: DropzoneEmptyStateProps) => {
   const { src, accept, maxSize, minSize, maxFiles } = useDropzoneContext();
 
-  if (src) {
+  if (src && src.length > 0) {
     return null;
   }
 
@@ -186,7 +186,7 @@ export const DropzoneEmptyState = ({
   return (
     <div className={cn('flex flex-col items-center justify-center', className)}>
       <div className="flex size-8 items-center justify-center rounded-md bg-muted text-muted-foreground">
-        <UploadIcon size={16} />
+        <Plus size={16} />
       </div>
       <p className="my-2 w-full truncate text-wrap font-medium text-sm">
         Upload {maxFiles === 1 ? 'a file' : 'files'}

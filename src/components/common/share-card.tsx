@@ -15,11 +15,12 @@ interface ShareCardProps {
     message: string
     name: string
   }
+  className?: string
 }
 
-export function ShareCard({ share }: ShareCardProps) {
+export function ShareCard({ share, className }: ShareCardProps) {
   return (
-    <Card key={share.id} className="flex h-full flex-col gap-4 p-4">
+    <Card key={share.id} className={`flex h-full flex-col gap-4 p-4 ${className}`}>
       <div className="aspect-square w-full rounded-xl bg-muted" />
       <CardContent className="flex items-start gap-3 p-0">
         <CardDescription className="text-sm leading-relaxed">

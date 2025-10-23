@@ -1,11 +1,12 @@
-import { PanelsTopLeft, Sparkles, UserPlus } from 'lucide-react'
-import { type ComponentType, useEffect, useState } from 'react'
+import { Grid2X2, SmilePlus, Sparkles } from 'lucide-react'
+import { type ComponentType } from 'react'
 import { Link, NavLink, useLocation } from 'react-router'
 
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { InfoCard } from '@/pages/me/info-card'
 
+import I18nToggle from '../common/operations/i18n'
 import { MessageToolTip } from '../common/operations/message-tooltip'
 
 interface SidebarItem {
@@ -22,24 +23,18 @@ interface DashboardSidebarProps {
 const primaryNav: SidebarItem[] = [{ label: '我的创意', to: '/ideas', icon: Sparkles }]
 
 const creationNav: SidebarItem[] = [
-  { label: '漫画创作', to: '/comics', icon: PanelsTopLeft },
-  { label: '新建AI人物', to: '/characters', icon: UserPlus },
+  { label: '漫画创作', to: '/comics', icon: Grid2X2 },
+  { label: '新建AI人物', to: '/characters', icon: SmilePlus },
 ]
 
 export function DashboardSidebar({ collapsed }: DashboardSidebarProps) {
   const location = useLocation()
-  const [hydrated, setHydrated] = useState(false)
-
-  useEffect(() => {
-    setHydrated(true)
-  }, [])
 
   return (
     <aside
       className={cn(
-        'flex h-screen flex-col border-r bg-sidebar text-sidebar-foreground',
-        hydrated && 'transition-[width] duration-300 ease-out',
-        collapsed ? 'w-20' : 'w-72',
+        'flex h-screen flex-col border-r bg-sidebar text-sidebar-foreground overflow-hidden flex-none',
+        collapsed ? 'basis-20' : 'basis-72',
       )}
     >
       <div
@@ -97,8 +92,9 @@ export function DashboardSidebar({ collapsed }: DashboardSidebarProps) {
         </div>
 
         <div className="mt-auto border-t px-5 py-6">
-          <div className="flex items-center gap-2">
+          <div className={cn('flex items-center gap-2', collapsed && 'flex-col')}>
             <MessageToolTip />
+            <I18nToggle />
           </div>
         </div>
       </nav>

@@ -1,19 +1,12 @@
-import { Pencil } from 'lucide-react'
 import React from 'react'
 
+import { InlineInput } from '@/components/common/inline-input'
 import { Button } from '@/components/ui/button'
 import {
   ToggleGroup,
   ToggleGroupItem,
 } from '@/components/ui/toggle-group'
 
-// ------------------------------------
-// 自定义 ToggleGroupItem 样式
-// ------------------------------------
-/**
- * 这是一个为深色主题定制的 ToggleGroupItem 样式。
- * shadcn/ui 默认的 'outline' 变体是为浅色模式设计的。
- */
 const toggleItemClasses = `
   bg-card
   border-border
@@ -27,10 +20,6 @@ const toggleItemClasses = `
   px-6
   transition-all
 `
-
-// ------------------------------------
-// 偏好设置组 (子组件)
-// ------------------------------------
 interface PreferenceGroupProps {
   title: string;
   children: React.ReactNode;
@@ -42,10 +31,6 @@ const PreferenceGroup: React.FC<PreferenceGroupProps> = ({ title, children }) =>
     <div>{children}</div>
   </div>
 );
-
-// ------------------------------------
-// 人物偏好卡片 (子组件)
-// ------------------------------------
 interface CharacterCardProps {
   imageUrl: string;
   label: string;
@@ -64,38 +49,38 @@ const CharacterCard: React.FC<CharacterCardProps> = ({ imageUrl, label }) => (
   </div>
 );
 
-// ------------------------------------
-// 主页面组件
-// ------------------------------------
 export default function CharacterSettingsPage() {
   return (
     <div className="min-h-screen bg-background p-8 text-foreground lg:p-12">
-      
-      {/* --------------------------- */}
-      {/* 页面头部 */}
-      {/* --------------------------- */}
       <header className="mb-10 flex items-center gap-4">
         <img
           src="https://placehold.co/64x64/334155/e2e8f0?text=Hu"
           alt="Hu Tao Avatar"
           className="h-16 w-16 rounded-full border-2 border-border"
         />
-        <h1 className="text-3xl font-semibold">Hu Tao</h1>
-        <Pencil className="h-5 w-5 cursor-pointer text-muted-foreground hover:text-foreground" />
+        <div className="min-w-0">
+          <InlineInput
+            initialValue="Hu Tao"
+            submitLabel="保存"
+            placeholder="请输入新的昵称"
+            renderDisplay={(val) => (
+              <h1 className="text-3xl font-semibold truncate">{val}</h1>
+            )}
+            onSubmit={async (v) => {
+              // TODO: 在此处调用后端接口保存昵称
+              // await request.post('/api/me/name', { name: v })
+              void v; // Marking parameter as used
+              await new Promise((r) => setTimeout(r, 600));
+            }}
+          />
+        </div>
       </header>
 
-      {/* --------------------------- */}
-      {/* 主内容网格 */}
-      {/* --------------------------- */}
       <main className="grid grid-cols-1 lg:grid-cols-3 gap-12">
-        
-        {/* --------------------------- */}
-        {/* 左侧设置区域 (2/3 宽度) */}
-        {/* --------------------------- */}
         <section className="flex flex-col gap-10 lg:col-span-2">
           
           <PreferenceGroup title="默认喜好">
-            <ToggleGroup type="single" defaultValue="jp" className="flex flex-wrap gap-3">
+            <ToggleGroup type="single" defaultValue="jp" className="flex flex-wrap">
               <ToggleGroupItem value="jp" className={toggleItemClasses}>
                 日漫
               </ToggleGroupItem>
@@ -112,7 +97,7 @@ export default function CharacterSettingsPage() {
           </PreferenceGroup>
 
           <PreferenceGroup title="漫画网格布局">
-            <ToggleGroup type="single" defaultValue="4-panel" className="flex flex-wrap gap-3">
+            <ToggleGroup type="single" defaultValue="4-panel" className="flex flex-wrap">
               <ToggleGroupItem value="4-panel" className={toggleItemClasses}>
                 四宫格
               </ToggleGroupItem>
@@ -132,20 +117,16 @@ export default function CharacterSettingsPage() {
             <Button
               className="h-auto px-6 py-2"
             >
-              精确短语
+              跟随漫画语言
             </Button>
           </PreferenceGroup>
 
         </section>
 
-        {/* --------------------------- */}
-        {/* 右侧人物偏好 (1/3 宽度) */}
-        {/* --------------------------- */}
         <aside className="lg:col-span-1">
           <h2 className="mb-4 text-lg font-medium text-foreground">人物偏好</h2>
           <div className="grid grid-cols-2 gap-4">
             
-            {/* 示例人物卡片 */}
             <CharacterCard 
               imageUrl="https://placehold.co/150x200/404040/9ca3af?text=男" 
               label="男, 年轻" 

@@ -1,5 +1,5 @@
 import { useAtom } from 'jotai'
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 import { sidebarCollapsedAtom } from '@/components/layout/atoms'
 import { Button } from '@/components/ui/button'
@@ -15,9 +15,9 @@ export default function SidebarToggle() {
       onClick={() => setCollapsed((v) => !v)}
     >
       {collapsed ? (
-        <PanelLeftOpen className="size-4" />
+        <ChevronRight className="size-4" />
       ) : (
-        <PanelLeftClose className="size-4" />
+        <ChevronLeft className="size-4" />
       )}
       <span className="sr-only">切换侧边栏</span>
     </Button>

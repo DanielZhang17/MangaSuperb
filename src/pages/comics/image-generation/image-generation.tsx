@@ -1,8 +1,10 @@
 import { ChevronDown, ChevronUp, Image as ImageIcon, Plus } from 'lucide-react'
 import { useState } from 'react'
+import toast from 'react-hot-toast'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -11,8 +13,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Toggle } from '@/components/ui/toggle'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { cn } from '@/lib/utils'
 
 interface Scene {
@@ -48,7 +48,6 @@ const FONT_SIZE_OPTIONS = ['18', '20', '22', '24', '28']
 const BUBBLE_SHAPES = [
   { value: 'rect', label: '矩形' },
   { value: 'round', label: '圆角' },
-  { value: 'bubble', label: '气泡' },
 ]
 
 function SceneSidebar({
@@ -66,7 +65,7 @@ function SceneSidebar({
   const canScrollDown = false
 
   return (
-    <aside className="flex w-28 flex-col items-center">
+    <aside className="flex w-32 flex-col items-center">
       <Button variant="ghost" size="icon" disabled={!canScrollUp}>
         <ChevronUp className="h-5 w-5 text-muted-foreground" />
       </Button>
@@ -82,7 +81,7 @@ function SceneSidebar({
         <button
           type="button"
           onClick={onAddScene}
-          className="group relative flex h-20 w-20 items-center justify-center rounded-xl border border-dashed border-muted-foreground/30 bg-muted/60 text-muted-foreground transition-colors hover:border-muted-foreground/50"
+          className="group relative flex h-20 w-28 items-center justify-center rounded-xl border border-dashed border-muted-foreground/30 bg-muted/60 text-muted-foreground transition-colors hover:border-muted-foreground/50"
         >
           <span className="absolute -left-6 text-xs font-medium text-muted-foreground">
             {String(scenes.length + 1).padStart(2, '0')}
@@ -97,6 +96,20 @@ function SceneSidebar({
   )
 }
 
+function ShapePreview({ shape }: { shape: string }) {
+  return (
+    <div className="relative h-4 w-8">
+      <div
+        className={cn(
+          'h-full w-full bg-muted-foreground/40',
+          shape === 'rect' && 'rounded-none',
+          shape === 'round' && 'rounded-md',
+        )}
+      />
+    </div>
+  )
+}
+
 function SceneThumbnail({
   label,
   isActive,
@@ -107,17 +120,21 @@ function SceneThumbnail({
   onClick: () => void
 }) {
   return (
-    <button
-      type="button"
+    <Card
+      role="button"
       onClick={onClick}
       className={cn(
-        'group relative flex h-20 w-20 items-center justify-center rounded-xl border border-input bg-card transition-all hover:border-primary',
+        'relative h-20 w-28 cursor-pointer rounded-xl border border-input bg-card transition-all hover:border-primary',
         isActive && 'border-primary shadow-[0_0_0_3px] shadow-primary/10',
       )}
     >
-      <span className="absolute -left-6 text-xs font-medium text-muted-foreground">{label}</span>
-      <ImageIcon className="h-8 w-8 text-muted-foreground/60" />
-    </button>
+      <CardContent className="h-full w-full p-2">
+        <span className="absolute left-2 top-2 text-xs font-medium text-muted-foreground">{label}</span>
+        <div className="flex h-full w-full items-center justify-center rounded-md bg-muted">
+          <ImageIcon className="h-8 w-8 text-muted-foreground/60" />
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -195,41 +212,43 @@ function PropertyPanel({
       </PanelCard>
 
       <PanelCard title="会话框">
-        <div className="flex items-center gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-input bg-card">
-            <div className="h-6 w-9 rounded-sm bg-muted-foreground/40" />
+        <div className='flex gap-4 justify-between items-center'>
+          <Select value={bubbleShape} onValueChange={onBubbleShapeChange}>
+            <SelectTrigger className="w-30">
+              <SelectValue placeholder="选择类型" />
+            </SelectTrigger>
+            <SelectContent>
+              {BUBBLE_SHAPES.map((shape) => (
+                <SelectItem key={shape.value} value={shape.value}>
+                  <div className="flex items-center gap-2">
+                    <ShapePreview shape={shape.value} />
+                    <span>{shape.label}</span>
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className="flex items-center gap-2">
+            <Checkbox id="bubble-tail" checked={hasTail} onCheckedChange={onToggleTail} />
+            <Label htmlFor="bubble-tail">{hasTail ? '有' : '无'}尾巴</Label>
           </div>
-          <ToggleGroup
-            type="single"
-            value={bubbleShape}
-            onValueChange={(value) => value && onBubbleShapeChange(value)}
-            className="flex-1"
-            variant="outline"
-            spacing={0}
-          >
-            {BUBBLE_SHAPES.map((shape) => (
-              <ToggleGroupItem key={shape.value} value={shape.value}>
-                {shape.label}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
         </div>
-        <Toggle
-          pressed={hasTail}
-          onPressedChange={onToggleTail}
-          variant="outline"
-          className="w-full justify-center"
-        >
-          {hasTail ? '有尾巴' : '无尾巴'}
-        </Toggle>
       </PanelCard>
 
       <Card className="rounded-3xl border border-border/60 bg-muted/60 p-4">
         <div className="flex flex-col gap-3">
-          <Button variant="outline" className="h-11 justify-center">
+          <Button
+            variant="outline"
+            className="h-11 justify-center"
+            onClick={() => toast.success('PDF 导出成功', { position: 'top-center' })}
+          >
             PDF 导出
           </Button>
-          <Button variant="outline" className="h-11 justify-center">
+          <Button
+            variant="outline"
+            className="h-11 justify-center"
+            onClick={() => toast.success('图片 导出成功', { position: 'top-center' })}
+          >
             图片 导出
           </Button>
         </div>

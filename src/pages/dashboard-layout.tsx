@@ -6,8 +6,10 @@ import ModeToggle from '@/components/common/operations/mode-toggle'
 import SidebarToggle from '@/components/common/operations/sidebar-toggle'
 import { sidebarCollapsedAtom } from '@/components/layout/atoms'
 import { DashboardSidebar } from '@/components/layout/sidebar'
+import { useAutoCollapseSidebar } from '@/hooks/use-auto-collapse-sidebar'
 
 export default function DashboardLayout() {
+  useAutoCollapseSidebar(1024)
   const [collapsed] = useAtom(sidebarCollapsedAtom)
 
   return (

@@ -1,54 +1,43 @@
 import { useAtom } from 'jotai'
-import { FilePenLine } from 'lucide-react'
-import { useState } from 'react'
+import { Check } from 'lucide-react'
 
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-import { activeTabAtom, mangaTitleAtom, storyStepAtom } from './atoms'
-import { CharactersTab } from './characters-tab'
-import { ImageGenerationTab } from './image-generation-tab'
-import { StoryTab } from './story-tab'
+import { activeTabAtom, charactersCompletedAtom, storyCompletedAtom, storyStepAtom } from './atoms'
+import { CharactersTab } from './character/characters-tab'
+import { ImageGenerationTab } from './image-generation/image-generation-tab'
+import { StoryTab } from './story/story-tab'
 
 export default function ComicsPage() {
   const [storyStep] = useAtom(storyStepAtom)
-  const [title, setTitle] = useAtom(mangaTitleAtom)
   const [activeTab, setActiveTab] = useAtom(activeTabAtom)
-  const [isEditing, setIsEditing] = useState(false)
+  const [storyCompleted] = useAtom(storyCompletedAtom)
+  const [charactersCompleted] = useAtom(charactersCompletedAtom)
 
-  const pageTitle = storyStep === 'panels' ? '生成9个分镜头' : title
+  const pageTitle = activeTab === 'story'
+    ? (storyStep === 'panels' ? '生成9个分镜头' : '漫画创作')
+    : ''
 
   return (
     <div className="flex-1 p-8 pt-6">
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <div className="flex items-center justify-center relative">
           <div className="absolute left-0 flex items-center gap-4">
-            {isEditing && storyStep === 'input' ? (
-              <Input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                onBlur={() => setIsEditing(false)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    setIsEditing(false)
-                  }
-                }}
-                autoFocus
-                className="text-3xl font-bold tracking-tight w-auto"
-              />
-            ) : (
-              <h2 className="text-3xl font-bold tracking-tight">{pageTitle}</h2>
-            )}
-            {storyStep === 'input' && (
-              <Button variant="ghost" size="icon" onClick={() => setIsEditing(!isEditing)}>
-                <FilePenLine className="h-5 w-5" />
-              </Button>
-            )}
+            <h2 className="text-3xl font-bold tracking-tight">{pageTitle}</h2>
           </div>
           <TabsList className="grid w-[400px] grid-cols-3">
-            <TabsTrigger value="story">故事</TabsTrigger>
-            <TabsTrigger value="characters">人物</TabsTrigger>
+            <TabsTrigger value="story">
+              <span className="inline-flex items-center gap-2">
+                {storyCompleted && <Check className="h-4 w-4 text-emerald-500" />}
+                <span>故事</span>
+              </span>
+            </TabsTrigger>
+            <TabsTrigger value="characters">
+              <span className="inline-flex items-center gap-2">
+                {charactersCompleted && <Check className="h-4 w-4 text-emerald-500" />}
+                <span>人物</span>
+              </span>
+            </TabsTrigger>
             <TabsTrigger value="image-generation">生图</TabsTrigger>
           </TabsList>
         </div>

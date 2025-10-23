@@ -111,9 +111,12 @@ export default function HomePage() {
 
       <section className="space-y-6">
         <h2 className="text-xl font-semibold">创作分享</h2>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 justify-items-start md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
           {creatorShares.map((share) => (
-            <ShareCard share={share} key={share.id}/>
+            <ShareCard
+              share={share}
+              key={share.id}
+            />
           ))}
         </div>
       </section>
