@@ -73,13 +73,19 @@ AUTH_REGISTER_DOC = {
             'required': True,
             'schema': {
                 'type': 'object',
-                'required': ['username', 'password'],
+                'required': ['username', 'email', 'password'],
                 'properties': {
                     'username': {
                         'type': 'string',
                         'minLength': 3,
                         'maxLength': 80,
                         'example': 'artist123',
+                    },
+                    'email': {
+                        'type': 'string',
+                        'format': 'email',
+                        'maxLength': 255,
+                        'example': 'artist123@example.com',
                     },
                     'password': {
                         'type': 'string',
@@ -101,6 +107,8 @@ AUTH_REGISTER_DOC = {
                         'properties': {
                             'id': {'type': 'integer'},
                             'username': {'type': 'string'},
+                            'email': {'type': 'string', 'format': 'email'},
+                            'avatar_index': {'type': 'integer', 'minimum': 1, 'maximum': 4},
                             'created_at': {'type': 'string', 'format': 'date-time'},
                         },
                     }
@@ -109,11 +117,11 @@ AUTH_REGISTER_DOC = {
         },
         '400': {
             'description': 'Validation error',
-            'examples': {'application/json': {'error': 'Username and password are required'}},
+            'examples': {'application/json': {'error': 'Username is required'}},
         },
         '409': {
-            'description': 'Username already exists',
-            'examples': {'application/json': {'error': 'Username already exists'}},
+            'description': 'Username or email already exists',
+            'examples': {'application/json': {'error': 'Username or email already exists'}},
         },
     },
 }
@@ -123,15 +131,180 @@ AUTH_LOGIN_DOC = {
     'tags': ['Auth'],
     'summary': 'Log in an existing user',
     'description': 'Authenticates credentials and returns session information.',
-    'parameters': AUTH_REGISTER_DOC['parameters'],
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['password'],
+                'anyOf': [
+                    {'required': ['email']},
+                    {'required': ['username']},
+                ],
+                'properties': {
+                    'email': {
+                        'type': 'string',
+                        'format': 'email',
+                        'example': 'artist123@example.com',
+                    },
+                    'username': {
+                        'type': 'string',
+                        'example': 'artist123',
+                    },
+                    'password': {
+                        'type': 'string',
+                        'minLength': 8,
+                        'example': 'super-secure-pass',
+                    },
+                },
+            },
+        }
+    ],
     'responses': {
         '200': AUTH_REGISTER_DOC['responses']['201'],
-        '400': AUTH_REGISTER_DOC['responses']['400'],
+        '400': {
+            'description': 'Validation error',
+            'examples': {'application/json': {'error': 'Email or username and password are required'}},
+        },
         '401': {
             'description': 'Invalid credentials',
             'examples': {'application/json': {'error': 'Invalid credentials'}},
         },
     },
+}
+
+AUTH_UPDATE_USERNAME_DOC = {
+    'tags': ['Auth'],
+    'summary': 'Update username',
+    'description': 'Updates the username for the authenticated user.',
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['username'],
+                'properties': {
+                    'username': {
+                        'type': 'string',
+                        'minLength': 3,
+                        'maxLength': 80,
+                        'example': 'new-artist-handle',
+                    },
+                },
+            },
+        }
+    ],
+    'responses': {
+        '200': AUTH_REGISTER_DOC['responses']['201'],
+        '400': {
+            'description': 'Validation error',
+            'examples': {'application/json': {'error': 'New username must be different'}},
+        },
+        '401': {
+            'description': 'Unauthenticated',
+            'examples': {'application/json': {'error': 'Authentication required'}},
+        },
+        '409': {
+            'description': 'Username already exists',
+            'examples': {'application/json': {'error': 'Username already exists'}},
+        },
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+
+AUTH_UPDATE_EMAIL_DOC = {
+    'tags': ['Auth'],
+    'summary': 'Update email address',
+    'description': 'Updates the email address for the authenticated user.',
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['email'],
+                'properties': {
+                    'email': {
+                        'type': 'string',
+                        'format': 'email',
+                        'maxLength': 255,
+                        'example': 'creator@example.com',
+                    },
+                },
+            },
+        }
+    ],
+    'responses': {
+        '200': AUTH_REGISTER_DOC['responses']['201'],
+        '400': {
+            'description': 'Validation error',
+            'examples': {'application/json': {'error': 'New email must be different'}},
+        },
+        '401': {
+            'description': 'Unauthenticated',
+            'examples': {'application/json': {'error': 'Authentication required'}},
+        },
+        '409': {
+            'description': 'Email already exists',
+            'examples': {'application/json': {'error': 'Email already exists'}},
+        },
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+
+AUTH_UPDATE_PASSWORD_DOC = {
+    'tags': ['Auth'],
+    'summary': 'Update password',
+    'description': 'Changes the password for the authenticated user.',
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['current_password', 'new_password'],
+                'properties': {
+                    'current_password': {
+                        'type': 'string',
+                        'example': 'old-pass-123',
+                    },
+                    'new_password': {
+                        'type': 'string',
+                        'minLength': 8,
+                        'example': 'new-super-secure-pass',
+                    },
+                },
+            },
+        }
+    ],
+    'responses': {
+        '200': {
+            'description': 'Password updated',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'message': {'type': 'string', 'example': 'Password updated'},
+                },
+            },
+        },
+        '400': {
+            'description': 'Validation error',
+            'examples': {'application/json': {'error': 'Current password is incorrect'}},
+        },
+        '401': {
+            'description': 'Unauthenticated',
+            'examples': {'application/json': {'error': 'Authentication required'}},
+        },
+    },
+    'security': [{'sessionCookie': []}],
 }
 
 
@@ -560,6 +733,9 @@ __all__ = [
     'AUTH_LOGIN_DOC',
     'AUTH_LOGOUT_DOC',
     'AUTH_ME_DOC',
+    'AUTH_UPDATE_USERNAME_DOC',
+    'AUTH_UPDATE_EMAIL_DOC',
+    'AUTH_UPDATE_PASSWORD_DOC',
     'CHARACTER_CREATE_DOC',
     'SCRIPT_CREATE_DOC',
     'SCRIPT_LIST_DOC',

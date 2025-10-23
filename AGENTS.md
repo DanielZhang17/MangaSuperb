@@ -29,6 +29,11 @@
 - Reference issues, flag schema/config updates, and list commands executed or tests added.
 - PRs should include motivation, manual/automated test evidence, and screenshots for UI edits; request both backend and frontend review on cross-stack work.
 
+## User Avatar Handling
+- `users.avatar_index` stores a 1–4 selector for default avatars; mirror the schema change in `init.sql` and backfill existing records when migrating.
+- Registration randomly assigns the index; keep logic server-side and expose only the integer in responses so the frontend can map to static assets.
+- Default avatar art should live under `static/avatars/avatar-{index}.png`; update `Config` or deployment assets if you add or renumber variants.
+
 ## Security & Configuration Tips
 - Keep API keys, database passwords, and R2 credentials in `.env`; never commit secrets or sample secrets with real values.
 - Treat R2 URLs as public surfaces; sanitize uploaded assets and delete debugging files promptly.

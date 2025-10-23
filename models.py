@@ -11,8 +11,10 @@ class User(UserMixin, db.Model):
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
+    email = db.Column(db.String(255), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(128), nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    avatar_index = db.Column(db.Integer, nullable=False, default=1)
 
     # Relationships
     characters = db.relationship('Character', backref='user', lazy=True, cascade='all, delete-orphan')
@@ -27,6 +29,8 @@ class User(UserMixin, db.Model):
         return {
             'id': self.id,
             'username': self.username,
+            'email': self.email,
+            'avatar_index': self.avatar_index,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 

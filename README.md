@@ -7,6 +7,7 @@ An AI-powered manga generation tool that uses Google's Gemini API to create mang
 - 🎨 Generate complete manga scripts with multiple panels
 - 🖼️ AI-generated manga panel images (when available)
 - 💾 Server-side environment configuration for API access and generated content
+- 👤 Randomly assigned default user avatars (index 1–4) surfaced via the REST API
 - 🔄 Regenerate stories on demand
 - ⬇️ Download individual or all panel images
 - 🔑 Support for multiple Gemini models
