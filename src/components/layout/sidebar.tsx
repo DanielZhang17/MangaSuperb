@@ -9,7 +9,6 @@ import {
 import { type ComponentType } from 'react'
 import { Link, NavLink, useLocation } from 'react-router'
 
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -18,6 +17,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
+import { InfoCard } from '@/pages/me/info-card'
 
 interface SidebarItem {
   label: string
@@ -99,27 +99,7 @@ export function DashboardSidebar({ collapsed, onToggle }: DashboardSidebarProps)
         </Button>
       </div>
 
-      <div className={cn('mt-4', collapsed ? 'px-2' : 'px-4')}>
-        <div
-          className={cn(
-            'flex items-center gap-3 rounded-lg bg-card p-2 text-card-foreground',
-            collapsed && 'justify-center',
-          )}
-        >
-          <Avatar className="size-9">
-            <AvatarImage src="https://github.com/shadcn.png" alt="Sayori" />
-            <AvatarFallback>SY</AvatarFallback>
-          </Avatar>
-          {!collapsed && (
-            <div className="flex flex-col">
-              <span className="text-sm font-semibold">Sayori</span>
-              <span className="text-xs text-muted-foreground">
-                sayori@example.com
-              </span>
-            </div>
-          )}
-        </div>
-      </div>
+      <InfoCard collapsed={collapsed} />
 
       <nav className="mt-4 flex flex-1 flex-col gap-6">
         <div className="flex flex-col gap-1">
