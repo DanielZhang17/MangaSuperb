@@ -1,20 +1,19 @@
-'use client';
-
 import { UploadIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { createContext, useContext } from 'react';
 import type { DropEvent, DropzoneOptions, FileRejection } from 'react-dropzone';
 import { useDropzone } from 'react-dropzone';
+
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-type DropzoneContextType = {
+interface DropzoneContextType {
   src?: File[];
   accept?: DropzoneOptions['accept'];
   maxSize?: DropzoneOptions['maxSize'];
   minSize?: DropzoneOptions['minSize'];
   maxFiles?: DropzoneOptions['maxFiles'];
-};
+}
 
 const renderBytes = (bytes: number) => {
   const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
@@ -30,7 +29,7 @@ const renderBytes = (bytes: number) => {
 };
 
 const DropzoneContext = createContext<DropzoneContextType | undefined>(
-  undefined
+  undefined,
 );
 
 export type DropzoneProps = Omit<DropzoneOptions, 'onDrop'> & {
@@ -68,6 +67,7 @@ export const Dropzone = ({
       if (fileRejections.length > 0) {
         const message = fileRejections.at(0)?.errors.at(0)?.message;
         onError?.(new Error(message));
+
         return;
       }
 
@@ -85,7 +85,7 @@ export const Dropzone = ({
         className={cn(
           'relative h-auto w-full flex-col overflow-hidden p-8',
           isDragActive && 'outline-none ring-1 ring-ring',
-          className
+          className,
         )}
         disabled={disabled}
         type="button"
@@ -109,10 +109,10 @@ const useDropzoneContext = () => {
   return context;
 };
 
-export type DropzoneContentProps = {
+export interface DropzoneContentProps {
   children?: ReactNode;
   className?: string;
-};
+}
 
 const maxLabelItems = 3;
 
@@ -138,8 +138,8 @@ export const DropzoneContent = ({
       <p className="my-2 w-full truncate font-medium text-sm">
         {src.length > maxLabelItems
           ? `${new Intl.ListFormat('en').format(
-              src.slice(0, maxLabelItems).map((file) => file.name)
-            )} and ${src.length - maxLabelItems} more`
+            src.slice(0, maxLabelItems).map((file) => file.name),
+          )} and ${src.length - maxLabelItems} more`
           : new Intl.ListFormat('en').format(src.map((file) => file.name))}
       </p>
       <p className="w-full text-wrap text-muted-foreground text-xs">
@@ -149,10 +149,10 @@ export const DropzoneContent = ({
   );
 };
 
-export type DropzoneEmptyStateProps = {
+export interface DropzoneEmptyStateProps {
   children?: ReactNode;
   className?: string;
-};
+}
 
 export const DropzoneEmptyState = ({
   children,

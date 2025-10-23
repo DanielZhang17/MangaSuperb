@@ -1,23 +1,12 @@
-import {
-  Megaphone,
-  PanelLeftClose,
-  PanelLeftOpen,
-  PanelsTopLeft,
-  Sparkles,
-  UserPlus,
-} from 'lucide-react'
+import { PanelsTopLeft, Sparkles, UserPlus } from 'lucide-react'
 import { type ComponentType } from 'react'
 import { Link, NavLink, useLocation } from 'react-router'
 
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 import { InfoCard } from '@/pages/me/info-card'
+
+import { MessageToolTip } from '../common/operations/message-tooltip'
 
 interface SidebarItem {
   label: string
@@ -28,7 +17,6 @@ interface SidebarItem {
 
 interface DashboardSidebarProps {
   collapsed: boolean
-  onToggle: () => void
 }
 
 const primaryNav: SidebarItem[] = [{ label: '我的创意', to: '/ideas', icon: Sparkles }]
@@ -38,26 +26,7 @@ const creationNav: SidebarItem[] = [
   { label: '新建AI人物', to: '/characters', icon: UserPlus },
 ]
 
-const messages = [
-  {
-    id: 1,
-    title: 'New feature released!',
-    content: 'We have just launched a new feature that you might like.',
-  },
-  {
-    id: 2,
-    title: 'System maintenance',
-    content: 'Our system will be under maintenance on Sunday.',
-  },
-  {
-    id: 3,
-    title: 'Your subscription is ending soon',
-    content:
-      'Please renew your subscription to continue enjoying our services.',
-  },
-]
-
-export function DashboardSidebar({ collapsed, onToggle }: DashboardSidebarProps) {
+export function DashboardSidebar({ collapsed }: DashboardSidebarProps) {
   const location = useLocation()
 
   return (
@@ -81,22 +50,7 @@ export function DashboardSidebar({ collapsed, onToggle }: DashboardSidebarProps)
             <span className="text-lg font-semibold">MangaSuperb</span>
           )}
         </Link>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className={cn(
-            'flex text-muted-foreground hover:text-foreground',
-            !collapsed && 'ml-auto',
-          )}
-          onClick={onToggle}
-        >
-          {collapsed ? (
-            <PanelLeftOpen className="size-4" />
-          ) : (
-            <PanelLeftClose className="size-4" />
-          )}
-          <span className="sr-only">切换侧边栏</span>
-        </Button>
+        <div className={cn('flex items-center gap-2', !collapsed && 'ml-auto')} />
       </div>
 
       <InfoCard collapsed={collapsed} />
@@ -137,45 +91,9 @@ export function DashboardSidebar({ collapsed, onToggle }: DashboardSidebarProps)
         </div>
 
         <div className="mt-auto border-t px-5 py-6">
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                size={'icon-lg'}
-                className={cn('justify-center', collapsed && 'px-0')}
-              >
-                <Megaphone className="size-5" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent side="right" className="w-80">
-              <div className="grid gap-4">
-                <div className="space-y-2">
-                  <h4 className="font-medium leading-none">消息</h4>
-                  <p className="text-sm text-muted-foreground">
-                    您有 {messages.length} 条未读消息。
-                  </p>
-                </div>
-                <div className="grid gap-2">
-                  {messages.map((message) => (
-                    <div
-                      key={message.id}
-                      className="grid grid-cols-[25px_1fr] items-start pb-4 last:mb-0 last:pb-0"
-                    >
-                      <span className="flex h-2 w-2 translate-y-1 rounded-full bg-sky-500" />
-                      <div className="grid gap-1">
-                        <p className="text-sm font-medium leading-none">
-                          {message.title}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          {message.content}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
+          <div className="flex items-center gap-2">
+            <MessageToolTip />
+          </div>
         </div>
       </nav>
     </aside>
