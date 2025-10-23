@@ -1,5 +1,5 @@
 import { PanelsTopLeft, Sparkles, UserPlus } from 'lucide-react'
-import { type ComponentType } from 'react'
+import { type ComponentType, useEffect, useState } from 'react'
 import { Link, NavLink, useLocation } from 'react-router'
 
 import { Badge } from '@/components/ui/badge'
@@ -28,11 +28,17 @@ const creationNav: SidebarItem[] = [
 
 export function DashboardSidebar({ collapsed }: DashboardSidebarProps) {
   const location = useLocation()
+  const [hydrated, setHydrated] = useState(false)
+
+  useEffect(() => {
+    setHydrated(true)
+  }, [])
 
   return (
     <aside
       className={cn(
-        'flex h-screen flex-col border-r bg-sidebar text-sidebar-foreground transition-[width] duration-300 ease-out',
+        'flex h-screen flex-col border-r bg-sidebar text-sidebar-foreground',
+        hydrated && 'transition-[width] duration-300 ease-out',
         collapsed ? 'w-20' : 'w-72',
       )}
     >
