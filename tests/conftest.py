@@ -1,18 +1,12 @@
 """Shared pytest fixtures for MangaSuperb tests."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+from collections.abc import Generator
 from types import SimpleNamespace
-from typing import Generator
 
 import pytest
 from flask import Flask
 from sqlalchemy.pool import StaticPool
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 from mangasuperb.extensions import bcrypt, db, login_manager
 from mangasuperb.routes import register_blueprints
@@ -47,7 +41,13 @@ class DummyStorage:
     def __init__(self) -> None:
         self.uploads: list[SimpleNamespace] = []
 
-    def upload_image(self, image_data: bytes, filename: str, content_type: str = "image/png") -> str:
+    def upload_image(
+        self,
+        image_data: bytes,
+        filename: str,
+        *,
+        content_type: str = "image/png",
+    ) -> str:
         self.uploads.append(
             SimpleNamespace(image_data=image_data, filename=filename, content_type=content_type)
         )

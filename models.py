@@ -1,9 +1,11 @@
 """Database models for MangaSuperb."""
+
 from datetime import datetime
 
 from flask_login import UserMixin
 
 from mangasuperb.extensions import db
+
 
 class User(UserMixin, db.Model):
     """User account information"""
@@ -17,9 +19,24 @@ class User(UserMixin, db.Model):
     avatar_index = db.Column(db.Integer, nullable=False, default=1)
 
     # Relationships
-    characters = db.relationship('Character', backref='user', lazy=True, cascade='all, delete-orphan')
-    scripts = db.relationship('Script', backref='user', lazy=True, cascade='all, delete-orphan')
-    comics = db.relationship('Comic', backref='user', lazy=True, cascade='all, delete-orphan')
+    characters = db.relationship(
+        'Character',
+        backref='user',
+        lazy=True,
+        cascade='all, delete-orphan',
+    )
+    scripts = db.relationship(
+        'Script',
+        backref='user',
+        lazy=True,
+        cascade='all, delete-orphan',
+    )
+    comics = db.relationship(
+        'Comic',
+        backref='user',
+        lazy=True,
+        cascade='all, delete-orphan',
+    )
 
     def __repr__(self):
         return f'<User {self.username}>'
@@ -39,7 +56,12 @@ class Character(db.Model):
     __tablename__ = 'characters'
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey('users.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text, nullable=False)
     style_prompt = db.Column(db.Text, nullable=True)
@@ -49,7 +71,19 @@ class Character(db.Model):
     image_status = db.Column(db.String(20), nullable=False, default='idle')
     image_error = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    # Relationships
+    comic_links = db.relationship(
+        "ComicCharacter",
+        back_populates="character",
+        lazy=True,
+    )
 
     def __repr__(self):
         return f'<Character {self.name}>'
@@ -75,11 +109,21 @@ class Script(db.Model):
     __tablename__ = 'scripts'
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey('users.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
     title = db.Column(db.String(200), nullable=False)
     content = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
 
     # Relationships
     comics = db.relationship('Comic', backref='script', lazy=True, cascade='all, delete-orphan')
@@ -102,15 +146,29 @@ class Comic(db.Model):
     __tablename__ = 'comics'
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
-    script_id = db.Column(db.Integer, db.ForeignKey('scripts.id', ondelete='CASCADE'), nullable=False, index=True)
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey('users.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
+    script_id = db.Column(
+        db.Integer,
+        db.ForeignKey('scripts.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
     title = db.Column(db.String(200), nullable=False)
 
     # Status: 'pending', 'processing', 'completed', 'failed'
     status = db.Column(db.String(20), nullable=False, default='pending')
     workflow_stage = db.Column(db.String(20), nullable=False, default='outline')
     workflow_status = db.Column(db.String(20), nullable=False, default='pending')
-    style_description = db.Column(db.Text, nullable=False, default='Classic manga black and white linework')
+    style_description = db.Column(
+        db.Text,
+        nullable=False,
+        default='Classic manga black and white linework',
+    )
     aspect_ratio = db.Column(db.String(5), nullable=False, default='16:9')
 
     pdf_url = db.Column(db.String(255), nullable=True)
@@ -123,7 +181,13 @@ class Comic(db.Model):
     completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     # Relationships
-    pages = db.relationship('ComicPage', backref='comic', lazy=True, cascade='all, delete-orphan', order_by='ComicPage.page_number')
+    pages = db.relationship(
+        'ComicPage',
+        backref='comic',
+        lazy=True,
+        cascade='all, delete-orphan',
+        order_by='ComicPage.page_number',
+    )
     workflow_stages = db.relationship(
         'ComicWorkflowStage',
         backref='comic',
@@ -152,6 +216,14 @@ class Comic(db.Model):
         cascade='all, delete-orphan',
         order_by='ComicPageLayout.page_number',
     )
+    character_links = db.relationship(
+        'ComicCharacter',
+        back_populates='comic',
+        lazy=True,
+        cascade='all, delete-orphan',
+        order_by='ComicCharacter.order_index',
+        single_parent=True,
+    )
 
     def __repr__(self):
         return f'<Comic {self.title} - {self.status}>'
@@ -173,19 +245,99 @@ class Comic(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'started_at': self.started_at.isoformat() if self.started_at else None,
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
-            'pages': [page.to_dict() for page in self.pages] if self.pages else [],
-            'workflow_stages': [stage.to_dict() for stage in self.workflow_stages] if self.workflow_stages else [],
-            'outline_sections': [section.to_dict() for section in self.outline_sections] if self.outline_sections else [],
-            'panel_shots': [panel.to_dict() for panel in self.panel_shots] if self.panel_shots else [],
-            'page_layouts': [layout.to_dict() for layout in self.page_layouts] if self.page_layouts else [],
+            'pages': ([page.to_dict() for page in self.pages] if self.pages else []),
+            'workflow_stages': (
+                [stage.to_dict() for stage in self.workflow_stages]
+                if self.workflow_stages
+                else []
+            ),
+            'outline_sections': (
+                [section.to_dict() for section in self.outline_sections]
+                if self.outline_sections
+                else []
+            ),
+            'panel_shots': (
+                [panel.to_dict() for panel in self.panel_shots]
+                if self.panel_shots
+                else []
+            ),
+            'page_layouts': (
+                [layout.to_dict() for layout in self.page_layouts]
+                if self.page_layouts
+                else []
+            ),
+            'characters': (
+                [link.to_dict() for link in self.character_links]
+                if self.character_links
+                else []
+            ),
         }
+
+
+class ComicCharacter(db.Model):
+    """Association between comics and characters with ordering and role metadata."""
+
+    __tablename__ = 'comic_characters'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    comic_id = db.Column(
+        db.Integer,
+        db.ForeignKey('comics.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
+    character_id = db.Column(
+        db.Integer,
+        db.ForeignKey('characters.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
+    order_index = db.Column(db.Integer, nullable=False, default=1)
+    role = db.Column(db.String(50), nullable=True)
+
+    __table_args__ = (
+        db.UniqueConstraint('comic_id', 'character_id', name='uq_comic_character_link'),
+    )
+
+    comic = db.relationship('Comic', back_populates='character_links')
+    character = db.relationship('Character', back_populates='comic_links')
+
+    def __repr__(self):
+        return f'<ComicCharacter comic={self.comic_id} character={self.character_id}>'
+
+    def to_dict(self):
+        character_data = self.character.to_dict() if self.character else None
+        summary = {
+            'comic_id': self.comic_id,
+            'character_id': self.character_id,
+            'order_index': self.order_index,
+            'role': self.role,
+            'comic_character_id': self.id,
+        }
+        if character_data:
+            summary.update(
+                {
+                    'id': character_data['id'],
+                    'name': character_data.get('name'),
+                    'description': character_data.get('description'),
+                    'style_prompt': character_data.get('style_prompt'),
+                    'image_url': character_data.get('image_url'),
+                    'optimized_description': character_data.get('optimized_description'),
+                }
+            )
+        return summary
 
 class ComicPage(db.Model):
     """Individual generated pages of a comic"""
     __tablename__ = 'comic_pages'
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    comic_id = db.Column(db.Integer, db.ForeignKey('comics.id', ondelete='CASCADE'), nullable=False, index=True)
+    comic_id = db.Column(
+        db.Integer,
+        db.ForeignKey('comics.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
     page_number = db.Column(db.Integer, nullable=False)
     image_url = db.Column(db.String(255), nullable=False)
     panel_text = db.Column(db.Text, nullable=True)

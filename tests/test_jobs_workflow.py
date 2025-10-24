@@ -11,7 +11,9 @@ from mangasuperb.extensions import db
 from mangasuperb.services import jobs
 from mangasuperb.services.jobs import PANELS_PER_PAGE
 from models import (
+    Character,
     Comic,
+    ComicCharacter,
     ComicOutlineSection,
     ComicPage,
     ComicPageLayout,
@@ -35,7 +37,7 @@ class DummyGenerativeModel:
 
     def generate_content(self, prompt: str) -> DummyModelResult:
         self._store.append(prompt)
-        payload = base64.b64encode(f"image-{len(self._store)}".encode("utf-8"))
+        payload = base64.b64encode(f"image-{len(self._store)}".encode())
         inline = SimpleNamespace(data=payload.decode("utf-8"))
         part = SimpleNamespace(inline_data=inline)
         content = SimpleNamespace(parts=[part])
@@ -92,7 +94,13 @@ def _patch_genai(monkeypatch: pytest.MonkeyPatch, store: list[str]) -> None:
     )
 
 
-def test_sequential_workflow_generates_resources(app, comic: Comic, script_payload, dummy_storage, monkeypatch):
+def test_sequential_workflow_generates_resources(
+    app,
+    comic: Comic,
+    script_payload,
+    dummy_storage,
+    monkeypatch,
+):
     prompts: list[str] = []
     _patch_genai(monkeypatch, prompts)
 
@@ -138,7 +146,12 @@ def test_sequential_workflow_generates_resources(app, comic: Comic, script_paylo
         assert stored[0]["dialogue"] == "Line 1"
 
 
-def test_requeue_render_includes_context(app, comic: Comic, dummy_storage, monkeypatch):
+def test_requeue_render_includes_context(
+    app,
+    comic: Comic,
+    dummy_storage,
+    monkeypatch,
+):
     prompts: list[str] = []
     _patch_genai(monkeypatch, prompts)
 
@@ -190,3 +203,67 @@ def test_requeue_render_includes_context(app, comic: Comic, dummy_storage, monke
 
         total_pages = ComicPage.query.filter_by(comic_id=comic.id).count()
         assert total_pages == 2
+
+
+def test_render_prompt_includes_character_roster(
+    app,
+    comic: Comic,
+    script_payload,
+    dummy_storage,
+    monkeypatch,
+):
+    prompts: list[str] = []
+    _patch_genai(monkeypatch, prompts)
+
+    with app.app_context():
+        stored_comic = db.session.get(Comic, comic.id)
+        script = db.session.get(Script, comic.script_id)
+
+        character = Character(
+            user_id=stored_comic.user_id,
+            name="Aya",
+            description="A daring pilot with a signature flight jacket.",
+            style_prompt="High-energy shounen hero with windswept hair",
+            optimized_description=(
+                "Confident ace pilot with windswept hair and a battered bomber jacket."
+            ),
+        )
+        db.session.add(character)
+        db.session.flush()
+        db.session.add(
+            ComicCharacter(
+                comic_id=stored_comic.id,
+                character_id=character.id,
+                order_index=1,
+                role="Protagonist",
+            )
+        )
+
+        script_data = json.loads(script.content)
+        script_data["characters"] = [
+            {
+                "id": character.id,
+                "name": character.name,
+                "description": character.description,
+                "style_prompt": character.style_prompt,
+                "optimized_description": character.optimized_description,
+                "order_index": 1,
+                "role": "Protagonist",
+            }
+        ]
+        script.content = json.dumps(script_data)
+        db.session.commit()
+
+        jobs.process_outline_stage(stored_comic.id)
+        jobs.process_shot_stage(stored_comic.id)
+        jobs.process_page_render_stage(
+            stored_comic.id,
+            page_number=1,
+            api_key="test-key",
+            image_model="test-model",
+        )
+
+        assert prompts, "Expected image generation prompt to be captured"
+        assert "Character roster:" in prompts[0]
+        assert "Aya" in prompts[0]
+        assert "Protagonist" in prompts[0]

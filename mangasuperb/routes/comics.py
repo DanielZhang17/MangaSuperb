@@ -10,6 +10,11 @@ from flask import Blueprint, jsonify, request
 from flask_login import current_user, login_required
 
 from mangasuperb.extensions import db
+from mangasuperb.routes._character_utils import (
+    apply_character_assignments,
+    build_character_script_payload,
+    resolve_character_assignments,
+)
 from mangasuperb.services.generation import validate_aspect_ratio
 from mangasuperb.services.jobs import bootstrap_comic_workflow
 from models import Comic, Script
@@ -42,11 +47,18 @@ def create_comic() -> Any:
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
+    try:
+        character_assignments = resolve_character_assignments(data)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     script_payload = {
         "story": story,
         "style_description": style_description,
         "aspect_ratio": resolved_aspect_ratio,
     }
+    if character_assignments:
+        script_payload["characters"] = build_character_script_payload(character_assignments)
 
     script = Script(
         user_id=current_user.id,
@@ -66,6 +78,8 @@ def create_comic() -> Any:
     try:
         db.session.add_all([script, comic])
         db.session.flush()
+        if character_assignments:
+            apply_character_assignments(comic, character_assignments)
         bootstrap_comic_workflow(comic)
         db.session.commit()
     except Exception as exc:  # pragma: no cover - database failure

@@ -11,12 +11,17 @@ from flask_login import current_user, login_required
 from rq.job import Job
 
 from mangasuperb.extensions import db
+from mangasuperb.routes._character_utils import (
+    apply_character_assignments,
+    build_character_script_payload,
+    resolve_character_assignments,
+)
 from mangasuperb.services.generation import (
     DEFAULT_COMIC_STYLE,
     generate_script_from_prompt,
     validate_aspect_ratio,
 )
-from mangasuperb.services.jobs import enqueue_comic_workflow
+from mangasuperb.services.jobs import build_character_prompt, enqueue_comic_workflow
 from models import Comic, Script
 from swagger import JOB_CREATE_DOC, JOB_STATUS_DOC
 
@@ -47,7 +52,18 @@ def create_job() -> Any:
         if not api_key:
             return jsonify({"error": "API key is required"}), 400
 
-        manga_script = generate_script_from_prompt(prompt, model_name, api_key)
+        try:
+            character_assignments = resolve_character_assignments(data)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        prompt_payload = prompt
+        roster_prompt = build_character_prompt(character_assignments)
+        if roster_prompt:
+            prompt_payload = f"{prompt}\n\n{roster_prompt}"
+        logger.info("Prompt length: %s characters", len(prompt_payload))
+
+        manga_script = generate_script_from_prompt(prompt_payload, model_name, api_key)
         logger.info("Script generated: %s", manga_script.get("title", "Untitled"))
 
         script_title = manga_script.get("title") or "Untitled"
@@ -57,6 +73,9 @@ def create_job() -> Any:
             resolved_aspect_ratio = validate_aspect_ratio(aspect_ratio)
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
+
+        if character_assignments:
+            manga_script["characters"] = build_character_script_payload(character_assignments)
 
         try:
             script = Script(
@@ -74,6 +93,8 @@ def create_job() -> Any:
             )
             db.session.add_all([script, comic])
             db.session.flush()
+            if character_assignments:
+                apply_character_assignments(comic, character_assignments)
 
             queue = current_app.extensions["rq_queue"]
             pipeline_jobs = enqueue_comic_workflow(
@@ -86,7 +107,7 @@ def create_job() -> Any:
             db.session.refresh(comic)
             db.session.refresh(script)
 
-        except Exception as exc:  # pragma: no cover - database/queue errors
+        except Exception:  # pragma: no cover - database/queue errors
             db.session.rollback()
             logger.exception("Failed to persist job resources")
             raise
