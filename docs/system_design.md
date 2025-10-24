@@ -70,6 +70,70 @@ graph TD
 - **`mangasuperb/services/jobs.py`** – Background job implementations reused by the API and worker so asynchronous logic stays in sync.
 - **`worker.py`** – Minimal bootstrap that creates the Flask app, pushes an application context, and starts the RQ worker loop.
 
+## API endpoints
+
+### System
+
+| Endpoint | Method | Description | Auth |
+|----------|--------|-------------|------|
+| `/` | GET | Serves the SPA entry (`static/index.html`). | Not required |
+| `/health` | GET | Liveness and dependency check for database, Redis, and R2. | Not required |
+| `/api/docs.json` | GET | Swagger definition used by Swagger UI. | Not required |
+
+### Authentication
+
+| Endpoint | Method | Description | Auth |
+|----------|--------|-------------|------|
+| `/api/auth/register` | POST | Create an account; enforces unique username and email, returns logged-in session. | No |
+| `/api/auth/login` | POST | Authenticate with username or email plus password; issues session cookie. | No |
+| `/api/auth/logout` | POST | Invalidate the active session. | Yes |
+| `/api/auth/me` | GET | Return the current user profile or `null`. | Optional |
+| `/api/auth/username` | PATCH | Update username after validation and uniqueness checks. | Yes |
+| `/api/auth/email` | PATCH | Update email address with format and uniqueness enforcement. | Yes |
+| `/api/auth/password` | PATCH | Change password by submitting current and new secrets. | Yes |
+
+### Characters
+
+| Endpoint | Method | Description | Auth |
+|----------|--------|-------------|------|
+| `/api/characters` | POST | Create a character; optional optimisation and reference images enqueue portrait jobs and return `job_id`. | Yes |
+| `/api/characters` | GET | List characters owned by the user plus any marked `is_public`. | Yes |
+| `/api/characters/<id>` | GET | Retrieve a single character owned by the user. | Yes |
+
+### Scripts
+
+| Endpoint | Method | Description | Auth |
+|----------|--------|-------------|------|
+| `/api/scripts` | POST | Save a custom script draft (title + JSON content). | Yes |
+| `/api/scripts` | GET | List recent scripts for the current user (max 100). | Yes |
+| `/api/scripts/<id>` | GET | Fetch a single script owned by the user. | Yes |
+
+### Comics
+
+| Endpoint | Method | Description | Auth |
+|----------|--------|-------------|------|
+| `/api/comics` | POST | Create a comic with associated script, aspect ratio, and optional character roster. | Yes |
+| `/api/comics` | GET | List comics belonging to the current user. | Yes |
+| `/api/comics/<id>` | GET | Retrieve a specific comic, including generated pages and status. | Yes |
+
+### Stories, panels, and rendering
+
+| Endpoint | Method | Description | Auth |
+|----------|--------|-------------|------|
+| `/api/stories/<comic_id>` | GET | Return the comic payload including outline, panels, and pages. | Yes |
+| `/api/stories/<comic_id>` | POST | Replace outline sections, optionally reassign characters, and reset workflow stages. | Yes |
+| `/api/stories/<comic_id>/optimize` | POST | Enqueue Gemini outline optimisation for the comic. | Yes |
+| `/api/panels/<panel_id>` | PATCH | Update panel metadata (text, ordering, status) and flag the render stage pending. | Yes |
+| `/api/panels/<comic_id>/layouts` | POST | Select a page layout and panel order, marking the comic for re-render. | Yes |
+| `/api/panels/<comic_id>/pages/<page_number>/render` | POST | Enqueue a specific page render job. | Yes |
+
+### Jobs
+
+| Endpoint | Method | Description | Auth |
+|----------|--------|-------------|------|
+| `/api/jobs` | POST | Dispatch background work (`comic_generation`, `story_optimization`, `character_optimization`, `page_render`). | Yes |
+| `/api/jobs/<job_id>` | GET | Inspect queued or completed job status and associated payloads. | Yes |
+
 ### Scaling considerations
 
 - **Horizontal API scaling** – The stateless blueprint architecture allows multiple Flask instances to be started behind a load balancer. Sessions are backed by secure cookies, while shared resources (PostgreSQL, Redis, R2) remain external.
@@ -93,3 +157,71 @@ graph TD
 | `ComicCharacter` | Joins characters to comics with roles and ordering.  | Many-to-many bridge between `Comic` and `Character`. |
 
 This shared mental model should make it straightforward to onboard contributors, reason about failure modes, and plan for future scalability milestones.
+
+## Database schema
+
+### `users`
+- `id` PK, auto-increment.
+- `username` unique, indexed length ≤ 80; enforced uniqueness at DB and application level.
+- `email` unique, indexed length ≤ 255; login accepts either username or email.
+- `password_hash`, `avatar_index`, `created_at`.
+- Cascading deletes remove child `characters`, `scripts`, and `comics`.
+
+### `characters`
+- `id` PK, `user_id` FK → `users.id` (`CASCADE` on delete).
+- Required fields: `name`, `description`; `sex` constrained in application to allowed vocabulary.
+- Flags: `is_public` (indexed) and `image_status` for queue tracking.
+- Optional: `style_prompt`, `optimized_description`, `image_url`, `image_job_id`, `image_error`.
+- Relationship: many characters per user; joined to comics via `comic_characters`.
+
+### `scripts`
+- `id` PK, `user_id` FK → `users.id` (`CASCADE`).
+- Required `title`, `content` (JSON string).
+- Relationship: one user owns many scripts; each script may back multiple comics.
+
+### `comics`
+- `id` PK, `user_id` FK → `users.id`, `script_id` FK → `scripts.id` (both `CASCADE`).
+- Workflow columns: `status`, `workflow_stage`, `workflow_status`, timestamps, optional `job_id` (unique), `error_message`.
+- Presentation data: `title`, `style_description`, `aspect_ratio`, optional `pdf_url`.
+- Relationships: one comic has many pages, stages, outline sections, panel shots, page layouts, and `comic_characters`.
+
+### `comic_characters`
+- Bridge table: `comic_id` FK → `comics.id`, `character_id` FK → `characters.id` (both `CASCADE`).
+- `order_index` (display ordering) and optional `role`.
+- Unique constraint `uq_comic_character_link` prevents duplicate assignments of the same character to a comic.
+
+### `comic_pages`
+- `id` PK, `comic_id` FK → `comics.id` (`CASCADE`).
+- `page_number` + `comic_id` unique (`unique_comic_page`), enforcing one rendered asset per page per comic.
+- Stores `image_url` and optional `panel_text`.
+- Linked from `comic_page_layouts.comic_page_id`.
+
+### `comic_workflow_stages`
+- `id` PK, `comic_id` FK → `comics.id` (`CASCADE`).
+- `stage` (outline/shots/render) constrained at application level; unique per comic (`unique_comic_stage`).
+- Tracks `status`, optional `job_id`, timestamps, `error_message`.
+
+### `comic_outline_sections`
+- `id` PK, `comic_id` FK → `comics.id` (`CASCADE`).
+- `order_index` unique per comic (`unique_outline_order`), with optional `title`, required `summary`.
+- Backref: `panel_shots` (one-to-many).
+
+### `comic_panel_shots`
+- `id` PK, `comic_id` FK → `comics.id` (`CASCADE`), `outline_section_id` FK → `comic_outline_sections.id` (`SET NULL`).
+- Unique `sequence_index` per comic (`unique_panel_sequence`); optional `page_number` / `panel_number`.
+- Stores description, dialogue, camera/style notes, status, timestamps.
+- Backref from `comic_page_panels` for layout placement.
+
+### `comic_page_layouts`
+- `id` PK, `comic_id` FK → `comics.id` (`CASCADE`), optional `comic_page_id` FK → `comic_pages.id` (`SET NULL`).
+- Unique `page_number` per comic (`unique_layout_page`).
+- Fields: `layout_key`, `notes`, `status`, optional `selected_at`.
+- One-to-many with `comic_page_panels`.
+
+### `comic_page_panels`
+- `id` PK, `page_layout_id` FK → `comic_page_layouts.id` (`CASCADE`), `panel_shot_id` FK → `comic_panel_shots.id` (`CASCADE`).
+- `position` integer; unique constraints on `(page_layout_id, position)` and `(page_layout_id, panel_shot_id)` enforce ordering without duplicates.
+
+### Queue-related helpers
+- Characters store `image_job_id`; comics track pipeline via `job_id` plus `comic_workflow_stages`.
+- All job IDs refer to Redis RQ identifiers stored as strings; foreign keys are not enforced for jobs, keeping queue coupling loose.

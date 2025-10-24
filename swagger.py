@@ -682,7 +682,12 @@ JOB_CREATE_DOC = {
     'summary': 'Create background job',
     'description': (
         'Dispatches asynchronous work such as comic generation, story optimisation, character optimisation, or page '
-        'rendering. Gemini credentials are sourced from server configuration; clients supply only task parameters.'
+        'rendering. Gemini credentials live in server configuration; clients supply only task parameters.\n\n'
+        'Available job types:\n'
+        '- `comic_generation` (default): requires `prompt`; optional `style`, `aspect_ratio`, and `characters`.\n'
+        '- `story_optimization`: requires `comic_id`; re-runs Gemini script polish for an existing comic.\n'
+        '- `character_optimization`: requires `character_id`; optional `description` override.\n'
+        '- `page_render`: requires `comic_id` and `page_number`; re-renders a single comic page.'
     ),
     'parameters': [
         {
@@ -701,25 +706,52 @@ JOB_CREATE_DOC = {
                             'page_render',
                         ],
                         'default': 'comic_generation',
+                        'description': 'Selects the queue workflow to run. See description for required fields per type.',
                     },
-                    'prompt': {'type': 'string', 'example': 'Two siblings discover a hidden mech in the forest.'},
-                    'style': {'type': 'string', 'example': 'High-contrast ink with splashy gradients.'},
+                    'prompt': {
+                        'type': 'string',
+                        'example': 'Two siblings discover a hidden mech in the forest.',
+                        'description': 'Required when `job_type` is `comic_generation`; ignored for other job types.',
+                    },
+                    'style': {
+                        'type': 'string',
+                        'example': 'High-contrast ink with splashy gradients.',
+                        'description': 'Optional style direction for `comic_generation`. Falls back to script defaults.',
+                    },
                     'aspect_ratio': {
                         'type': 'string',
                         'enum': ['16:9', '9:16', '1:1'],
-                        'example': '16:9'
+                        'example': '16:9',
+                        'description': 'Optional for `comic_generation`; validated against supported canvas sizes.',
                     },
                     'characters': {
                         'type': 'array',
                         'items': {'type': 'object'},
-                        'description': 'Optional character selections (same structure as POST /api/characters).',
+                        'description': (
+                            'Optional for `comic_generation`. Supply character assignments matching POST /api/characters '
+                            'payloads to blend roster context into the generated script.'
+                        ),
                     },
-                    'comic_id': {'type': 'integer', 'example': 42},
-                    'page_number': {'type': 'integer', 'example': 1},
-                    'character_id': {'type': 'integer', 'example': 7},
+                    'comic_id': {
+                        'type': 'integer',
+                        'example': 42,
+                        'description': 'Required for `story_optimization` and `page_render`; must reference an owned comic.',
+                    },
+                    'page_number': {
+                        'type': 'integer',
+                        'example': 1,
+                        'description': 'Required for `page_render`; 1-indexed page number to regenerate.',
+                    },
+                    'character_id': {
+                        'type': 'integer',
+                        'example': 7,
+                        'description': 'Required for `character_optimization`; must reference an owned character.',
+                    },
                     'description': {
                         'type': 'string',
-                        'description': 'Optional raw description when optimising a character.',
+                        'description': (
+                            'Optional override copy when optimising a character. When omitted, the stored description is used.'
+                        ),
                     },
                 },
                 'oneOf': [
