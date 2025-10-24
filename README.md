@@ -29,17 +29,15 @@ pip install -r requirements.txt
 pip install -r requirements-dev.txt  # optional: development tooling
 ```
 
-Create a `.env` file in the project root and add your Gemini credentials so the backend can authenticate without prompting end users:
+Create a `.env` file from .env.exemple in the project root and add your credentials so the backend can authenticate with gemini API, DB and other services:
 
 ```bash
-echo "GEMINI_API_KEY=your-key-here" >> .env
+cp .env.example .env
 ```
 
 ### Running the application
 
 ```bash
-flask --app app run
-# or
 python app.py
 ```
 

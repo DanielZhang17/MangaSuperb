@@ -51,6 +51,8 @@ CREATE TABLE characters (
     user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name VARCHAR(100) NOT NULL,
     description TEXT NOT NULL,
+    sex VARCHAR(20) NOT NULL DEFAULT 'unspecified',
+    is_public BOOLEAN NOT NULL DEFAULT FALSE,
     style_prompt TEXT,
     image_url VARCHAR(255),
     optimized_description TEXT,
@@ -234,6 +236,7 @@ CREATE TABLE comic_page_panels (
 -- PostgreSQL creates indexes for PRIMARY KEY and UNIQUE constraints automatically, but not for foreign keys.
 --
 CREATE INDEX ON characters (user_id);
+CREATE INDEX ON characters (is_public);
 CREATE INDEX ON scripts (user_id);
 CREATE INDEX ON comics (user_id);
 CREATE INDEX ON comics (script_id);

@@ -64,6 +64,8 @@ class Character(db.Model):
     )
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text, nullable=False)
+    sex = db.Column(db.String(20), nullable=False, default='unspecified')
+    is_public = db.Column(db.Boolean, nullable=False, default=False, index=True)
     style_prompt = db.Column(db.Text, nullable=True)
     image_url = db.Column(db.String(255), nullable=True)
     optimized_description = db.Column(db.Text, nullable=True)
@@ -94,6 +96,8 @@ class Character(db.Model):
             'user_id': self.user_id,
             'name': self.name,
             'description': self.description,
+            'sex': self.sex,
+            'is_public': self.is_public,
             'style_prompt': self.style_prompt,
             'image_url': self.image_url,
             'optimized_description': self.optimized_description,
@@ -320,6 +324,8 @@ class ComicCharacter(db.Model):
                     'id': character_data['id'],
                     'name': character_data.get('name'),
                     'description': character_data.get('description'),
+                    'sex': character_data.get('sex'),
+                    'is_public': character_data.get('is_public'),
                     'style_prompt': character_data.get('style_prompt'),
                     'image_url': character_data.get('image_url'),
                     'optimized_description': character_data.get('optimized_description'),

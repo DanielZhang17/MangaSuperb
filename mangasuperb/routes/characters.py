@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 from flasgger import swag_from
 from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
+from sqlalchemy import or_
 
 from mangasuperb.extensions import db
 from mangasuperb.services.generation import (
@@ -14,11 +15,18 @@ from mangasuperb.services.generation import (
     optimize_character_description,
 )
 from models import Character
-from swagger import CHARACTER_CREATE_DOC, CHARACTER_DETAIL_DOC
+from swagger import (
+    CHARACTER_CREATE_DOC,
+    CHARACTER_DETAIL_DOC,
+    CHARACTER_LIST_DOC,
+)
 
 logger = logging.getLogger(__name__)
 
 bp = Blueprint("characters", __name__, url_prefix="/api/characters")
+
+ALLOWED_SEX_VALUES = {"male", "female", "non-binary", "unspecified", "other"}
+ALLOWED_SEX_VALUES_MESSAGE = ", ".join(sorted(ALLOWED_SEX_VALUES))
 
 
 @bp.post("")
@@ -32,11 +40,18 @@ def create_character() -> Any:
     style_prompt = (data.get("style_prompt") or "").strip() or None
     reference_images = data.get("reference_images") or []
     api_key = (data.get("api_key") or "").strip()
+    sex_value = (data.get("sex") or "unspecified").strip().lower()
+    is_public = bool(data.get("is_public", False))
 
     if not name:
         return jsonify({"error": "Name is required"}), 400
     if not description:
         return jsonify({"error": "Description is required"}), 400
+    if sex_value not in ALLOWED_SEX_VALUES:
+        return (
+            jsonify({"error": f"Sex must be one of {ALLOWED_SEX_VALUES_MESSAGE}"}),
+            400,
+        )
 
     requires_api = optimize_flag or bool(reference_images)
     if requires_api and not api_key:
@@ -69,6 +84,8 @@ def create_character() -> Any:
         user_id=current_user.id,
         name=name,
         description=description,
+        sex=sex_value,
+        is_public=is_public,
         style_prompt=resolved_style_prompt,
         optimized_description=optimized_description,
         image_status="idle",
@@ -120,3 +137,24 @@ def get_character(character_id: int) -> Any:
     if not character or character.user_id != current_user.id:
         return jsonify({"error": "Character not found"}), 404
     return jsonify({"character": character.to_dict()}), 200
+
+
+@bp.get("")
+@login_required
+@swag_from(CHARACTER_LIST_DOC)
+def list_characters() -> Any:
+    characters = (
+        Character.query.filter(
+            or_(Character.user_id == current_user.id, Character.is_public.is_(True))
+        )
+        .order_by(Character.name.asc(), Character.id.asc())
+        .all()
+    )
+    payload: list[Dict[str, Any]] = []
+    seen: set[int] = set()
+    for character in characters:
+        if character.id in seen:
+            continue
+        seen.add(character.id)
+        payload.append(character.to_dict())
+    return jsonify({"characters": payload}), 200

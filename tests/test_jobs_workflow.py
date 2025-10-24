@@ -223,6 +223,8 @@ def test_render_prompt_includes_character_roster(
             user_id=stored_comic.user_id,
             name="Aya",
             description="A daring pilot with a signature flight jacket.",
+            sex="female",
+            is_public=True,
             style_prompt="High-energy shounen hero with windswept hair",
             optimized_description=(
                 "Confident ace pilot with windswept hair and a battered bomber jacket."

@@ -144,6 +144,8 @@ def build_character_script_payload(
                 "id": character.id,
                 "name": character.name,
                 "description": character.description,
+                "sex": character.sex,
+                "is_public": character.is_public,
                 "style_prompt": character.style_prompt,
                 "optimized_description": character.optimized_description,
                 "order_index": assignment.order_index,

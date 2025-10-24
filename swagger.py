@@ -376,6 +376,16 @@ CHARACTER_CREATE_DOC = {
                         'type': 'string',
                         'example': 'A brilliant teen engineer with mechanized arms and neon tattoos.'
                     },
+                    'sex': {
+                        'type': 'string',
+                        'enum': ['male', 'female', 'non-binary', 'other', 'unspecified'],
+                        'default': 'unspecified',
+                    },
+                    'is_public': {
+                        'type': 'boolean',
+                        'default': False,
+                        'description': 'When true the character is visible to other users.'
+                    },
                     'optimize': {'type': 'boolean', 'default': False},
                     'api_key': {'type': 'string', 'description': 'Required when optimization or reference images are used.'},
                     'style_prompt': {'type': 'string', 'example': 'Cyberpunk manga aesthetic with bold line work.'},
@@ -401,6 +411,8 @@ CHARACTER_CREATE_DOC = {
                             'user_id': {'type': 'integer'},
                             'name': {'type': 'string'},
                             'description': {'type': 'string'},
+                            'sex': {'type': 'string'},
+                            'is_public': {'type': 'boolean'},
                             'style_prompt': {'type': ['string', 'null']},
                             'optimized_description': {'type': ['string', 'null']},
                             'image_status': {'type': 'string'},
@@ -422,6 +434,27 @@ CHARACTER_CREATE_DOC = {
         '502': {
             'description': 'Optimization failed',
             'examples': {'application/json': {'error': 'Failed to optimize character description'}},
+        },
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+CHARACTER_LIST_DOC = {
+    'tags': ['Characters'],
+    'summary': 'List characters',
+    'description': 'Returns characters owned by the authenticated user plus any that are marked public.',
+    'responses': {
+        '200': {
+            'description': 'List of characters',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'characters': {
+                        'type': 'array',
+                        'items': CHARACTER_CREATE_DOC['responses']['201']['schema']['properties']['character'],
+                    }
+                },
+            },
         },
     },
     'security': [{'sessionCookie': []}],
@@ -737,6 +770,7 @@ __all__ = [
     'AUTH_UPDATE_EMAIL_DOC',
     'AUTH_UPDATE_PASSWORD_DOC',
     'CHARACTER_CREATE_DOC',
+    'CHARACTER_LIST_DOC',
     'SCRIPT_CREATE_DOC',
     'SCRIPT_LIST_DOC',
     'SCRIPT_DETAIL_DOC',
