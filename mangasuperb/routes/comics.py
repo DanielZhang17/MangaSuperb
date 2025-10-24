@@ -11,6 +11,7 @@ from flask_login import current_user, login_required
 
 from mangasuperb.extensions import db
 from mangasuperb.services.generation import validate_aspect_ratio
+from mangasuperb.services.jobs import bootstrap_comic_workflow
 from models import Comic, Script
 from swagger import COMIC_CREATE_DOC, COMIC_DETAIL_DOC, COMIC_LIST_DOC
 
@@ -64,6 +65,8 @@ def create_comic() -> Any:
 
     try:
         db.session.add_all([script, comic])
+        db.session.flush()
+        bootstrap_comic_workflow(comic)
         db.session.commit()
     except Exception as exc:  # pragma: no cover - database failure
         db.session.rollback()

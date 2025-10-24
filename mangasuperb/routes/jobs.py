@@ -16,6 +16,7 @@ from mangasuperb.services.generation import (
     generate_script_from_prompt,
     validate_aspect_ratio,
 )
+from mangasuperb.services.jobs import enqueue_comic_workflow
 from models import Comic, Script
 from swagger import JOB_CREATE_DOC, JOB_STATUS_DOC
 
@@ -74,36 +75,33 @@ def create_job() -> Any:
             db.session.add_all([script, comic])
             db.session.flush()
 
-            from mangasuperb.services.jobs import process_manga_generation
-
             queue = current_app.extensions["rq_queue"]
-            job = queue.enqueue(
-                process_manga_generation,
-                comic_id=comic.id,
-                api_key=api_key,
-                model_name=model_name,
-                job_timeout=current_app.config["RQ_JOB_TIMEOUT"],
-                result_ttl=current_app.config["RQ_RESULT_TTL"],
+            pipeline_jobs = enqueue_comic_workflow(
+                queue,
+                comic,
+                api_key,
+                image_model=current_app.config.get("GEMINI_IMAGE_MODEL"),
             )
-
-            comic.job_id = job.id
-            db.session.commit()
+            job_id = pipeline_jobs["render_job_id"]
+            db.session.refresh(comic)
+            db.session.refresh(script)
 
         except Exception as exc:  # pragma: no cover - database/queue errors
             db.session.rollback()
             logger.exception("Failed to persist job resources")
             raise
 
-        logger.info("Job enqueued: %s", job.id)
+        logger.info("Job enqueued: %s", job_id)
         logger.info("=== Job created successfully ===")
 
         return jsonify(
             {
-                "job_id": job.id,
+                "job_id": job_id,
                 "comic_id": comic.id,
                 "script_id": script.id,
                 "status": "pending",
                 "script": manga_script,
+                "stage_jobs": pipeline_jobs,
             }
         ), 201
 
