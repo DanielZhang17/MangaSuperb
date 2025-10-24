@@ -4,14 +4,18 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import zipfile
 from collections.abc import Iterable
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Any
+from io import BytesIO
+from typing import Any, Sequence
 
 import google.generativeai as genai
 from flask import current_app
 from sqlalchemy import func
+
+from PIL import Image, UnidentifiedImageError
 
 from config import Config
 from mangasuperb.extensions import db
@@ -67,7 +71,7 @@ def _gemini_api_key() -> str:
     return api_key
 
 
-WORKFLOW_STAGES = ("outline", "shots", "render")
+WORKFLOW_STAGES = ("outline", "shots", "render", "export")
 PANELS_PER_PAGE = 4
 LAYOUT_INSTRUCTIONS = {
     "auto-grid": (
@@ -184,6 +188,37 @@ def build_page_render_prompt(
     return "\n\n".join(section for section in sections if section)
 
 
+def _extract_text_from_response(response: Any) -> str:
+    text = getattr(response, "text", "") or ""
+    if text:
+        return text.strip()
+
+    candidates = getattr(response, "candidates", None) or []
+    chunks: list[str] = []
+    for candidate in candidates:
+        content = getattr(candidate, "content", None)
+        parts = getattr(content, "parts", None) or []
+        for part in parts:
+            part_text = getattr(part, "text", None)
+            if part_text:
+                chunks.append(part_text)
+    return "\n".join(chunk.strip() for chunk in chunks if chunk).strip()
+
+
+def _panel_summary_lines(panels: Sequence[ComicPanelShot]) -> list[str]:
+    lines: list[str] = []
+    for panel in panels:
+        page_no = panel.page_number if panel.page_number is not None else "?"
+        panel_no = panel.panel_number if panel.panel_number is not None else panel.sequence_index
+        description = panel.description or "Description missing"
+        dialogue = panel.dialogue or ""
+        parts = [f"Page {page_no} Panel {panel_no}: {description}"]
+        if dialogue:
+            parts.append(f"Dialogue: {dialogue}")
+        lines.append(" ".join(parts))
+    return lines
+
+
 def bootstrap_comic_workflow(comic: Comic) -> None:
     """Ensure workflow stage rows exist for the supplied comic."""
 
@@ -241,21 +276,17 @@ def _set_stage_status(comic: Comic, stage: str, status: str, *, error: str | Non
     elif status == "completed":
         stage_row.completed_at = now
         stage_row.error_message = None
-        if stage == "render":
+        idx = WORKFLOW_STAGES.index(stage) if stage in WORKFLOW_STAGES else -1
+        if idx >= 0 and idx + 1 < len(WORKFLOW_STAGES):
+            comic.workflow_stage = WORKFLOW_STAGES[idx + 1]
+            comic.workflow_status = "pending"
+            comic.status = "processing"
+            comic.error_message = None
+        else:
             comic.workflow_stage = stage
             comic.workflow_status = status
             comic.status = "completed"
             comic.completed_at = now
-            comic.error_message = None
-        else:
-            idx = WORKFLOW_STAGES.index(stage) if stage in WORKFLOW_STAGES else -1
-            if idx >= 0 and idx + 1 < len(WORKFLOW_STAGES):
-                comic.workflow_stage = WORKFLOW_STAGES[idx + 1]
-                comic.workflow_status = "pending"
-            else:
-                comic.workflow_stage = stage
-                comic.workflow_status = status
-            comic.status = "processing"
             comic.error_message = None
     elif status == "failed":
         stage_row.completed_at = now
@@ -472,6 +503,60 @@ def enqueue_story_optimization(queue, comic: Comic) -> dict[str, str]:
     db.session.commit()
 
     return {"outline_job_id": outline_job.id, "shot_job_id": shots_job.id}
+
+
+def enqueue_publish_workflow(
+    queue,
+    comic: Comic,
+    *,
+    image_model: str | None = None,
+    make_public: bool = True,
+) -> dict[str, str]:
+    """Schedule export, cover generation, and publish finalisation jobs."""
+
+    bootstrap_comic_workflow(comic)
+    db.session.flush()
+
+    timeout = current_app.config["RQ_JOB_TIMEOUT"]
+    result_ttl = current_app.config["RQ_RESULT_TTL"]
+
+    export_job = queue.enqueue(
+        process_export_stage,
+        comic_id=comic.id,
+        job_timeout=timeout,
+        result_ttl=result_ttl,
+        description=f"Export bundle for comic {comic.id}",
+    )
+    _assign_stage_job(comic, "export", export_job.id)
+
+    cover_job = queue.enqueue(
+        process_cover_generation,
+        comic_id=comic.id,
+        image_model=image_model,
+        depends_on=export_job,
+        job_timeout=timeout,
+        result_ttl=result_ttl,
+        description=f"Generate cover for comic {comic.id}",
+    )
+
+    publish_job = queue.enqueue(
+        finalize_publish_stage,
+        comic_id=comic.id,
+        make_public=make_public,
+        depends_on=cover_job,
+        job_timeout=timeout,
+        result_ttl=result_ttl,
+        description=f"Finalize publish for comic {comic.id}",
+    )
+
+    comic.job_id = publish_job.id
+    db.session.commit()
+
+    return {
+        "export_job_id": export_job.id,
+        "cover_job_id": cover_job.id,
+        "publish_job_id": publish_job.id,
+    }
 
 
 def process_outline_stage(comic_id: int) -> dict[str, Any]:
@@ -867,6 +952,280 @@ def process_page_render_stage(
                 "page_number": page_number,
                 "error": str(exc),
             }
+
+
+def _load_page_images(storage, pages: Sequence[ComicPage]) -> list[tuple[int, bytes]]:
+    payload: list[tuple[int, bytes]] = []
+    for page in pages:
+        data = storage.download_file(page.image_url)
+        if not data:
+            raise ValueError(f"Failed to download image for page {page.page_number}")
+        payload.append((page.page_number, data))
+    return payload
+
+
+def _build_pdf_bytes(image_payload: list[tuple[int, bytes]]) -> bytes:
+    if not image_payload:
+        raise ValueError("No images supplied for PDF export")
+
+    pdf_buffer = BytesIO()
+    images: list[Image.Image] = []
+    try:
+        for _, data in image_payload:
+            with Image.open(BytesIO(data)) as img:
+                converted = img.convert("RGB")
+                images.append(converted)
+
+        first_image, *others = images
+        if others:
+            first_image.save(pdf_buffer, format="PDF", save_all=True, append_images=others)
+        else:
+            first_image.save(pdf_buffer, format="PDF")
+    except UnidentifiedImageError as exc:
+        raise ValueError("One of the page images is not a valid image") from exc
+    finally:
+        for image in images:
+            try:
+                image.close()
+            except Exception:  # pragma: no cover - cleanup
+                pass
+
+    return pdf_buffer.getvalue()
+
+
+def process_export_stage(comic_id: int) -> dict[str, Any]:
+    """Bundle rendered comic pages into ZIP and PDF artifacts."""
+
+    with _application_context():
+        logger.info("=== Export stage started for comic_id=%s ===", comic_id)
+
+        comic: Comic | None = db.session.get(Comic, comic_id)
+        if not comic:
+            raise ValueError(f"Comic {comic_id} not found")
+
+        pages = (
+            ComicPage.query.filter_by(comic_id=comic_id)
+            .order_by(ComicPage.page_number)
+            .all()
+        )
+
+        if not pages:
+            raise ValueError("No rendered pages available for export")
+
+        storage = _get_storage()
+
+        try:
+            _set_stage_status(comic, "export", "in_progress")
+            db.session.commit()
+
+            image_payload = _load_page_images(storage, pages)
+
+            zip_buffer = BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+                for page_number, data in image_payload:
+                    archive_name = f"page-{page_number:03d}.png"
+                    bundle.writestr(archive_name, data)
+
+            pdf_bytes = _build_pdf_bytes(image_payload)
+            zip_bytes = zip_buffer.getvalue()
+
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            base_name = f"comic_{comic_id}_{timestamp}"
+
+            pdf_url = storage.upload_file(
+                pdf_bytes,
+                f"{base_name}.pdf",
+                content_type="application/pdf",
+                prefix="manga/exports",
+            )
+            zip_url = storage.upload_file(
+                zip_bytes,
+                f"{base_name}.zip",
+                content_type="application/zip",
+                prefix="manga/exports",
+            )
+
+            if not pdf_url or not zip_url:
+                raise ValueError("Failed to upload export bundles to storage")
+
+            comic.pdf_url = pdf_url
+            comic.zip_url = zip_url
+            db.session.flush()
+            _set_stage_status(comic, "export", "completed")
+            db.session.commit()
+
+            logger.info("=== Export stage completed for comic_id=%s ===", comic_id)
+            return {
+                "status": "completed",
+                "comic_id": comic_id,
+                "pdf_url": pdf_url,
+                "zip_url": zip_url,
+            }
+        except Exception as exc:
+            logger.exception("Export stage failed for comic_id=%s", comic_id)
+            db.session.rollback()
+
+            comic = db.session.get(Comic, comic_id)
+            if comic:
+                _set_stage_status(comic, "export", "failed", error=str(exc))
+                db.session.commit()
+
+            return {"status": "failed", "comic_id": comic_id, "error": str(exc)}
+
+
+def process_cover_generation(
+    comic_id: int,
+    *,
+    image_model: str | None = None,
+) -> dict[str, Any]:
+    """Generate a public-facing cover image for a comic."""
+
+    with _application_context():
+        logger.info("=== Cover generation started for comic_id=%s ===", comic_id)
+
+        comic: Comic | None = db.session.get(Comic, comic_id)
+        if not comic:
+            raise ValueError(f"Comic {comic_id} not found")
+
+        panels = (
+            ComicPanelShot.query.filter_by(comic_id=comic_id)
+            .order_by(ComicPanelShot.sequence_index)
+            .all()
+        )
+
+        if not panels:
+            raise ValueError("Cannot generate cover without panel context")
+
+        try:
+            api_key = _gemini_api_key()
+            genai.configure(api_key=api_key)
+
+            text_model_name = _config_value("GEMINI_SCRIPT_MODEL", Config.GEMINI_SCRIPT_MODEL)
+            text_model = genai.GenerativeModel(text_model_name)
+
+            summary_prompt = (
+                "You are a manga editor distilling a finished comic into a single evocative cover brief.\n"
+                f"Title: {comic.title}\n"
+                f"Target art style: {comic.style_description}\n"
+                "Describe the central conflict, mood, and key characters in under 80 words.\n"
+                "Emphasise imagery that would inspire a striking manga cover illustration.\n\n"
+                "Story outline:\n"
+                + "\n".join(_panel_summary_lines(panels))
+            )
+
+            summary_response = text_model.generate_content(summary_prompt)
+            summary_text = _extract_text_from_response(summary_response)
+            if not summary_text:
+                raise ValueError("Gemini summary was empty")
+
+            image_model_name = image_model or _config_value(
+                "GEMINI_IMAGE_MODEL", Config.GEMINI_IMAGE_MODEL
+            )
+            image_model_client = genai.GenerativeModel(image_model_name)
+
+            cover_prompt = (
+                f"Design a finished manga cover for '{comic.title}'.\n"
+                f"Narrative summary: {summary_text}\n"
+                f"Visual direction: {comic.style_description}.\n"
+                "Focus on the lead characters in a dramatic composition with space for title typography at the top."
+            )
+
+            result = image_model_client.generate_content(cover_prompt)
+
+            img_data: bytes | None = None
+            if result.candidates:
+                candidate = result.candidates[0]
+                content = getattr(candidate, "content", None)
+                if content and content.parts:
+                    for part in content.parts:
+                        inline = getattr(part, "inline_data", None)
+                        if inline and inline.data:
+                            image_data = inline.data
+                            if isinstance(image_data, str):
+                                img_data = base64.b64decode(image_data)
+                            else:
+                                img_data = image_data
+                            break
+
+            if not img_data:
+                raise ValueError("No cover image data returned from Gemini")
+
+            filename = f"comic_{comic_id}_cover_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.png"
+            storage = _get_storage()
+            cover_url = storage.upload_image(
+                image_data=img_data,
+                filename=filename,
+                content_type="image/png",
+            )
+
+            if not cover_url:
+                raise ValueError("Failed to upload cover image to storage")
+
+            comic.cover_image_url = cover_url
+            db.session.commit()
+
+            logger.info("=== Cover generation completed for comic_id=%s ===", comic_id)
+            return {
+                "status": "completed",
+                "comic_id": comic_id,
+                "cover_image_url": cover_url,
+                "summary": summary_text,
+            }
+        except Exception as exc:
+            logger.exception("Cover generation failed for comic_id=%s", comic_id)
+            db.session.rollback()
+            return {"status": "failed", "comic_id": comic_id, "error": str(exc)}
+
+
+def finalize_publish_stage(
+    comic_id: int,
+    *,
+    make_public: bool = True,
+) -> dict[str, Any]:
+    """Mark a comic as published and ready for public listing."""
+
+    with _application_context():
+        logger.info("=== Publish finalisation started for comic_id=%s ===", comic_id)
+
+        comic: Comic | None = db.session.get(Comic, comic_id)
+        if not comic:
+            raise ValueError(f"Comic {comic_id} not found")
+
+        try:
+            if make_public:
+                missing_assets: list[str] = []
+                if not comic.pdf_url:
+                    missing_assets.append("pdf")
+                if not comic.zip_url:
+                    missing_assets.append("zip")
+                if not comic.cover_image_url:
+                    missing_assets.append("cover")
+                if missing_assets:
+                    raise ValueError(
+                        "Cannot publish comic without assets: " + ", ".join(sorted(missing_assets))
+                    )
+
+                comic.is_public = True
+                comic.published_at = comic.published_at or datetime.utcnow()
+            else:
+                comic.is_public = False
+                comic.published_at = None
+
+            db.session.commit()
+
+            logger.info("=== Publish finalisation completed for comic_id=%s ===", comic_id)
+            return {
+                "status": "completed",
+                "comic_id": comic_id,
+                "is_public": comic.is_public,
+                "published_at": (
+                    comic.published_at.isoformat() if comic.published_at else None
+                ),
+            }
+        except Exception as exc:
+            logger.exception("Publish finalisation failed for comic_id=%s", comic_id)
+            db.session.rollback()
+            return {"status": "failed", "comic_id": comic_id, "error": str(exc)}
 
 
 def set_comic_stage_status(

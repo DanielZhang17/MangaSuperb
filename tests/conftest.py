@@ -1,7 +1,7 @@
 """Shared pytest fixtures for MangaSuperb tests."""
 from __future__ import annotations
 
-from collections.abc import Generator
+from typing import Generator
 from types import SimpleNamespace
 
 import pytest
@@ -40,6 +40,22 @@ class DummyStorage:
 
     def __init__(self) -> None:
         self.uploads: list[SimpleNamespace] = []
+        self.files: dict[str, bytes] = {}
+        self.public_url = "https://cdn.example.com"
+        self.bucket_name = "dummy"
+
+    def _store(self, filename: str, data: bytes, content_type: str) -> str:
+        url = f"{self.public_url}/{filename}"
+        entry = SimpleNamespace(
+            image_data=data,
+            filename=filename,
+            content_type=content_type,
+            url=url,
+        )
+        self.uploads.append(entry)
+        self.files[url] = data
+        self.files[filename] = data
+        return url
 
     def upload_image(
         self,
@@ -48,10 +64,21 @@ class DummyStorage:
         *,
         content_type: str = "image/png",
     ) -> str:
-        self.uploads.append(
-            SimpleNamespace(image_data=image_data, filename=filename, content_type=content_type)
-        )
-        return f"https://cdn.example.com/{filename}"
+        return self._store(filename, image_data, content_type)
+
+    def upload_file(
+        self,
+        file_data: bytes,
+        filename: str,
+        *,
+        content_type: str = "application/octet-stream",
+        prefix: str | None = None,
+        cache_control: str | None = None,
+    ) -> str:
+        return self._store(filename, file_data, content_type)
+
+    def download_file(self, url_or_key: str) -> bytes | None:
+        return self.files.get(url_or_key)
 
 
 @pytest.fixture

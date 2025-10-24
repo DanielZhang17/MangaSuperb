@@ -176,6 +176,10 @@ class Comic(db.Model):
     aspect_ratio = db.Column(db.String(5), nullable=False, default='16:9')
 
     pdf_url = db.Column(db.String(255), nullable=True)
+    zip_url = db.Column(db.String(255), nullable=True)
+    cover_image_url = db.Column(db.String(255), nullable=True)
+    is_public = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    published_at = db.Column(db.DateTime(timezone=True), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     # RQ Job tracking
@@ -244,6 +248,10 @@ class Comic(db.Model):
             'style_description': self.style_description,
             'aspect_ratio': self.aspect_ratio,
             'pdf_url': self.pdf_url,
+            'zip_url': self.zip_url,
+            'cover_image_url': self.cover_image_url,
+            'is_public': self.is_public,
+            'published_at': self.published_at.isoformat() if self.published_at else None,
             'job_id': self.job_id,
             'error_message': self.error_message,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -275,6 +283,18 @@ class Comic(db.Model):
                 if self.character_links
                 else []
             ),
+        }
+
+    def to_public_dict(self):
+        return {
+            'id': self.id,
+            'title': self.title,
+            'cover_image_url': self.cover_image_url,
+            'pdf_url': self.pdf_url,
+            'zip_url': self.zip_url,
+            'published_at': self.published_at.isoformat() if self.published_at else None,
+            'style_description': self.style_description,
+            'aspect_ratio': self.aspect_ratio,
         }
 
 

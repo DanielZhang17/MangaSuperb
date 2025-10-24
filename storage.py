@@ -7,8 +7,8 @@ from botocore.client import Config as BotoConfig
 from botocore.exceptions import ClientError
 import logging
 from typing import Optional
-import os
 from datetime import datetime
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -39,27 +39,23 @@ class R2Storage:
 
         logger.info(f"R2 Storage initialized for bucket: {self.bucket_name}")
 
-    def upload_image(
+    def _build_object_key(self, filename: str, prefix: Optional[str] = None) -> str:
+        timestamp = datetime.utcnow().strftime('%Y/%m/%d')
+        segments = [segment.strip('/') for segment in [prefix or 'manga', timestamp, filename] if segment]
+        return '/'.join(segments)
+
+    def upload_file(
         self,
-        image_data: bytes,
+        file_data: bytes,
         filename: str,
-        content_type: str = 'image/png'
+        *,
+        content_type: str = 'application/octet-stream',
+        prefix: Optional[str] = None,
+        cache_control: str = 'public, max-age=31536000',
     ) -> Optional[str]:
-        """
-        Upload image to R2
-
-        Args:
-            image_data: Image bytes
-            filename: Filename to use in R2
-            content_type: MIME type of the image
-
-        Returns:
-            Public URL of the uploaded image, or None if failed
-        """
+        """Upload arbitrary binary data to R2 and return the public URL."""
         try:
-            # Generate a unique path
-            timestamp = datetime.utcnow().strftime('%Y/%m/%d')
-            key = f"manga/{timestamp}/{filename}"
+            key = self._build_object_key(filename, prefix=prefix)
 
             logger.info(f"Uploading image to R2: {key}")
 
@@ -67,9 +63,9 @@ class R2Storage:
             self.s3_client.put_object(
                 Bucket=self.bucket_name,
                 Key=key,
-                Body=image_data,
+                Body=file_data,
                 ContentType=content_type,
-                CacheControl='public, max-age=31536000',  # 1 year cache
+                CacheControl=cache_control,
             )
 
             # Construct public URL
@@ -84,6 +80,21 @@ class R2Storage:
         except Exception as e:
             logger.error(f"Unexpected error uploading to R2: {str(e)}")
             return None
+
+    def upload_image(
+        self,
+        image_data: bytes,
+        filename: str,
+        content_type: str = 'image/png'
+    ) -> Optional[str]:
+        """Upload image to R2"""
+
+        return self.upload_file(
+            file_data=image_data,
+            filename=filename,
+            content_type=content_type,
+            prefix='manga',
+        )
 
     def delete_image(self, key: str) -> bool:
         """
@@ -119,3 +130,36 @@ class R2Storage:
             return True
         except ClientError:
             return False
+
+    def _resolve_key(self, url_or_key: str) -> Optional[str]:
+        if not url_or_key:
+            return None
+
+        cleaned = url_or_key.strip()
+        if cleaned.startswith(self.public_url):
+            return cleaned[len(self.public_url):].lstrip('/')
+
+        parsed = urlparse(cleaned)
+        if parsed.scheme and parsed.netloc:
+            # External URL that does not belong to this bucket
+            return None
+
+        return cleaned
+
+    def download_file(self, url_or_key: str) -> Optional[bytes]:
+        """Fetch an object from R2 using either its public URL or object key."""
+
+        key = self._resolve_key(url_or_key)
+        if not key:
+            logger.error("Cannot resolve object key for download: %s", url_or_key)
+            return None
+
+        try:
+            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
+            body = response.get('Body')
+            if body:
+                return body.read()
+            logger.error("No body returned for key %s", key)
+        except ClientError as exc:
+            logger.error("Failed to download from R2: %s", exc)
+        return None

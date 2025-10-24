@@ -106,12 +106,18 @@ CREATE TABLE comics (
     style_description TEXT NOT NULL DEFAULT 'Classic manga black and white linework',
     aspect_ratio VARCHAR(5) NOT NULL DEFAULT '16:9' CHECK (aspect_ratio IN ('16:9', '9:16', '1:1')),
     pdf_url VARCHAR(255),
+    zip_url VARCHAR(255),
+    cover_image_url VARCHAR(255),
+    is_public BOOLEAN NOT NULL DEFAULT FALSE,
+    published_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     job_id VARCHAR(36) UNIQUE,
     error_message TEXT,
     started_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ
 );
+
+CREATE INDEX IF NOT EXISTS idx_comics_is_public ON comics (is_public);
 
 
 --
