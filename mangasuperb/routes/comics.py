@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from flasgger import swag_from
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
 
 from mangasuperb.extensions import db
@@ -16,7 +16,10 @@ from mangasuperb.routes._character_utils import (
     resolve_character_assignments,
 )
 from mangasuperb.services.generation import validate_aspect_ratio
-from mangasuperb.services.jobs import bootstrap_comic_workflow
+from mangasuperb.services.jobs import (
+    bootstrap_comic_workflow,
+    enqueue_publish_workflow,
+)
 from models import Comic, Script
 from swagger import COMIC_CREATE_DOC, COMIC_DETAIL_DOC, COMIC_LIST_DOC
 
@@ -121,3 +124,64 @@ def list_comics() -> Any:
     except Exception as exc:  # pragma: no cover - database failure
         logger.error("Error listing comics: %s", exc)
         return jsonify({"error": str(exc)}), 500
+
+
+@bp.post("/<int:comic_id>/publish")
+@login_required
+def publish_comic(comic_id: int) -> Any:
+    comic = db.session.get(Comic, comic_id)
+    if not comic or comic.user_id != current_user.id:
+        return jsonify({"error": "Comic not found"}), 404
+
+    render_stage = next(
+        (stage for stage in comic.workflow_stages if stage.stage == "render"),
+        None,
+    )
+    if not render_stage or render_stage.status != "completed":
+        return jsonify({"error": "Render stage must complete before publishing"}), 409
+
+    if comic.is_public and comic.pdf_url and comic.zip_url and comic.cover_image_url:
+        return jsonify({"comic": comic.to_dict(), "message": "Comic already published"})
+
+    queue = current_app.extensions.get("rq_queue")
+    if not queue:
+        return jsonify({"error": "Background queue is not configured"}), 503
+
+    payload = request.get_json(silent=True) or {}
+    image_model = payload.get("image_model")
+    make_public = payload.get("make_public", True)
+
+    try:
+        stage_jobs = enqueue_publish_workflow(
+            queue,
+            comic,
+            image_model=image_model,
+            make_public=bool(make_public),
+        )
+        db.session.refresh(comic)
+        return jsonify({"comic": comic.to_dict(), "stage_jobs": stage_jobs}), 202
+    except Exception as exc:  # pragma: no cover - queue failure
+        logger.exception("Failed to enqueue publish workflow for comic_id=%s", comic_id)
+        return jsonify({"error": "Failed to enqueue publish workflow"}), 500
+
+
+@bp.get("/public")
+def list_public_comics() -> Any:
+    comics = (
+        Comic.query.filter_by(is_public=True)
+        .order_by(Comic.published_at.desc(), Comic.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    return jsonify({
+        "comics": [comic.to_public_dict() for comic in comics],
+        "count": len(comics),
+    })
+
+
+@bp.get("/public/<int:comic_id>")
+def get_public_comic(comic_id: int) -> Any:
+    comic = db.session.get(Comic, comic_id)
+    if not comic or not comic.is_public:
+        return jsonify({"error": "Comic not found"}), 404
+    return jsonify(comic.to_public_dict())

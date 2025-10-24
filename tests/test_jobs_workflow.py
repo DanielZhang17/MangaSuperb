@@ -28,6 +28,11 @@ class DummyModelResult(SimpleNamespace):
     """Simple container for fake Gemini responses."""
 
 
+MINI_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC"
+)
+
+
 class DummyGenerativeModel:
     """Track prompts and return inline image data."""
 
@@ -37,10 +42,36 @@ class DummyGenerativeModel:
 
     def generate_content(self, prompt: str) -> DummyModelResult:
         self._store.append(prompt)
-        payload = base64.b64encode(f"image-{len(self._store)}".encode())
+        payload = base64.b64encode(MINI_PNG)
         inline = SimpleNamespace(data=payload.decode("utf-8"))
         part = SimpleNamespace(inline_data=inline)
         content = SimpleNamespace(parts=[part])
+        candidate = SimpleNamespace(content=content)
+        return DummyModelResult(candidates=[candidate])
+
+
+class DummyTextModel:
+    """Return a canned text response while recording prompts."""
+
+    def __init__(self, store: list[tuple[str, str]]) -> None:
+        self._store = store
+
+    def generate_content(self, prompt: str):
+        self._store.append(("text", prompt))
+        return SimpleNamespace(text="The hero confronts looming shadows to protect the city.")
+
+
+class DummyCoverImageModel:
+    """Return image bytes while tracking prompts for cover generation."""
+
+    def __init__(self, store: list[tuple[str, str]]) -> None:
+        self._store = store
+
+    def generate_content(self, prompt: str) -> DummyModelResult:
+        self._store.append(("image", prompt))
+        payload = base64.b64encode(MINI_PNG)
+        inline = SimpleNamespace(inline_data=SimpleNamespace(data=payload.decode("utf-8")))
+        content = SimpleNamespace(parts=[inline])
         candidate = SimpleNamespace(content=content)
         return DummyModelResult(candidates=[candidate])
 
@@ -94,6 +125,17 @@ def _patch_genai(monkeypatch: pytest.MonkeyPatch, store: list[str]) -> None:
     )
 
 
+def _patch_cover_models(monkeypatch: pytest.MonkeyPatch, store: list[tuple[str, str]]) -> None:
+    monkeypatch.setattr(jobs.genai, "configure", lambda api_key: None)
+
+    def _factory(model_name: str):
+        if model_name == "test-script-model":
+            return DummyTextModel(store)
+        return DummyCoverImageModel(store)
+
+    monkeypatch.setattr(jobs.genai, "GenerativeModel", _factory)
+
+
 def test_sequential_workflow_generates_resources(
     app,
     comic: Comic,
@@ -105,6 +147,10 @@ def test_sequential_workflow_generates_resources(
     _patch_genai(monkeypatch, prompts)
 
     with app.app_context():
+        comic_row = db.session.get(Comic, comic.id)
+        jobs.bootstrap_comic_workflow(comic_row)
+        db.session.commit()
+
         outline_result = jobs.process_outline_stage(comic.id)
         assert outline_result["status"] == "completed"
         sections = ComicOutlineSection.query.filter_by(comic_id=comic.id).all()
@@ -122,15 +168,14 @@ def test_sequential_workflow_generates_resources(
             page_number=1,
             image_model="test-model",
         )
-        assert render_result["status"] == "completed"
+        assert render_result["status"] == "processing"
         assert len(prompts) == 1
         assert dummy_storage.uploads[0].filename.endswith(".png")
 
         refreshed_comic = db.session.get(Comic, comic.id)
-        assert refreshed_comic.status == "completed"
-        assert refreshed_comic.workflow_stage == "render"
-        assert refreshed_comic.workflow_status == "completed"
-        assert refreshed_comic.completed_at is not None
+        assert refreshed_comic.status == "processing"
+        assert refreshed_comic.workflow_stage == "export"
+        assert refreshed_comic.workflow_status == "pending"
 
         workflow_rows = {
             row.stage: row for row in ComicWorkflowStage.query.filter_by(comic_id=comic.id)
@@ -138,11 +183,28 @@ def test_sequential_workflow_generates_resources(
         assert workflow_rows["outline"].status == "completed"
         assert workflow_rows["shots"].status == "completed"
         assert workflow_rows["render"].status == "completed"
+        assert workflow_rows["export"].status == "pending"
 
         page = ComicPage.query.filter_by(comic_id=comic.id, page_number=1).first()
         assert page is not None
         stored = json.loads(page.panel_text)
         assert stored[0]["dialogue"] == "Line 1"
+
+        export_result = jobs.process_export_stage(comic.id)
+        assert export_result["status"] == "completed"
+
+        refreshed_comic = db.session.get(Comic, comic.id)
+        assert refreshed_comic.status == "completed"
+        assert refreshed_comic.workflow_stage == "export"
+        assert refreshed_comic.workflow_status == "completed"
+        assert refreshed_comic.pdf_url is not None
+        assert refreshed_comic.zip_url is not None
+
+        workflow_rows = {
+            row.stage: row for row in ComicWorkflowStage.query.filter_by(comic_id=comic.id)
+        }
+        assert workflow_rows["export"].status == "completed"
+        assert len(dummy_storage.uploads) == 3  # page image + PDF + ZIP
 
 
 def test_requeue_render_includes_context(
@@ -162,6 +224,10 @@ def test_requeue_render_includes_context(
     }
 
     with app.app_context():
+        comic_row = db.session.get(Comic, comic.id)
+        jobs.bootstrap_comic_workflow(comic_row)
+        db.session.commit()
+
         script = db.session.get(Script, comic.script_id)
         payload = json.loads(script.content)
         payload["panels"].append(extra_panel)
@@ -187,19 +253,55 @@ def test_requeue_render_includes_context(
             page_number=2,
             image_model="test-model",
         )
-        assert second_pass["status"] == "completed"
+        assert second_pass["status"] == "processing"
         assert len(prompts) == 2
         assert "Previous pages context" in prompts[1]
         assert "Page 1 Panel 1" in prompts[1]
 
         refreshed_comic = db.session.get(Comic, comic.id)
-        assert refreshed_comic.workflow_status == "completed"
-        assert refreshed_comic.status == "completed"
+        assert refreshed_comic.workflow_stage == "export"
+        assert refreshed_comic.workflow_status == "pending"
+        assert refreshed_comic.status == "processing"
+
+        render_stage = (
+            ComicWorkflowStage.query.filter_by(comic_id=comic.id, stage="render").first()
+        )
+        assert render_stage is not None
+        assert render_stage.status == "completed"
 
         assert len(dummy_storage.uploads) == 2
 
-        total_pages = ComicPage.query.filter_by(comic_id=comic.id).count()
-        assert total_pages == 2
+
+def test_cover_generation_creates_cover_asset(
+    app,
+    comic: Comic,
+    dummy_storage,
+    monkeypatch,
+):
+    prompts: list[tuple[str, str]] = []
+    _patch_cover_models(monkeypatch, prompts)
+
+    with app.app_context():
+        comic_row = db.session.get(Comic, comic.id)
+        jobs.bootstrap_comic_workflow(comic_row)
+        db.session.commit()
+
+        jobs.process_outline_stage(comic.id)
+        jobs.process_shot_stage(comic.id)
+
+        cover_result = jobs.process_cover_generation(comic.id)
+        assert cover_result["status"] == "completed"
+        assert cover_result["cover_image_url"].endswith(".png")
+
+        refreshed_comic = db.session.get(Comic, comic.id)
+        assert refreshed_comic.cover_image_url is not None
+
+        assert prompts[0][0] == "text"
+        assert "Story outline" in prompts[0][1]
+        assert prompts[1][0] == "image"
+        assert "Design a finished manga cover" in prompts[1][1]
+
+        assert any("cover" in upload.filename for upload in dummy_storage.uploads)
 
 
 def test_render_prompt_includes_character_roster(
