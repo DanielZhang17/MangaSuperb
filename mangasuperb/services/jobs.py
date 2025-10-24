@@ -6,7 +6,7 @@ import json
 import logging
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import google.generativeai as genai
 from flask import current_app
@@ -40,6 +40,50 @@ def _get_storage():
     return storage
 
 
+def _collect_character_context(comic: Comic, script_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return a list of character dictionaries for prompt rendering."""
+
+    characters = script_data.get("characters")
+    collected: List[Dict[str, Any]] = []
+
+    if isinstance(characters, Iterable):
+        for entry in characters:
+            if isinstance(entry, dict):
+                collected.append(entry)
+
+    if collected:
+        return collected
+
+    return [link.to_summary() for link in comic.comic_characters]
+
+
+def _render_character_prompt(characters: Iterable[Dict[str, Any]]) -> str:
+    """Format characters for inclusion in generation prompts."""
+
+    lines: List[str] = []
+    for idx, character in enumerate(characters, start=1):
+        name = (character.get("name") or f"Character {idx}").strip()
+        role = (character.get("role") or "").strip()
+        description = (
+            character.get("optimized_description")
+            or character.get("description")
+            or ""
+        ).strip()
+        style_prompt = (character.get("style_prompt") or "").strip()
+
+        segments: List[str] = [name]
+        if role:
+            segments.append(f"Role: {role}")
+        if description:
+            segments.append(f"Bio: {description}")
+        if style_prompt:
+            segments.append(f"Visual cues: {style_prompt}")
+
+        lines.append(f"{idx}. {' | '.join(segments)}")
+
+    return "\n".join(lines)
+
+
 def process_manga_generation(comic_id: int, api_key: str, model_name: str) -> Dict[str, Any]:
     """Generate a full comic page for the provided comic."""
     with _application_context():
@@ -68,6 +112,8 @@ def process_manga_generation(comic_id: int, api_key: str, model_name: str) -> Di
                 script_data = json.loads(script.content)
             except json.JSONDecodeError:
                 raise ValueError("Script content is not valid JSON")
+
+            character_context = _collect_character_context(comic, script_data)
 
             panels = script_data.get("panels", [])
             if not panels:
@@ -105,6 +151,8 @@ def process_manga_generation(comic_id: int, api_key: str, model_name: str) -> Di
                     "left to right in manga style."
                 )
 
+            character_prompt = _render_character_prompt(character_context)
+
             image_prompt = f"""Generate a complete manga page with {num_panels} panels arranged as follows:
 
 {layout_instruction}
@@ -112,6 +160,9 @@ def process_manga_generation(comic_id: int, api_key: str, model_name: str) -> Di
 Title: {script_data.get('title', comic.title)}
 Overall Style: {script_data.get('style_notes') or comic.style_description}
 Preferred Aspect Ratio: {comic.aspect_ratio}
+
+Characters:
+{character_prompt or 'Use the established cast from the script and maintain consistent appearances.'}
 
 Panel Details:
 {chr(10).join(panels_description)}

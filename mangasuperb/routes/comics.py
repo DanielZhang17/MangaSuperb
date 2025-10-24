@@ -11,7 +11,8 @@ from flask_login import current_user, login_required
 
 from mangasuperb.extensions import db
 from mangasuperb.services.generation import validate_aspect_ratio
-from models import Comic, Script
+from models import Character, Comic, ComicCharacter, Script
+from ._payloads import normalize_character_payload
 from swagger import COMIC_CREATE_DOC, COMIC_DETAIL_DOC, COMIC_LIST_DOC
 
 logger = logging.getLogger(__name__)
@@ -41,11 +42,50 @@ def create_comic() -> Any:
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
+    raw_characters = data.get("characters")
+    if raw_characters is None:
+        raw_characters = data.get("character_ids")
+
+    try:
+        character_assignments = normalize_character_payload(raw_characters)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    character_lookup: dict[int, Character] = {}
+    character_summaries = []
+
+    if character_assignments:
+        character_assignments = sorted(character_assignments, key=lambda item: item["order"])
+        character_ids = [item["id"] for item in character_assignments]
+        characters = (
+            Character.query.filter(
+                Character.id.in_(character_ids),
+                Character.user_id == current_user.id,
+            ).all()
+        )
+        character_lookup = {character.id: character for character in characters}
+
+        missing = [str(cid) for cid in character_ids if cid not in character_lookup]
+        if missing:
+            return (
+                jsonify({"error": f"Character(s) not found or not owned: {', '.join(missing)}"}),
+                404,
+            )
+
+        for item in character_assignments:
+            character = character_lookup[item["id"]]
+            summary = character.to_summary()
+            summary.update({"role": item["role"], "order": item["order"]})
+            character_summaries.append(summary)
+
     script_payload = {
         "story": story,
         "style_description": style_description,
         "aspect_ratio": resolved_aspect_ratio,
     }
+
+    if character_summaries:
+        script_payload["characters"] = character_summaries
 
     script = Script(
         user_id=current_user.id,
@@ -61,6 +101,16 @@ def create_comic() -> Any:
         style_description=style_description,
         aspect_ratio=resolved_aspect_ratio,
     )
+
+    if character_assignments:
+        comic.comic_characters = [
+            ComicCharacter(
+                character=character_lookup[item["id"]],
+                sort_order=item["order"],
+                role=item["role"],
+            )
+            for item in character_assignments
+        ]
 
     try:
         db.session.add_all([script, comic])

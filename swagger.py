@@ -567,6 +567,35 @@ COMIC_CREATE_DOC = {
                         'enum': ['16:9', '9:16', '1:1'],
                         'example': '16:9'
                     },
+                    'characters': {
+                        'type': 'array',
+                        'description': (
+                            'Optional ordered character assignments. Each item may include a role '
+                            'and explicit order value; omitted orders follow list order.'
+                        ),
+                        'items': {
+                            'type': 'object',
+                            'required': ['id'],
+                            'properties': {
+                                'id': {'type': 'integer', 'example': 12},
+                                'role': {
+                                    'type': ['string', 'null'],
+                                    'example': 'Protagonist',
+                                },
+                                'order': {'type': 'integer', 'example': 0},
+                            },
+                        },
+                        'example': [
+                            {'id': 1, 'role': 'Protagonist', 'order': 0},
+                            {'id': 2, 'role': 'Mentor', 'order': 1},
+                        ],
+                    },
+                    'character_ids': {
+                        'type': 'array',
+                        'items': {'type': 'integer'},
+                        'description': 'Deprecated alias for characters; accepts ordered character identifiers.',
+                        'example': [1, 2, 3],
+                    },
                 },
             },
         }
@@ -587,6 +616,33 @@ COMIC_CREATE_DOC = {
                             'aspect_ratio': {'type': 'string'},
                             'script_id': {'type': 'integer'},
                             'created_at': {'type': ['string', 'null'], 'format': 'date-time'},
+                            'characters': {
+                                'type': 'array',
+                                'items': {
+                                    'type': 'object',
+                                    'properties': {
+                                        'id': {'type': 'integer'},
+                                        'name': {'type': 'string'},
+                                        'description': {'type': ['string', 'null']},
+                                        'style_prompt': {'type': ['string', 'null']},
+                                        'optimized_description': {'type': ['string', 'null']},
+                                        'image_url': {'type': ['string', 'null'], 'format': 'uri'},
+                                        'role': {'type': ['string', 'null']},
+                                        'order': {'type': 'integer'},
+                                    },
+                                },
+                                'example': [
+                                    {
+                                        'id': 1,
+                                        'name': 'Aiko',
+                                        'role': 'Protagonist',
+                                        'order': 0,
+                                        'description': 'Energetic hacker with neon cyber deck.',
+                                        'style_prompt': 'Sharp neon lines, layered street fashion.',
+                                        'image_url': 'https://cdn.example/aiko.png',
+                                    }
+                                ],
+                            },
                         },
                     },
                     'script': SCRIPT_CREATE_DOC['responses']['201']['schema']['properties']['script'],
@@ -667,6 +723,28 @@ JOB_CREATE_DOC = {
                         'type': 'string',
                         'enum': ['16:9', '9:16', '1:1'],
                         'example': '16:9'
+                    },
+                    'characters': {
+                        'type': 'array',
+                        'description': (
+                            'Optional ordered characters to ground the script and artwork. '
+                            'Each item may declare role and order to preserve appearance sequencing.'
+                        ),
+                        'items': {
+                            'type': 'object',
+                            'required': ['id'],
+                            'properties': {
+                                'id': {'type': 'integer'},
+                                'role': {'type': ['string', 'null']},
+                                'order': {'type': 'integer'},
+                            },
+                        },
+                        'example': [{'id': 7, 'role': 'Rival', 'order': 0}],
+                    },
+                    'character_ids': {
+                        'type': 'array',
+                        'items': {'type': 'integer'},
+                        'description': 'Deprecated alias for characters; accepts ordered identifiers.',
                     },
                 },
             },
