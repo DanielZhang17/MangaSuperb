@@ -2,9 +2,6 @@
 from __future__ import annotations
 
 import json
-from typing import List
-
-import pytest
 
 from mangasuperb.extensions import db
 from mangasuperb.services import jobs
@@ -21,7 +18,7 @@ from models import (
 
 
 def _build_script_payload(panel_count: int = 2) -> dict[str, object]:
-    panels: List[dict[str, str]] = []
+    panels: list[dict[str, str]] = []
     for idx in range(1, panel_count + 1):
         panels.append(
             {

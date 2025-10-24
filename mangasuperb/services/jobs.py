@@ -4,13 +4,13 @@ from __future__ import annotations
 import base64
 import json
 import logging
+from collections.abc import Iterable
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any
 
 import google.generativeai as genai
 from flask import current_app
-
 from sqlalchemy import func
 
 from config import Config
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 def _application_context():
     """Ensure a Flask application context is available."""
     try:
-        current_app.name
+        _ = current_app.name
         yield current_app
         return
     except RuntimeError:
@@ -55,11 +55,118 @@ def _get_storage():
 WORKFLOW_STAGES = ("outline", "shots", "render")
 PANELS_PER_PAGE = 4
 LAYOUT_INSTRUCTIONS = {
-    "auto-grid": "Arrange the panels evenly across the page in a balanced manga grid, keeping gutters consistent and reading right-to-left.",
-    "grid-2x2": "Arrange the panels in a 2x2 grid, reading order right-to-left along the top row and then the bottom row.",
-    "vertical": "Stack the panels vertically with cinematic pacing and generous space for dialogue balloons.",
-    "cinematic": "Use a cinematic layout with a wide establishing panel at the top followed by dynamic close-ups underneath.",
+    "auto-grid": (
+        "Arrange the panels evenly across the page in a balanced manga grid, "
+        "keeping gutters consistent and reading right-to-left."
+    ),
+    "grid-2x2": (
+        "Arrange the panels in a 2x2 grid, reading order right-to-left along the "
+        "top row and then the bottom row."
+    ),
+    "vertical": (
+        "Stack the panels vertically with cinematic pacing and generous space "
+        "for dialogue balloons."
+    ),
+    "cinematic": (
+        "Use a cinematic layout with a wide establishing panel at the top "
+        "followed by dynamic close-ups underneath."
+    ),
 }
+
+
+def build_character_prompt(characters: Iterable[Any]) -> str:
+    """Render a textual roster for prompts based on character metadata."""
+
+    entries: list[tuple[int, int, str]] = []
+    for idx, item in enumerate(characters, start=1):
+        character_obj: Character | None = None
+        role: str | None = None
+        order_index: int | None = None
+
+        if hasattr(item, "character") and isinstance(item.character, Character):
+            character_obj = item.character
+            role = getattr(item, "role", None)
+            order_index = getattr(item, "order_index", None)
+        elif isinstance(item, Character):
+            character_obj = item
+            role = getattr(item, "role", None)
+            order_index = getattr(item, "order_index", None)
+        else:
+            continue
+
+        if not character_obj:
+            continue
+
+        label = character_obj.name or f"Character {character_obj.id}"
+        if role:
+            label = f"{label} ({role})"
+
+        description = (
+            character_obj.optimized_description
+            or character_obj.description
+            or ""
+        ).strip()
+        style_prompt = (character_obj.style_prompt or "").strip()
+
+        details: list[str] = []
+        if description:
+            details.append(description)
+        if style_prompt:
+            details.append(f"Style cues: {style_prompt}")
+
+        entry_text = f"- {label}"
+        if details:
+            entry_text += f": {' '.join(details)}"
+
+        entries.append((order_index if order_index is not None else idx, idx, entry_text))
+
+    if not entries:
+        return ""
+
+    entries.sort(key=lambda item: (item[0], item[1]))
+    roster_lines = [text for _, _, text in entries]
+    return "Character roster:\n" + "\n".join(roster_lines)
+
+
+def build_page_render_prompt(
+    comic: Comic,
+    script_data: dict[str, Any],
+    page_number: int,
+    layout_instruction: str,
+    panel_lines: list[str],
+    context_block: str,
+) -> str:
+    """Compose the full prompt for image generation, including character context."""
+
+    sections: list[str] = []
+
+    character_prompt = build_character_prompt(comic.character_links)
+    if character_prompt:
+        sections.append(character_prompt)
+
+    title = script_data.get("title") or comic.title
+    style_notes = script_data.get("style_notes") or comic.style_description
+
+    base_prompt = (
+        f"Render page {page_number} of the manga \"{title}\" with the following layout:\n\n"
+        f"{layout_instruction}\n\n"
+        f"Overall Style: {style_notes}\n"
+        f"Preferred Aspect Ratio: {comic.aspect_ratio}\n\n"
+        f"Panel Details:\n{chr(10).join(panel_lines)}"
+    )
+    sections.append(base_prompt)
+
+    if context_block:
+        sections.append(context_block)
+
+    sections.append(
+        "Requirements:\n"
+        "- Maintain stylistic continuity with earlier pages\n"
+        "- Leave space for lettering and speech balloons\n"
+        "- Use high-contrast black and white manga illustration"
+    )
+
+    return "\n\n".join(section for section in sections if section)
 
 
 def bootstrap_comic_workflow(comic: Comic) -> None:
@@ -95,7 +202,7 @@ def _assign_stage_job(comic: Comic, stage: str, job_id: str) -> None:
     db.session.flush()
 
 
-def _set_stage_status(comic: Comic, stage: str, status: str, *, error: Optional[str] = None) -> None:
+def _set_stage_status(comic: Comic, stage: str, status: str, *, error: str | None = None) -> None:
     stage_row = _get_stage_row(comic, stage)
     now = datetime.utcnow()
 
@@ -147,7 +254,7 @@ def _set_stage_status(comic: Comic, stage: str, status: str, *, error: Optional[
     db.session.flush()
 
 
-def _load_script_payload(script: Script | None) -> Dict[str, Any]:
+def _load_script_payload(script: Script | None) -> dict[str, Any]:
     if not script or not script.content:
         return {}
 
@@ -157,8 +264,8 @@ def _load_script_payload(script: Script | None) -> Dict[str, Any]:
         return {"story": script.content}
 
 
-def _build_outline_sections(script_data: Dict[str, Any]) -> List[Dict[str, str]]:
-    sections: List[Dict[str, str]] = []
+def _build_outline_sections(script_data: dict[str, Any]) -> list[dict[str, str]]:
+    sections: list[dict[str, str]] = []
     panels = script_data.get("panels")
 
     if isinstance(panels, list) and panels:
@@ -169,7 +276,7 @@ def _build_outline_sections(script_data: Dict[str, Any]) -> List[Dict[str, str]]
                 or f"Beat {panel.get('panel_number') or idx}"
             )
 
-            summary_parts: List[str] = []
+            summary_parts: list[str] = []
             for key in ("scene", "summary", "description"):
                 value = panel.get(key)
                 if isinstance(value, str) and value.strip():
@@ -206,8 +313,8 @@ def _build_outline_sections(script_data: Dict[str, Any]) -> List[Dict[str, str]]
     return sections
 
 
-def _panel_payload_json(panels: List[ComicPanelShot]) -> str:
-    payload: List[Dict[str, Any]] = []
+def _panel_payload_json(panels: list[ComicPanelShot]) -> str:
+    payload: list[dict[str, Any]] = []
     for panel in panels:
         payload.append(
             {
@@ -227,8 +334,8 @@ def enqueue_comic_workflow(
     comic: Comic,
     api_key: str,
     *,
-    image_model: Optional[str] = None,
-) -> Dict[str, str]:
+    image_model: str | None = None,
+) -> dict[str, str]:
     """Schedule outline, shot refinement, and first render jobs for a comic."""
 
     bootstrap_comic_workflow(comic)
@@ -285,7 +392,7 @@ def enqueue_page_render(
     page_number: int,
     api_key: str,
     *,
-    image_model: Optional[str] = None,
+    image_model: str | None = None,
 ):
     """Schedule a render job for a specific comic page."""
 
@@ -316,7 +423,7 @@ def enqueue_page_render(
     return job
 
 
-def enqueue_story_optimization(queue, comic: Comic) -> Dict[str, str]:
+def enqueue_story_optimization(queue, comic: Comic) -> dict[str, str]:
     """Queue outline and shot refinement jobs without triggering renders."""
 
     bootstrap_comic_workflow(comic)
@@ -352,17 +459,17 @@ def enqueue_story_optimization(queue, comic: Comic) -> Dict[str, str]:
     return {"outline_job_id": outline_job.id, "shot_job_id": shots_job.id}
 
 
-def process_outline_stage(comic_id: int) -> Dict[str, Any]:
+def process_outline_stage(comic_id: int) -> dict[str, Any]:
     """Derive outline sections from a comic's script."""
 
     with _application_context():
         logger.info("=== Outline stage started for comic_id=%s ===", comic_id)
 
-        comic: Optional[Comic] = db.session.get(Comic, comic_id)
+        comic: Comic | None = db.session.get(Comic, comic_id)
         if not comic:
             raise ValueError(f"Comic {comic_id} not found")
 
-        script: Optional[Script] = db.session.get(Script, comic.script_id)
+        script: Script | None = db.session.get(Script, comic.script_id)
         if not script:
             raise ValueError(f"Script for comic {comic_id} not found")
 
@@ -379,7 +486,7 @@ def process_outline_stage(comic_id: int) -> Dict[str, Any]:
             ComicOutlineSection.query.filter_by(comic_id=comic_id).delete(synchronize_session=False)
             db.session.flush()
 
-            created_sections: List[ComicOutlineSection] = []
+            created_sections: list[ComicOutlineSection] = []
             for idx, section in enumerate(sections_data, start=1):
                 outline = ComicOutlineSection(
                     comic_id=comic_id,
@@ -413,17 +520,17 @@ def process_outline_stage(comic_id: int) -> Dict[str, Any]:
             return {"status": "failed", "comic_id": comic_id, "error": str(exc)}
 
 
-def process_shot_stage(comic_id: int) -> Dict[str, Any]:
+def process_shot_stage(comic_id: int) -> dict[str, Any]:
     """Convert outline sections into panel shots and layout suggestions."""
 
     with _application_context():
         logger.info("=== Shot refinement started for comic_id=%s ===", comic_id)
 
-        comic: Optional[Comic] = db.session.get(Comic, comic_id)
+        comic: Comic | None = db.session.get(Comic, comic_id)
         if not comic:
             raise ValueError(f"Comic {comic_id} not found")
 
-        script: Optional[Script] = db.session.get(Script, comic.script_id)
+        script: Script | None = db.session.get(Script, comic.script_id)
         if not script:
             raise ValueError(f"Script for comic {comic_id} not found")
 
@@ -458,9 +565,13 @@ def process_shot_stage(comic_id: int) -> Dict[str, Any]:
             db.session.flush()
 
             panel_payload = script_data.get("panels") if isinstance(script_data, dict) else None
-            created_panels: List[ComicPanelShot] = []
+            created_panels: list[ComicPanelShot] = []
             for idx, section in enumerate(outline_sections, start=1):
-                panel_info = panel_payload[idx - 1] if isinstance(panel_payload, list) and idx - 1 < len(panel_payload) else {}
+                panel_info = (
+                    panel_payload[idx - 1]
+                    if isinstance(panel_payload, list) and idx - 1 < len(panel_payload)
+                    else {}
+                )
                 description = (
                     panel_info.get("scene")
                     or panel_info.get("summary")
@@ -479,8 +590,10 @@ def process_shot_stage(comic_id: int) -> Dict[str, Any]:
                     outline_section_id=section.id,
                     sequence_index=idx,
                     description=(description or section.summary or "").strip(),
-                    dialogue=dialogue.strip() if isinstance(dialogue, str) else dialogue,
-                    camera_notes=camera_notes.strip() if isinstance(camera_notes, str) else camera_notes,
+                    dialogue=(dialogue.strip() if isinstance(dialogue, str) else dialogue),
+                    camera_notes=(
+                        camera_notes.strip() if isinstance(camera_notes, str) else camera_notes
+                    ),
                     style_notes=style_notes,
                     status="draft",
                 )
@@ -489,8 +602,8 @@ def process_shot_stage(comic_id: int) -> Dict[str, Any]:
 
             db.session.flush()
 
-            layouts: List[ComicPageLayout] = []
-            layout_by_page: Dict[int, ComicPageLayout] = {}
+            layouts: list[ComicPageLayout] = []
+            layout_by_page: dict[int, ComicPageLayout] = {}
             for panel in created_panels:
                 page_number = (panel.sequence_index - 1) // PANELS_PER_PAGE + 1
                 panel_number = ((panel.sequence_index - 1) % PANELS_PER_PAGE) + 1
@@ -545,8 +658,8 @@ def process_page_render_stage(
     page_number: int,
     api_key: str,
     *,
-    image_model: Optional[str] = None,
-) -> Dict[str, Any]:
+    image_model: str | None = None,
+) -> dict[str, Any]:
     """Render a comic page using existing panel shots and layout assignments."""
 
     with _application_context():
@@ -556,11 +669,11 @@ def process_page_render_stage(
             page_number,
         )
 
-        comic: Optional[Comic] = db.session.get(Comic, comic_id)
+        comic: Comic | None = db.session.get(Comic, comic_id)
         if not comic:
             raise ValueError(f"Comic {comic_id} not found")
 
-        script: Optional[Script] = db.session.get(Script, comic.script_id)
+        script: Script | None = db.session.get(Script, comic.script_id)
         if not script:
             raise ValueError(f"Script for comic {comic_id} not found")
 
@@ -586,7 +699,7 @@ def process_page_render_stage(
             if not panels:
                 raise ValueError("No panel shots assigned to this page")
 
-            panel_lines: List[str] = []
+            panel_lines: list[str] = []
             for panel in panels:
                 panel_index = panel.panel_number or panel.sequence_index
                 description = panel.description or "Scene description missing"
@@ -609,7 +722,7 @@ def process_page_render_stage(
                 .all()
             )
 
-            context_lines: List[str] = []
+            context_lines: list[str] = []
             for prev in previous_panels:
                 snippet = prev.dialogue or prev.description
                 if snippet:
@@ -634,25 +747,18 @@ def process_page_render_stage(
             model_name = image_model or Config.GEMINI_IMAGE_MODEL
             image_model_client = genai.GenerativeModel(model_name)
 
-            prompt = (
-                f"Render page {page_number} of the manga \"{script_data.get('title', comic.title)}\" with the following layout:\n\n"
-                f"{layout_instruction}\n\n"
-                f"Overall Style: {script_data.get('style_notes') or comic.style_description}\n"
-                f"Preferred Aspect Ratio: {comic.aspect_ratio}\n\n"
-                f"Panel Details:\n{chr(10).join(panel_lines)}\n"
-            )
-            if context_block:
-                prompt += f"\n{context_block}\n"
-            prompt += (
-                "\nRequirements:\n"
-                "- Maintain stylistic continuity with earlier pages\n"
-                "- Leave space for lettering and speech balloons\n"
-                "- Use high-contrast black and white manga illustration"
+            prompt = build_page_render_prompt(
+                comic,
+                script_data,
+                page_number,
+                layout_instruction,
+                panel_lines,
+                context_block,
             )
 
             result = image_model_client.generate_content(prompt)
 
-            img_data: Optional[bytes] = None
+            img_data: bytes | None = None
             if result.candidates:
                 candidate = result.candidates[0]
                 content = getattr(candidate, "content", None)
@@ -671,7 +777,8 @@ def process_page_render_stage(
                 raise ValueError("No image data returned from Gemini")
 
             storage = _get_storage()
-            filename = f"manga_page_{comic_id}_{page_number}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.png"
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            filename = f"manga_page_{comic_id}_{page_number}_{timestamp}.png"
             r2_url = storage.upload_image(
                 image_data=img_data,
                 filename=filename,
@@ -752,7 +859,7 @@ def set_comic_stage_status(
     stage: str,
     status: str,
     *,
-    error: Optional[str] = None,
+    error: str | None = None,
 ) -> None:
     """Expose stage status updates for synchronous flows."""
 
@@ -763,8 +870,8 @@ def process_character_image_generation(
     character_id: int,
     api_key: str,
     description: str,
-    reference_images: Iterable[Dict[str, str]],
-) -> Dict[str, Any]:
+    reference_images: Iterable[dict[str, str]],
+) -> dict[str, Any]:
     """Generate a character concept illustration using Gemini."""
     with _application_context():
         logger.info("=== Starting character image job character_id=%s ===", character_id)
@@ -789,7 +896,7 @@ def process_character_image_generation(
                 f"Character description:\n{description}"
             )
 
-            parts: list[Dict[str, Any]] = []
+            parts: list[dict[str, Any]] = []
             for idx, ref in enumerate(reference_images):
                 data = ref.get("data")
                 mime_type = ref.get("mime_type", "image/png")
@@ -805,7 +912,7 @@ def process_character_image_generation(
 
             response = image_model.generate_content(parts + [{"text": prompt}])
 
-            img_data: Optional[bytes] = None
+            img_data: bytes | None = None
             if response.candidates:
                 candidate = response.candidates[0]
                 content = getattr(candidate, "content", None)

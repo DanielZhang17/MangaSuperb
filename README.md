@@ -51,6 +51,16 @@ Ruff is used to enforce import order and lightweight static analysis:
 ruff check .
 ```
 
+### Testing
+
+Install the runtime and development requirements, then execute the pytest suite to validate story, comic, and job workflows:
+
+```bash
+pip install -r requirements.txt
+pip install -r requirements-dev.txt
+pytest
+```
+
 ## Backend modernization plan
 
 The current iteration focuses on laying foundations for a modular, maintainable backend. The plan is split into iterative tracks so future contributors can continue scaling functionality.

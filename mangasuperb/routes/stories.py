@@ -1,12 +1,18 @@
 """Story management endpoints for outlines and optimisation."""
 from __future__ import annotations
 
-from typing import Any, Dict, List
+import json
+from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
 
 from mangasuperb.extensions import db
+from mangasuperb.routes._character_utils import (
+    apply_character_assignments,
+    build_character_script_payload,
+    resolve_character_assignments,
+)
 from mangasuperb.services.jobs import (
     bootstrap_comic_workflow,
     enqueue_story_optimization,
@@ -42,11 +48,17 @@ def upsert_story_outline(comic_id: int) -> Any:
         return jsonify({"error": "Comic not found"}), 404
 
     payload = request.get_json(silent=True) or {}
+    characters_present = "characters" in payload or "character_ids" in payload
+    try:
+        character_assignments = resolve_character_assignments(payload)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     sections = payload.get("sections")
     if not isinstance(sections, list) or not sections:
         return jsonify({"error": "Sections must be a non-empty list"}), 400
 
-    normalized: List[Dict[str, str]] = []
+    normalized: list[dict[str, str]] = []
     for idx, raw in enumerate(sections, start=1):
         if not isinstance(raw, dict):
             continue
@@ -80,6 +92,17 @@ def upsert_story_outline(comic_id: int) -> Any:
                 status="draft",
             )
         )
+
+    if characters_present:
+        apply_character_assignments(comic, character_assignments)
+        script_payload: dict[str, Any] = {}
+        if comic.script and comic.script.content:
+            try:
+                script_payload = json.loads(comic.script.content)
+            except json.JSONDecodeError:
+                script_payload = {}
+        script_payload["characters"] = build_character_script_payload(character_assignments)
+        comic.script.content = json.dumps(script_payload)
 
     bootstrap_comic_workflow(comic)
     set_comic_stage_status(comic, "outline", "completed")
