@@ -272,7 +272,7 @@ def test_render_page_endpoint_enqueues_job(app, auth_client, user: User, dummy_q
 
     response = auth_client.post(
         f"/api/panels/{comic_id}/pages/1/render",
-        json={"api_key": "abc123", "image_model": "custom-model"},
+        json={},
     )
     assert response.status_code == 202
     payload = response.get_json()

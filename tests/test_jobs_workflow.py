@@ -120,7 +120,6 @@ def test_sequential_workflow_generates_resources(
         render_result = jobs.process_page_render_stage(
             comic.id,
             page_number=1,
-            api_key="test-key",
             image_model="test-model",
         )
         assert render_result["status"] == "completed"
@@ -175,7 +174,6 @@ def test_requeue_render_includes_context(
         first_pass = jobs.process_page_render_stage(
             comic.id,
             page_number=1,
-            api_key="test-key",
             image_model="test-model",
         )
         assert first_pass["status"] == "processing"
@@ -187,7 +185,6 @@ def test_requeue_render_includes_context(
         second_pass = jobs.process_page_render_stage(
             comic.id,
             page_number=2,
-            api_key="test-key",
             image_model="test-model",
         )
         assert second_pass["status"] == "completed"
@@ -261,7 +258,6 @@ def test_render_prompt_includes_character_roster(
         jobs.process_page_render_stage(
             stored_comic.id,
             page_number=1,
-            api_key="test-key",
             image_model="test-model",
         )
 

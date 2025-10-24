@@ -8,6 +8,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 import google.generativeai as genai
 
+from flask import current_app
+
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -83,14 +85,43 @@ def build_script_prompt(idea: str) -> str:
     return SCRIPT_PROMPT_TEMPLATE.format(idea=idea)
 
 
-def generate_script_from_prompt(prompt: str, model_name: str, api_key: str) -> Dict[str, Any]:
+def _config_value(key: str, fallback: str) -> str:
+    try:
+        return current_app.config.get(key, fallback)  # type: ignore[attr-defined]
+    except RuntimeError:
+        return fallback
+
+
+def _resolve_api_key(explicit: Optional[str] = None) -> str:
+    if explicit:
+        return explicit
+    return _config_value("GEMINI_API_KEY", Config.GEMINI_API_KEY)
+
+
+def _resolve_model(config_key: str, default_value: str, override: Optional[str] = None) -> str:
+    if override:
+        return override
+    return _config_value(config_key, default_value)
+
+
+def generate_script_from_prompt(
+    prompt: str,
+    model_name: str | None = None,
+    *,
+    api_key: str | None = None,
+) -> Dict[str, Any]:
     """Call Gemini to create a manga script from the supplied prompt."""
     if not prompt:
         raise ValueError("Prompt is required")
 
-    logger.info("Generating manga script with model: %s", model_name)
-    genai.configure(api_key=api_key)
-    script_model = genai.GenerativeModel(model_name)
+    resolved_model = _resolve_model("GEMINI_SCRIPT_MODEL", Config.GEMINI_SCRIPT_MODEL, model_name)
+    api_key_value = _resolve_api_key(api_key)
+    if not api_key_value:
+        raise ValueError("Gemini API key is not configured")
+
+    logger.info("Generating manga script with model: %s", resolved_model)
+    genai.configure(api_key=api_key_value)
+    script_model = genai.GenerativeModel(resolved_model)
     response = script_model.generate_content(build_script_prompt(prompt))
 
     raw_text = _extract_text_from_response(response)
@@ -111,16 +142,21 @@ def generate_script_from_prompt(prompt: str, model_name: str, api_key: str) -> D
 
 def optimize_character_description(
     description: str,
-    api_key: str,
-    *,
     model_name: str = Config.GEMINI_SCRIPT_MODEL,
+    *,
+    api_key: str | None = None,
 ) -> str:
     """Use Gemini to enhance a character description."""
     if not description:
         raise ValueError("Description is required")
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_name)
+    api_key_value = _resolve_api_key(api_key)
+    if not api_key_value:
+        raise ValueError("Gemini API key is not configured")
+
+    resolved_model = _resolve_model("GEMINI_SCRIPT_MODEL", Config.GEMINI_SCRIPT_MODEL, model_name)
+    genai.configure(api_key=api_key_value)
+    model = genai.GenerativeModel(resolved_model)
     response = model.generate_content(CHARACTER_OPTIMIZE_PROMPT.format(description=description))
     optimized = _extract_text_from_response(response).strip()
     if not optimized:

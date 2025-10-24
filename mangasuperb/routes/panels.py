@@ -173,12 +173,8 @@ def render_page(comic_id: int, page_number: int) -> Any:
     if not comic:
         return jsonify({"error": "Comic not found"}), 404
 
-    data = request.get_json(silent=True) or {}
-    api_key = (data.get("api_key") or "").strip()
-    if not api_key:
-        return jsonify({"error": "API key is required"}), 400
-
-    image_model = data.get("image_model")
+    _ = request.get_json(silent=True) or {}
+    image_model = None
 
     queue = current_app.extensions.get("rq_queue")
     if not queue:
@@ -188,7 +184,6 @@ def render_page(comic_id: int, page_number: int) -> Any:
         queue,
         comic,
         page_number,
-        api_key,
         image_model=image_model,
     )
     db.session.refresh(comic)

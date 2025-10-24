@@ -360,7 +360,8 @@ CHARACTER_CREATE_DOC = {
     'summary': 'Create a character',
     'description': (
         'Creates a character profile. When reference images are provided, the request enqueues a background job '
-        'to generate concept art using the optimized description and references.'
+        'to generate concept art using the optimized description and references. Optimisation uses the backend '
+        'Gemini configuration; clients do not supply API keys.'
     ),
     'parameters': [
         {
@@ -387,7 +388,6 @@ CHARACTER_CREATE_DOC = {
                         'description': 'When true the character is visible to other users.'
                     },
                     'optimize': {'type': 'boolean', 'default': False},
-                    'api_key': {'type': 'string', 'description': 'Required when optimization or reference images are used.'},
                     'style_prompt': {'type': 'string', 'example': 'Cyberpunk manga aesthetic with bold line work.'},
                     'reference_images': {
                         'type': 'array',
@@ -679,9 +679,10 @@ COMIC_DETAIL_DOC = {
 
 JOB_CREATE_DOC = {
     'tags': ['Jobs'],
-    'summary': 'Create manga generation job',
+    'summary': 'Create background job',
     'description': (
-        'Generates a manga script immediately and enqueues background image generation using the provided API key.'
+        'Dispatches asynchronous work such as comic generation, story optimisation, character optimisation, or page '
+        'rendering. Gemini credentials are sourced from server configuration; clients supply only task parameters.'
     ),
     'parameters': [
         {
@@ -690,18 +691,59 @@ JOB_CREATE_DOC = {
             'required': True,
             'schema': {
                 'type': 'object',
-                'required': ['prompt', 'api_key'],
                 'properties': {
+                    'job_type': {
+                        'type': 'string',
+                        'enum': [
+                            'comic_generation',
+                            'story_optimization',
+                            'character_optimization',
+                            'page_render',
+                        ],
+                        'default': 'comic_generation',
+                    },
                     'prompt': {'type': 'string', 'example': 'Two siblings discover a hidden mech in the forest.'},
-                    'model': {'type': 'string', 'example': 'gemini-2.5-pro'},
-                    'api_key': {'type': 'string'},
                     'style': {'type': 'string', 'example': 'High-contrast ink with splashy gradients.'},
                     'aspect_ratio': {
                         'type': 'string',
                         'enum': ['16:9', '9:16', '1:1'],
                         'example': '16:9'
                     },
+                    'characters': {
+                        'type': 'array',
+                        'items': {'type': 'object'},
+                        'description': 'Optional character selections (same structure as POST /api/characters).',
+                    },
+                    'comic_id': {'type': 'integer', 'example': 42},
+                    'page_number': {'type': 'integer', 'example': 1},
+                    'character_id': {'type': 'integer', 'example': 7},
+                    'description': {
+                        'type': 'string',
+                        'description': 'Optional raw description when optimising a character.',
+                    },
                 },
+                'oneOf': [
+                    {
+                        'description': 'Comic generation (default)',
+                        'required': ['prompt'],
+                        'properties': {'job_type': {'enum': ['comic_generation']}},
+                    },
+                    {
+                        'description': 'Story optimisation',
+                        'required': ['comic_id'],
+                        'properties': {'job_type': {'enum': ['story_optimization']}},
+                    },
+                    {
+                        'description': 'Character optimisation',
+                        'required': ['character_id'],
+                        'properties': {'job_type': {'enum': ['character_optimization']}},
+                    },
+                    {
+                        'description': 'Page render',
+                        'required': ['comic_id', 'page_number'],
+                        'properties': {'job_type': {'enum': ['page_render']}},
+                    },
+                ],
             },
         }
     ],
@@ -719,7 +761,27 @@ JOB_CREATE_DOC = {
                 },
             },
         },
+        '202': {
+            'description': 'Job accepted for processing',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'job_id': {'type': 'string'},
+                    'character_id': {'type': 'integer'},
+                    'comic': COMIC_CREATE_DOC['responses']['201']['schema']['properties']['comic'],
+                    'stage_jobs': {
+                        'type': 'object',
+                        'properties': {
+                            'outline_job_id': {'type': 'string'},
+                            'shot_job_id': {'type': 'string'},
+                        },
+                    },
+                },
+            },
+        },
         '400': {'description': 'Validation error'},
+        '404': {'description': 'Target resource not found'},
+        '503': {'description': 'Background queue not available'},
         '500': {'description': 'Unexpected failure'},
     },
     'security': [{'sessionCookie': []}],

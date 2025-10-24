@@ -71,6 +71,8 @@ def app() -> Generator[Flask, None, None]:
         SQLALCHEMY_SESSION_OPTIONS={"expire_on_commit": False},
         RQ_JOB_TIMEOUT=30,
         RQ_RESULT_TTL=30,
+        GEMINI_API_KEY="test-api-key",
+        GEMINI_SCRIPT_MODEL="test-script-model",
         GEMINI_IMAGE_MODEL="test-image-model",
     )
 

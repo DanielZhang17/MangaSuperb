@@ -15,6 +15,7 @@ from sqlalchemy import func
 
 from config import Config
 from mangasuperb.extensions import db
+from mangasuperb.services.generation import optimize_character_description
 from models import (
     Character,
     Comic,
@@ -50,6 +51,20 @@ def _get_storage():
     if not storage:
         raise RuntimeError("R2 storage is not configured")
     return storage
+
+
+def _config_value(key: str, default: str) -> str:
+    try:
+        return current_app.config.get(key, default)  # type: ignore[attr-defined]
+    except RuntimeError:
+        return getattr(Config, key, default)
+
+
+def _gemini_api_key() -> str:
+    api_key = _config_value("GEMINI_API_KEY", Config.GEMINI_API_KEY)
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is not configured")
+    return api_key
 
 
 WORKFLOW_STAGES = ("outline", "shots", "render")
@@ -175,9 +190,13 @@ def bootstrap_comic_workflow(comic: Comic) -> None:
     existing = {stage.stage for stage in comic.workflow_stages}
     for stage_name in WORKFLOW_STAGES:
         if stage_name not in existing:
-            db.session.add(
-                ComicWorkflowStage(comic_id=comic.id, stage=stage_name, status="pending")
+            stage_row = ComicWorkflowStage(
+                comic_id=comic.id,
+                stage=stage_name,
+                status="pending",
             )
+            db.session.add(stage_row)
+            comic.workflow_stages.append(stage_row)
 
     if not comic.workflow_stage:
         comic.workflow_stage = WORKFLOW_STAGES[0]
@@ -332,7 +351,6 @@ def _panel_payload_json(panels: list[ComicPanelShot]) -> str:
 def enqueue_comic_workflow(
     queue,
     comic: Comic,
-    api_key: str,
     *,
     image_model: str | None = None,
 ) -> dict[str, str]:
@@ -367,8 +385,7 @@ def enqueue_comic_workflow(
         process_page_render_stage,
         comic_id=comic.id,
         page_number=1,
-        api_key=api_key,
-        image_model=image_model or Config.GEMINI_IMAGE_MODEL,
+        image_model=image_model,
         depends_on=shots_job,
         job_timeout=timeout,
         result_ttl=result_ttl,
@@ -390,7 +407,6 @@ def enqueue_page_render(
     queue,
     comic: Comic,
     page_number: int,
-    api_key: str,
     *,
     image_model: str | None = None,
 ):
@@ -406,8 +422,7 @@ def enqueue_page_render(
         process_page_render_stage,
         comic_id=comic.id,
         page_number=page_number,
-        api_key=api_key,
-        image_model=image_model or Config.GEMINI_IMAGE_MODEL,
+        image_model=image_model,
         job_timeout=timeout,
         result_ttl=result_ttl,
         description=f"Render page {page_number} for comic {comic.id}",
@@ -656,7 +671,6 @@ def process_shot_stage(comic_id: int) -> dict[str, Any]:
 def process_page_render_stage(
     comic_id: int,
     page_number: int,
-    api_key: str,
     *,
     image_model: str | None = None,
 ) -> dict[str, Any]:
@@ -743,8 +757,9 @@ def process_page_render_stage(
             if layout.notes:
                 layout_instruction += f" Notes: {layout.notes}"
 
+            api_key = _gemini_api_key()
             genai.configure(api_key=api_key)
-            model_name = image_model or Config.GEMINI_IMAGE_MODEL
+            model_name = image_model or _config_value("GEMINI_IMAGE_MODEL", Config.GEMINI_IMAGE_MODEL)
             image_model_client = genai.GenerativeModel(model_name)
 
             prompt = build_page_render_prompt(
@@ -866,9 +881,56 @@ def set_comic_stage_status(
     _set_stage_status(comic, stage, status, error=error)
 
 
+def process_character_optimization(
+    character_id: int,
+    source_description: str | None = None,
+) -> dict[str, Any]:
+    """Optimise a character description using the configured script model."""
+
+    with _application_context():
+        logger.info("=== Character optimisation started for character_id=%s ===", character_id)
+
+        character = db.session.get(Character, character_id)
+        if not character:
+            logger.error("Character %s not found", character_id)
+            raise ValueError(f"Character {character_id} not found")
+
+        description_text = (source_description or character.description or "").strip()
+        if not description_text:
+            raise ValueError("Character description is empty")
+
+        try:
+            optimized = optimize_character_description(description_text)
+            character.optimized_description = optimized
+            if source_description:
+                character.description = source_description
+            db.session.commit()
+
+            logger.info(
+                "=== Character optimisation completed for character_id=%s ===",
+                character_id,
+            )
+            return {
+                "status": "completed",
+                "character_id": character_id,
+                "optimized_description": optimized,
+            }
+        except Exception as exc:
+            logger.exception(
+                "Character optimisation failed for character_id=%s: %s",
+                character_id,
+                exc,
+            )
+            db.session.rollback()
+            return {
+                "status": "failed",
+                "character_id": character_id,
+                "error": str(exc),
+            }
+
+
 def process_character_image_generation(
     character_id: int,
-    api_key: str,
     description: str,
     reference_images: Iterable[dict[str, str]],
 ) -> dict[str, Any]:
@@ -886,8 +948,10 @@ def process_character_image_generation(
             character.image_error = None
             db.session.commit()
 
+            api_key = _gemini_api_key()
             genai.configure(api_key=api_key)
-            image_model = genai.GenerativeModel(Config.GEMINI_IMAGE_MODEL)
+            model_name = _config_value("GEMINI_IMAGE_MODEL", Config.GEMINI_IMAGE_MODEL)
+            image_model = genai.GenerativeModel(model_name)
 
             prompt = (
                 "Create a polished character concept illustration based on the description below. "

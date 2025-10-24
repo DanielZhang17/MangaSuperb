@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, Callable, Dict, Tuple
 
 from flasgger import swag_from
 from flask import Blueprint, current_app, jsonify, request
@@ -21,101 +21,100 @@ from mangasuperb.services.generation import (
     generate_script_from_prompt,
     validate_aspect_ratio,
 )
-from mangasuperb.services.jobs import build_character_prompt, enqueue_comic_workflow
-from models import Comic, Script
+from mangasuperb.services.jobs import (
+    build_character_prompt,
+    enqueue_comic_workflow,
+    enqueue_page_render,
+    enqueue_story_optimization,
+    process_character_optimization,
+)
+from models import Character, Comic, Script
 from swagger import JOB_CREATE_DOC, JOB_STATUS_DOC
 
 logger = logging.getLogger(__name__)
 
 bp = Blueprint("jobs", __name__, url_prefix="/api/jobs")
 
+JOB_TYPE_COMIC_GENERATION = "comic_generation"
+JOB_TYPE_STORY_OPTIMIZATION = "story_optimization"
+JOB_TYPE_CHARACTER_OPTIMIZATION = "character_optimization"
+JOB_TYPE_PAGE_RENDER = "page_render"
 
-@bp.post("")
-@login_required
-@swag_from(JOB_CREATE_DOC)
-def create_job() -> Any:
+
+def _require_queue():
+    queue = current_app.extensions.get("rq_queue")
+    if not queue:
+        raise RuntimeError("Background queue is not configured")
+    return queue
+
+
+def _handle_comic_generation(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
+    prompt = (data.get("prompt") or "").strip()
+    if not prompt:
+        return {"error": "Prompt is required"}, 400
+
+    requested_style = (data.get("style") or data.get("style_description") or "").strip()
+    aspect_ratio = data.get("aspect_ratio")
+
     try:
-        data = request.get_json(silent=True) or {}
-        prompt = data.get("prompt", "").strip()
-        model_name = data.get("model", current_app.config["GEMINI_SCRIPT_MODEL"])
-        api_key = data.get("api_key", "").strip()
-        requested_style = (data.get("style") or data.get("style_description") or "").strip()
-        aspect_ratio = data.get("aspect_ratio")
+        character_assignments = resolve_character_assignments(data)
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
 
-        logger.info("=== New job request ===")
-        logger.info("User: %s", current_user.username)
-        logger.info("Prompt length: %s characters", len(prompt))
-        logger.info("Model: %s", model_name)
+    prompt_payload = prompt
+    roster_prompt = build_character_prompt(character_assignments)
+    if roster_prompt:
+        prompt_payload = f"{prompt}\n\n{roster_prompt}"
 
-        if not prompt:
-            return jsonify({"error": "Prompt is required"}), 400
-        if not api_key:
-            return jsonify({"error": "API key is required"}), 400
+    logger.info(
+        "Comic generation request by user_id=%s characters=%s",
+        current_user.id,
+        len(character_assignments),
+    )
 
-        try:
-            character_assignments = resolve_character_assignments(data)
-        except ValueError as exc:
-            return jsonify({"error": str(exc)}), 400
+    try:
+        manga_script = generate_script_from_prompt(prompt_payload)
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
 
-        prompt_payload = prompt
-        roster_prompt = build_character_prompt(character_assignments)
-        if roster_prompt:
-            prompt_payload = f"{prompt}\n\n{roster_prompt}"
-        logger.info("Prompt length: %s characters", len(prompt_payload))
+    script_title = manga_script.get("title") or "Untitled"
+    style_notes = requested_style or manga_script.get("style_notes") or DEFAULT_COMIC_STYLE
 
-        manga_script = generate_script_from_prompt(prompt_payload, model_name, api_key)
-        logger.info("Script generated: %s", manga_script.get("title", "Untitled"))
+    try:
+        resolved_aspect_ratio = validate_aspect_ratio(aspect_ratio)
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
 
-        script_title = manga_script.get("title") or "Untitled"
-        style_notes = requested_style or manga_script.get("style_notes") or DEFAULT_COMIC_STYLE
+    if character_assignments:
+        manga_script["characters"] = build_character_script_payload(character_assignments)
 
-        try:
-            resolved_aspect_ratio = validate_aspect_ratio(aspect_ratio)
-        except ValueError as exc:
-            return jsonify({"error": str(exc)}), 400
-
+    try:
+        script = Script(
+            user_id=current_user.id,
+            title=script_title,
+            content=json.dumps(manga_script),
+        )
+        comic = Comic(
+            user_id=current_user.id,
+            script=script,
+            title=script_title,
+            status="pending",
+            style_description=style_notes,
+            aspect_ratio=resolved_aspect_ratio,
+        )
+        db.session.add_all([script, comic])
+        db.session.flush()
         if character_assignments:
-            manga_script["characters"] = build_character_script_payload(character_assignments)
+            apply_character_assignments(comic, character_assignments)
 
-        try:
-            script = Script(
-                user_id=current_user.id,
-                title=script_title,
-                content=json.dumps(manga_script),
-            )
-            comic = Comic(
-                user_id=current_user.id,
-                script=script,
-                title=script_title,
-                status="pending",
-                style_description=style_notes,
-                aspect_ratio=resolved_aspect_ratio,
-            )
-            db.session.add_all([script, comic])
-            db.session.flush()
-            if character_assignments:
-                apply_character_assignments(comic, character_assignments)
+        queue = _require_queue()
+        pipeline_jobs = enqueue_comic_workflow(queue, comic)
+        job_id = pipeline_jobs["render_job_id"]
+        db.session.refresh(comic)
+        db.session.refresh(script)
 
-            queue = current_app.extensions["rq_queue"]
-            pipeline_jobs = enqueue_comic_workflow(
-                queue,
-                comic,
-                api_key,
-                image_model=current_app.config.get("GEMINI_IMAGE_MODEL"),
-            )
-            job_id = pipeline_jobs["render_job_id"]
-            db.session.refresh(comic)
-            db.session.refresh(script)
-
-        except Exception:  # pragma: no cover - database/queue errors
-            db.session.rollback()
-            logger.exception("Failed to persist job resources")
-            raise
-
-        logger.info("Job enqueued: %s", job_id)
-        logger.info("=== Job created successfully ===")
-
-        return jsonify(
+        logger.info("Comic generation enqueued job_id=%s for comic_id=%s", job_id, comic.id)
+        return (
             {
                 "job_id": job_id,
                 "comic_id": comic.id,
@@ -123,16 +122,134 @@ def create_job() -> Any:
                 "status": "pending",
                 "script": manga_script,
                 "stage_jobs": pipeline_jobs,
-            }
-        ), 201
+            },
+            201,
+        )
+    except RuntimeError as exc:
+        logger.error("Comic generation queue unavailable: %s", exc)
+        db.session.rollback()
+        return {"error": "Background queue is not configured"}, 503
+    except Exception:  # pragma: no cover - unexpected database/queue error
+        db.session.rollback()
+        logger.exception("Failed to create comic generation job")
+        return {"error": "Failed to create comic generation job"}, 500
 
-    except ValueError as exc:
-        logger.error("Script generation failed: %s", exc)
-        return jsonify({"error": str(exc)}), 400
-    except Exception as exc:  # pragma: no cover - unexpected failure
-        logger.error("Error creating job: %s", exc)
-        logger.exception("Full traceback:")
-        return jsonify({"error": str(exc)}), 500
+
+def _handle_story_optimization(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
+    comic_id = data.get("comic_id")
+    if comic_id is None:
+        return {"error": "comic_id is required"}, 400
+
+    try:
+        comic_id = int(comic_id)
+    except (TypeError, ValueError):
+        return {"error": "comic_id must be an integer"}, 400
+
+    comic = db.session.get(Comic, comic_id)
+    if not comic or comic.user_id != current_user.id:
+        return {"error": "Comic not found"}, 404
+
+    try:
+        queue = _require_queue()
+        stage_jobs = enqueue_story_optimization(queue, comic)
+        db.session.refresh(comic)
+        return {"stage_jobs": stage_jobs, "comic": comic.to_dict()}, 202
+    except RuntimeError as exc:
+        logger.error("Story optimisation queue unavailable: %s", exc)
+        return {"error": "Background queue is not configured"}, 503
+    except Exception:  # pragma: no cover - unexpected queue error
+        logger.exception("Failed to enqueue story optimisation for comic_id=%s", comic_id)
+        return {"error": "Failed to enqueue story optimisation"}, 500
+
+
+def _handle_character_optimization(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
+    character_id = data.get("character_id")
+    if character_id is None:
+        return {"error": "character_id is required"}, 400
+
+    try:
+        character_id = int(character_id)
+    except (TypeError, ValueError):
+        return {"error": "character_id must be an integer"}, 400
+
+    character = db.session.get(Character, character_id)
+    if not character or character.user_id != current_user.id:
+        return {"error": "Character not found"}, 404
+
+    description_override = (data.get("description") or "").strip() or None
+
+    try:
+        queue = _require_queue()
+        job = queue.enqueue(
+            process_character_optimization,
+            character_id=character.id,
+            source_description=description_override,
+            job_timeout=current_app.config["RQ_JOB_TIMEOUT"],
+            result_ttl=current_app.config["RQ_RESULT_TTL"],
+            description=f"Character optimisation for {character.id}",
+        )
+        return {"job_id": job.id, "character_id": character.id}, 202
+    except RuntimeError as exc:
+        logger.error("Character optimisation queue unavailable: %s", exc)
+        return {"error": "Background queue is not configured"}, 503
+    except Exception:  # pragma: no cover - unexpected queue error
+        logger.exception("Failed to enqueue character optimisation for %s", character_id)
+        return {"error": "Failed to enqueue character optimisation"}, 500
+
+
+def _handle_page_render(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
+    comic_id = data.get("comic_id")
+    page_number = data.get("page_number")
+    if comic_id is None or page_number is None:
+        return {"error": "comic_id and page_number are required"}, 400
+
+    try:
+        comic_id = int(comic_id)
+        page_number = int(page_number)
+    except (TypeError, ValueError):
+        return {"error": "comic_id and page_number must be integers"}, 400
+
+    if page_number <= 0:
+        return {"error": "page_number must be greater than zero"}, 400
+
+    comic = db.session.get(Comic, comic_id)
+    if not comic or comic.user_id != current_user.id:
+        return {"error": "Comic not found"}, 404
+
+    try:
+        queue = _require_queue()
+        job = enqueue_page_render(queue, comic, page_number)
+        db.session.refresh(comic)
+        return {"job_id": job.id, "comic": comic.to_dict()}, 202
+    except RuntimeError as exc:
+        logger.error("Page render queue unavailable: %s", exc)
+        return {"error": "Background queue is not configured"}, 503
+    except Exception:  # pragma: no cover - unexpected queue error
+        logger.exception("Failed to enqueue page render for comic=%s page=%s", comic_id, page_number)
+        return {"error": "Failed to enqueue page render"}, 500
+
+
+JOB_HANDLERS: Dict[str, Callable[[Dict[str, Any]], Tuple[Dict[str, Any], int]]] = {
+    JOB_TYPE_COMIC_GENERATION: _handle_comic_generation,
+    JOB_TYPE_STORY_OPTIMIZATION: _handle_story_optimization,
+    JOB_TYPE_CHARACTER_OPTIMIZATION: _handle_character_optimization,
+    JOB_TYPE_PAGE_RENDER: _handle_page_render,
+}
+
+
+@bp.post("")
+@login_required
+@swag_from(JOB_CREATE_DOC)
+def create_job() -> Any:
+    data = request.get_json(silent=True) or {}
+    job_type = (data.get("job_type") or JOB_TYPE_COMIC_GENERATION).strip().lower()
+    handler = JOB_HANDLERS.get(job_type)
+
+    if not handler:
+        return jsonify({"error": f"Unsupported job_type '{job_type}'"}), 400
+
+    payload, status = handler(data)
+    return jsonify(payload), status
 
 
 @bp.get("/<job_id>")

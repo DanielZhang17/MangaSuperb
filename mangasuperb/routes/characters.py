@@ -39,7 +39,6 @@ def create_character() -> Any:
     optimize_flag = bool(data.get("optimize", False))
     style_prompt = (data.get("style_prompt") or "").strip() or None
     reference_images = data.get("reference_images") or []
-    api_key = (data.get("api_key") or "").strip()
     sex_value = (data.get("sex") or "unspecified").strip().lower()
     is_public = bool(data.get("is_public", False))
 
@@ -53,16 +52,12 @@ def create_character() -> Any:
             400,
         )
 
-    requires_api = optimize_flag or bool(reference_images)
-    if requires_api and not api_key:
-        return jsonify({"error": "API key is required for optimization or image generation"}), 400
-
     optimized_description = None
     prompt_for_image = description
 
     if optimize_flag:
         try:
-            optimized_description = optimize_character_description(description, api_key)
+            optimized_description = optimize_character_description(description)
             prompt_for_image = optimized_description
         except ValueError as exc:
             logger.error("Character optimization failed: %s", exc)
@@ -103,7 +98,6 @@ def create_character() -> Any:
             job = queue.enqueue(
                 process_character_image_generation,
                 character_id=character.id,
-                api_key=api_key,
                 description=prompt_for_image,
                 reference_images=normalized_refs,
                 job_timeout=current_app.config["RQ_JOB_TIMEOUT"],
