@@ -24,6 +24,8 @@ SCRIPT_PROMPT_TEMPLATE = """You are a professional manga scriptwriter. Based on 
 
 User idea: {idea}
 
+{character_context}{style_context}
+
 Format your response as JSON with this structure:
 {{
     "title": "Manga Title",
@@ -78,12 +80,62 @@ def _extract_text_from_response(response: Any) -> str:
     return text
 
 
-def build_script_prompt(idea: str) -> str:
+def _build_character_context(characters: Optional[Iterable[Dict[str, Any]]]) -> str:
+    if not characters:
+        return ""
+
+    entries: List[str] = []
+    for idx, character in enumerate(characters, start=1):
+        name = (character.get("name") or f"Character {idx}").strip()
+        role = (character.get("role") or "").strip()
+        description = (
+            character.get("optimized_description")
+            or character.get("description")
+            or ""
+        ).strip()
+        style_prompt = (character.get("style_prompt") or "").strip()
+
+        segments: List[str] = [f"Name: {name}"]
+        if role:
+            segments.append(f"Role: {role}")
+        if description:
+            segments.append(f"Bio: {description}")
+        if style_prompt:
+            segments.append(f"Visual style cues: {style_prompt}")
+
+        entries.append(" - " + "; ".join(segments))
+
+    return "Existing characters:\n" + "\n".join(entries) + "\n\n"
+
+
+def build_script_prompt(
+    idea: str,
+    *,
+    characters: Optional[Iterable[Dict[str, Any]]] = None,
+    style_description: Optional[str] = None,
+) -> str:
     """Render a structured prompt describing the desired manga script."""
-    return SCRIPT_PROMPT_TEMPLATE.format(idea=idea)
+    character_context = _build_character_context(characters)
+
+    style_context = ""
+    if style_description:
+        style_context = f"Preferred overarching art direction: {style_description.strip()}\n\n"
+
+    return SCRIPT_PROMPT_TEMPLATE.format(
+        idea=idea,
+        character_context=character_context,
+        style_context=style_context,
+    )
 
 
-def generate_script_from_prompt(prompt: str, model_name: str, api_key: str) -> Dict[str, Any]:
+def generate_script_from_prompt(
+    prompt: str,
+    model_name: str,
+    api_key: str,
+    *,
+    characters: Optional[Iterable[Dict[str, Any]]] = None,
+    style_description: Optional[str] = None,
+) -> Dict[str, Any]:
     """Call Gemini to create a manga script from the supplied prompt."""
     if not prompt:
         raise ValueError("Prompt is required")
@@ -91,7 +143,9 @@ def generate_script_from_prompt(prompt: str, model_name: str, api_key: str) -> D
     logger.info("Generating manga script with model: %s", model_name)
     genai.configure(api_key=api_key)
     script_model = genai.GenerativeModel(model_name)
-    response = script_model.generate_content(build_script_prompt(prompt))
+    response = script_model.generate_content(
+        build_script_prompt(prompt, characters=characters, style_description=style_description)
+    )
 
     raw_text = _extract_text_from_response(response)
     cleaned = _strip_code_fences(raw_text)
