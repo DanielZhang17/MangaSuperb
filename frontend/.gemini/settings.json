@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "Framelink MCP for Figma": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "figma-developer-mcp",
+        "--figma-api-key=figd_EQk7MoRvRo8MTA9XEPpEPr3qF-jfEbmM3aXoDLSo",
+        "--stdio"
+      ]
+    },
+    "shadcn": {
+      "url": "https://www.shadcn.io/api/mcp"
+    }
+  }
+}
