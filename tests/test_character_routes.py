@@ -94,3 +94,19 @@ def test_create_character_rejects_invalid_sex(auth_client) -> None:
     assert response.status_code == 400
     data = response.get_json()
     assert data["error"].startswith("Sex must be one of")
+
+
+def test_create_character_without_name(auth_client) -> None:
+    response = auth_client.post(
+        "/api/characters",
+        json={
+            "description": "A newly conceived character awaiting a proper name.",
+            "sex": "non-binary",
+        },
+    )
+    assert response.status_code == 201
+    payload = response.get_json()
+    character = payload["character"]
+    assert character["name"] == "unspecified"
+    assert character["description"].startswith("A newly conceived character")
+    assert character["sex"] == "non-binary"

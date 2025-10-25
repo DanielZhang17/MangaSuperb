@@ -1,99 +1,81 @@
 """
-Database initialization script for MangaSuperb
-Run this script to create all database tables
-"""
-import os
-import sys
-from config import Config
-from models import db, MangaJob, User
-from flask import Flask
+Database initialization script for MangaSuperb.
 
-def init_database():
-    """Initialize the database and create all tables"""
+Usage:
+    source .venv/bin/activate
+    pip install -r requirements.txt
+    python init_db.py
+"""
+from __future__ import annotations
+
+import sys
+
+from sqlalchemy import inspect, text
+
+from mangasuperb import create_app
+from mangasuperb.extensions import db
+
+
+def init_database() -> bool:
+    """Initialise the database and create all tables."""
 
     print("=" * 60)
     print("MangaSuperb Database Initialization")
     print("=" * 60)
 
-    # Create Flask app
-    app = Flask(__name__)
-    app.config.from_object(Config)
-
+    app = create_app()
     print(f"\nDatabase URL: {app.config['SQLALCHEMY_DATABASE_URI']}")
-
-    # Initialize db with app
-    db.init_app(app)
 
     with app.app_context():
         try:
             print("\n[1/3] Creating database tables...")
-
-            # Create all tables
             db.create_all()
 
-            print("✓ Tables created successfully:")
-            print("  - manga_jobs")
-            print("  - users")
-
-            # Verify tables exist
-            from sqlalchemy import inspect
             inspector = inspect(db.engine)
             tables = inspector.get_table_names()
+            print(f"✓ Tables present ({len(tables)}): {', '.join(sorted(tables))}")
 
-            print(f"\n[2/3] Verifying tables...")
-            print(f"✓ Found {len(tables)} table(s): {', '.join(tables)}")
-
-            # Test connection
-            print("\n[3/3] Testing database connection...")
-            result = db.session.execute(db.text("SELECT 1"))
+            print("\n[2/3] Testing database connection...")
+            db.session.execute(text("SELECT 1"))
             print("✓ Database connection successful")
 
-            print("\n" + "=" * 60)
-            print("Database initialization completed successfully!")
-            print("=" * 60)
-
+            print("\n[3/3] Ready to use!")
             return True
-
-        except Exception as e:
-            print(f"\n✗ Error initializing database: {str(e)}")
-            print("\nPlease ensure:")
-            print("1. PostgreSQL is running")
-            print("2. Database credentials in .env are correct")
-            print("3. Database 'manga' exists (create with: createdb manga)")
+        except Exception as exc:  # pragma: no cover - setup aid
+            print(f"\n✗ Error initialising database: {exc}")
+            print("\nTroubleshooting checklist:")
+            print("  1. PostgreSQL is running and reachable.")
+            print("  2. Credentials in .env match the database.")
+            print("  3. The target database exists (create with: createdb manga).")
             return False
 
-def reset_database():
-    """Drop all tables and recreate them (USE WITH CAUTION!)"""
 
-    response = input("\n⚠️  WARNING: This will DELETE ALL DATA! Type 'yes' to confirm: ")
+def reset_database() -> bool:
+    """Drop and recreate the schema (USE WITH CAUTION!)."""
 
-    if response.lower() != 'yes':
+    confirmation = input("\n⚠️  This will DELETE ALL DATA. Type 'yes' to continue: ")
+    if confirmation.lower() != "yes":
         print("Aborted.")
         return False
 
-    app = Flask(__name__)
-    app.config.from_object(Config)
-    db.init_app(app)
-
+    app = create_app()
     with app.app_context():
         try:
             print("\n[1/2] Dropping all tables...")
             db.drop_all()
-            print("✓ All tables dropped")
+            print("✓ Tables dropped")
 
-            print("\n[2/2] Creating fresh tables...")
+            print("\n[2/2] Recreating tables...")
             db.create_all()
             print("✓ Tables recreated")
-
-            print("\nDatabase reset completed successfully!")
             return True
-
-        except Exception as e:
-            print(f"\n✗ Error resetting database: {str(e)}")
+        except Exception as exc:  # pragma: no cover - setup aid
+            print(f"\n✗ Error resetting database: {exc}")
             return False
 
-if __name__ == '__main__':
-    if len(sys.argv) > 1 and sys.argv[1] == '--reset':
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--reset":
         success = reset_database()
     else:
         success = init_database()

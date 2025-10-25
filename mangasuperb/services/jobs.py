@@ -16,6 +16,7 @@ from flask import current_app
 from sqlalchemy import func
 
 from PIL import Image, UnidentifiedImageError
+from rq import get_current_job
 
 from config import Config
 from mangasuperb.extensions import db
@@ -55,6 +56,11 @@ def _get_storage():
     if not storage:
         raise RuntimeError("R2 storage is not configured")
     return storage
+
+
+def _current_job_id() -> str:
+    job = get_current_job()
+    return job.id if job else "inline"
 
 
 def _config_value(key: str, default: str) -> str:
@@ -417,6 +423,7 @@ def enqueue_comic_workflow(
         comic_id=comic.id,
         page_number=1,
         image_model=image_model,
+        chain_remaining=True,
         depends_on=shots_job,
         job_timeout=timeout,
         result_ttl=result_ttl,
@@ -440,6 +447,7 @@ def enqueue_page_render(
     page_number: int,
     *,
     image_model: str | None = None,
+    chain_remaining: bool = False,
 ):
     """Schedule a render job for a specific comic page."""
 
@@ -454,6 +462,7 @@ def enqueue_page_render(
         comic_id=comic.id,
         page_number=page_number,
         image_model=image_model,
+        chain_remaining=chain_remaining,
         job_timeout=timeout,
         result_ttl=result_ttl,
         description=f"Render page {page_number} for comic {comic.id}",
@@ -563,7 +572,8 @@ def process_outline_stage(comic_id: int) -> dict[str, Any]:
     """Derive outline sections from a comic's script."""
 
     with _application_context():
-        logger.info("=== Outline stage started for comic_id=%s ===", comic_id)
+        job_id = _current_job_id()
+        logger.info("=== Outline stage started for comic_id=%s job_id=%s ===", comic_id, job_id)
 
         comic: Comic | None = db.session.get(Comic, comic_id)
         if not comic:
@@ -602,14 +612,14 @@ def process_outline_stage(comic_id: int) -> dict[str, Any]:
             _set_stage_status(comic, "outline", "completed")
             db.session.commit()
 
-            logger.info("=== Outline stage completed for comic_id=%s ===", comic_id)
+            logger.info("=== Outline stage completed for comic_id=%s job_id=%s ===", comic_id, job_id)
             return {
                 "status": "completed",
                 "comic_id": comic_id,
                 "sections": [section.to_dict() for section in created_sections],
             }
         except Exception as exc:
-            logger.exception("Outline stage failed for comic_id=%s", comic_id)
+            logger.exception("Outline stage failed for comic_id=%s job_id=%s", comic_id, job_id)
             db.session.rollback()
 
             comic = db.session.get(Comic, comic_id)
@@ -624,7 +634,8 @@ def process_shot_stage(comic_id: int) -> dict[str, Any]:
     """Convert outline sections into panel shots and layout suggestions."""
 
     with _application_context():
-        logger.info("=== Shot refinement started for comic_id=%s ===", comic_id)
+        job_id = _current_job_id()
+        logger.info("=== Shot refinement started for comic_id=%s job_id=%s ===", comic_id, job_id)
 
         comic: Comic | None = db.session.get(Comic, comic_id)
         if not comic:
@@ -734,7 +745,7 @@ def process_shot_stage(comic_id: int) -> dict[str, Any]:
             _set_stage_status(comic, "shots", "completed")
             db.session.commit()
 
-            logger.info("=== Shot refinement completed for comic_id=%s ===", comic_id)
+            logger.info("=== Shot refinement completed for comic_id=%s job_id=%s ===", comic_id, job_id)
             return {
                 "status": "completed",
                 "comic_id": comic_id,
@@ -742,7 +753,7 @@ def process_shot_stage(comic_id: int) -> dict[str, Any]:
                 "page_layouts": [layout.to_dict() for layout in layouts],
             }
         except Exception as exc:
-            logger.exception("Shot refinement failed for comic_id=%s", comic_id)
+            logger.exception("Shot refinement failed for comic_id=%s job_id=%s", comic_id, job_id)
             db.session.rollback()
 
             comic = db.session.get(Comic, comic_id)
@@ -758,14 +769,17 @@ def process_page_render_stage(
     page_number: int,
     *,
     image_model: str | None = None,
+    chain_remaining: bool = False,
 ) -> dict[str, Any]:
     """Render a comic page using existing panel shots and layout assignments."""
 
     with _application_context():
+        job_id = _current_job_id()
         logger.info(
-            "=== Page render started for comic_id=%s page=%s ===",
+            "=== Page render started for comic_id=%s page=%s job_id=%s ===",
             comic_id,
             page_number,
+            job_id,
         )
 
         comic: Comic | None = db.session.get(Comic, comic_id)
@@ -895,9 +909,11 @@ def process_page_render_stage(
             if comic_page:
                 comic_page.image_url = r2_url
                 comic_page.panel_text = panel_payload
+                comic_page.script_id = comic.script_id
             else:
                 comic_page = ComicPage(
                     comic_id=comic_id,
+                    script_id=comic.script_id,
                     page_number=page_number,
                     image_url=r2_url,
                     panel_text=panel_payload,
@@ -920,15 +936,42 @@ def process_page_render_stage(
                 _set_stage_status(comic, "render", "completed")
             else:
                 comic.error_message = None
+                if chain_remaining:
+                    next_panel = (
+                        ComicPanelShot.query.filter(
+                            ComicPanelShot.comic_id == comic_id,
+                            ComicPanelShot.page_number.isnot(None),
+                            ComicPanelShot.page_number > page_number,
+                        )
+                        .order_by(ComicPanelShot.page_number.asc())
+                        .first()
+                    )
+                    if next_panel and next_panel.page_number:
+                        queue = current_app.extensions.get("rq_queue")
+                        if queue:
+                            timeout = current_app.config["RQ_JOB_TIMEOUT"]
+                            result_ttl = current_app.config["RQ_RESULT_TTL"]
+                            next_job = queue.enqueue(
+                                process_page_render_stage,
+                                comic_id=comic_id,
+                                page_number=next_panel.page_number,
+                                image_model=image_model,
+                                chain_remaining=True,
+                                job_timeout=timeout,
+                                result_ttl=result_ttl,
+                                description=f"Render page {next_panel.page_number} for comic {comic_id}",
+                            )
+                            _assign_stage_job(comic, "render", next_job.id)
 
             db.session.commit()
 
             status_label = "completed" if comic.workflow_status == "completed" else "processing"
             logger.info(
-                "=== Page render finished for comic_id=%s page=%s (%s) ===",
+                "=== Page render finished for comic_id=%s page=%s (%s) job_id=%s ===",
                 comic_id,
                 page_number,
                 status_label,
+                job_id,
             )
             return {
                 "status": status_label,
@@ -938,7 +981,12 @@ def process_page_render_stage(
                 "page": comic_page.to_dict(),
             }
         except Exception as exc:
-            logger.exception("Page render failed for comic_id=%s page=%s", comic_id, page_number)
+            logger.exception(
+                "Page render failed for comic_id=%s page=%s job_id=%s",
+                comic_id,
+                page_number,
+                job_id,
+            )
             db.session.rollback()
 
             comic = db.session.get(Comic, comic_id)
@@ -997,7 +1045,8 @@ def process_export_stage(comic_id: int) -> dict[str, Any]:
     """Bundle rendered comic pages into ZIP and PDF artifacts."""
 
     with _application_context():
-        logger.info("=== Export stage started for comic_id=%s ===", comic_id)
+        job_id = _current_job_id()
+        logger.info("=== Export stage started for comic_id=%s job_id=%s ===", comic_id, job_id)
 
         comic: Comic | None = db.session.get(Comic, comic_id)
         if not comic:
@@ -1054,7 +1103,7 @@ def process_export_stage(comic_id: int) -> dict[str, Any]:
             _set_stage_status(comic, "export", "completed")
             db.session.commit()
 
-            logger.info("=== Export stage completed for comic_id=%s ===", comic_id)
+            logger.info("=== Export stage completed for comic_id=%s job_id=%s ===", comic_id, job_id)
             return {
                 "status": "completed",
                 "comic_id": comic_id,
@@ -1062,7 +1111,7 @@ def process_export_stage(comic_id: int) -> dict[str, Any]:
                 "zip_url": zip_url,
             }
         except Exception as exc:
-            logger.exception("Export stage failed for comic_id=%s", comic_id)
+            logger.exception("Export stage failed for comic_id=%s job_id=%s", comic_id, job_id)
             db.session.rollback()
 
             comic = db.session.get(Comic, comic_id)
@@ -1081,7 +1130,8 @@ def process_cover_generation(
     """Generate a public-facing cover image for a comic."""
 
     with _application_context():
-        logger.info("=== Cover generation started for comic_id=%s ===", comic_id)
+        job_id = _current_job_id()
+        logger.info("=== Cover generation started for comic_id=%s job_id=%s ===", comic_id, job_id)
 
         comic: Comic | None = db.session.get(Comic, comic_id)
         if not comic:
@@ -1164,7 +1214,7 @@ def process_cover_generation(
             comic.cover_image_url = cover_url
             db.session.commit()
 
-            logger.info("=== Cover generation completed for comic_id=%s ===", comic_id)
+            logger.info("=== Cover generation completed for comic_id=%s job_id=%s ===", comic_id, job_id)
             return {
                 "status": "completed",
                 "comic_id": comic_id,
@@ -1172,7 +1222,7 @@ def process_cover_generation(
                 "summary": summary_text,
             }
         except Exception as exc:
-            logger.exception("Cover generation failed for comic_id=%s", comic_id)
+            logger.exception("Cover generation failed for comic_id=%s job_id=%s", comic_id, job_id)
             db.session.rollback()
             return {"status": "failed", "comic_id": comic_id, "error": str(exc)}
 
@@ -1185,7 +1235,12 @@ def finalize_publish_stage(
     """Mark a comic as published and ready for public listing."""
 
     with _application_context():
-        logger.info("=== Publish finalisation started for comic_id=%s ===", comic_id)
+        job_id = _current_job_id()
+        logger.info(
+            "=== Publish finalisation started for comic_id=%s job_id=%s ===",
+            comic_id,
+            job_id,
+        )
 
         comic: Comic | None = db.session.get(Comic, comic_id)
         if not comic:
@@ -1213,7 +1268,7 @@ def finalize_publish_stage(
 
             db.session.commit()
 
-            logger.info("=== Publish finalisation completed for comic_id=%s ===", comic_id)
+            logger.info("=== Publish finalisation completed for comic_id=%s job_id=%s ===", comic_id, job_id)
             return {
                 "status": "completed",
                 "comic_id": comic_id,
@@ -1223,7 +1278,7 @@ def finalize_publish_stage(
                 ),
             }
         except Exception as exc:
-            logger.exception("Publish finalisation failed for comic_id=%s", comic_id)
+            logger.exception("Publish finalisation failed for comic_id=%s job_id=%s", comic_id, job_id)
             db.session.rollback()
             return {"status": "failed", "comic_id": comic_id, "error": str(exc)}
 
@@ -1247,7 +1302,12 @@ def process_character_optimization(
     """Optimise a character description using the configured script model."""
 
     with _application_context():
-        logger.info("=== Character optimisation started for character_id=%s ===", character_id)
+        job_id = _current_job_id()
+        logger.info(
+            "=== Character optimisation started for character_id=%s job_id=%s ===",
+            character_id,
+            job_id,
+        )
 
         character = db.session.get(Character, character_id)
         if not character:
@@ -1266,8 +1326,9 @@ def process_character_optimization(
             db.session.commit()
 
             logger.info(
-                "=== Character optimisation completed for character_id=%s ===",
+                "=== Character optimisation completed for character_id=%s job_id=%s ===",
                 character_id,
+                job_id,
             )
             return {
                 "status": "completed",
@@ -1276,8 +1337,9 @@ def process_character_optimization(
             }
         except Exception as exc:
             logger.exception(
-                "Character optimisation failed for character_id=%s: %s",
+                "Character optimisation failed for character_id=%s job_id=%s: %s",
                 character_id,
+                job_id,
                 exc,
             )
             db.session.rollback()
@@ -1290,17 +1352,27 @@ def process_character_optimization(
 
 def process_character_image_generation(
     character_id: int,
-    description: str,
-    reference_images: Iterable[dict[str, str]],
+    description: str | None = None,
+    reference_images: Iterable[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Generate a character concept illustration using Gemini."""
     with _application_context():
-        logger.info("=== Starting character image job character_id=%s ===", character_id)
+        job_id = _current_job_id()
+        logger.info(
+            "=== Starting character image job character_id=%s job_id=%s ===",
+            character_id,
+            job_id,
+        )
 
         character = db.session.get(Character, character_id)
         if not character:
             logger.error("Character %s not found", character_id)
             raise ValueError(f"Character {character_id} not found")
+
+        prompt_description = (description or character.optimized_description or character.description or "").strip()
+        if not prompt_description:
+            raise ValueError("Character description is empty")
+        image_refs = list(reference_images or [])
 
         try:
             character.image_status = "processing"
@@ -1316,11 +1388,11 @@ def process_character_image_generation(
                 "Create a polished character concept illustration based on the description below. "
                 "Incorporate notable traits and align with the provided reference imagery. "
                 "Return a single high-resolution manga/anime style portrait.\n\n"
-                f"Character description:\n{description}"
+                f"Character description:\n{prompt_description}"
             )
 
             parts: list[dict[str, Any]] = []
-            for idx, ref in enumerate(reference_images):
+            for idx, ref in enumerate(image_refs):
                 data = ref.get("data")
                 mime_type = ref.get("mime_type", "image/png")
                 if not data:
@@ -1332,6 +1404,13 @@ def process_character_image_generation(
                     logger.warning("Failed to decode reference image %s", idx)
                     continue
                 parts.append({"inline_data": {"mime_type": mime_type, "data": image_bytes}})
+
+            logger.info(
+                "Submitting character image prompt job_id=%s character_id=%s reference_count=%s",
+                job_id,
+                character_id,
+                len(parts),
+            )
 
             response = image_model.generate_content(parts + [{"text": prompt}])
 
@@ -1369,11 +1448,19 @@ def process_character_image_generation(
             character.image_error = None
             db.session.commit()
 
-            logger.info("Character image generated successfully for %s", character_id)
+            logger.info(
+                "Character image generated successfully for %s job_id=%s",
+                character_id,
+                job_id,
+            )
             return {"status": "completed", "character_id": character_id, "image_url": r2_url}
 
         except Exception as exc:
-            logger.exception("Character image generation failed for %s", character_id)
+            logger.exception(
+                "Character image generation failed for %s job_id=%s",
+                character_id,
+                job_id,
+            )
             character.image_status = "failed"
             character.image_error = str(exc)
             db.session.commit()

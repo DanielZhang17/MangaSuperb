@@ -370,9 +370,14 @@ CHARACTER_CREATE_DOC = {
             'required': True,
             'schema': {
                 'type': 'object',
-                'required': ['name', 'description'],
+                'required': ['description'],
                 'properties': {
-                    'name': {'type': 'string', 'example': 'Aiko the Mechanist'},
+                    'name': {
+                        'type': 'string',
+                        'example': 'Aiko the Mechanist',
+                        'default': 'unspecified',
+                        'description': 'Optional. If omitted the backend stores `unspecified` until the user renames it.',
+                    },
                     'description': {
                         'type': 'string',
                         'example': 'A brilliant teen engineer with mechanized arms and neon tattoos.'
@@ -845,7 +850,27 @@ JOB_STATUS_DOC = {
                             CHARACTER_CREATE_DOC['responses']['201']['schema']['properties']['character'],
                             {'type': 'null'}
                         ]
-                    }
+                    },
+                    'worker_snapshot': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'idle'},
+                            'active': {'type': 'integer', 'example': 0},
+                            'workers': {
+                                'type': 'array',
+                                'items': {'type': 'string'},
+                                'example': ['manga-worker-1234'],
+                            },
+                            'queued': {'type': 'integer', 'example': 3},
+                            'deferred': {'type': 'integer', 'example': 2},
+                            'scheduled': {'type': 'integer', 'example': 0},
+                            'failed': {'type': 'integer', 'example': 0},
+                        },
+                    },
+                    'warning': {
+                        'type': 'string',
+                        'example': 'No active RQ workers detected; job will remain queued.',
+                    },
                 },
             },
         },

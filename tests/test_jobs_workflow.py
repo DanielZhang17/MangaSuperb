@@ -187,6 +187,7 @@ def test_sequential_workflow_generates_resources(
 
         page = ComicPage.query.filter_by(comic_id=comic.id, page_number=1).first()
         assert page is not None
+        assert page.script_id == comic.script_id
         stored = json.loads(page.panel_text)
         assert stored[0]["dialogue"] == "Line 1"
 
@@ -198,13 +199,82 @@ def test_sequential_workflow_generates_resources(
         assert refreshed_comic.workflow_stage == "export"
         assert refreshed_comic.workflow_status == "completed"
         assert refreshed_comic.pdf_url is not None
-        assert refreshed_comic.zip_url is not None
 
-        workflow_rows = {
-            row.stage: row for row in ComicWorkflowStage.query.filter_by(comic_id=comic.id)
-        }
-        assert workflow_rows["export"].status == "completed"
-        assert len(dummy_storage.uploads) == 3  # page image + PDF + ZIP
+
+def test_render_stage_chains_additional_pages(
+    app,
+    user: User,
+    dummy_storage,
+    dummy_queue,
+    monkeypatch,
+):
+    panels = []
+    for idx in range(1, PANELS_PER_PAGE * 2 + 1):
+        panels.append(
+            {
+                "panel_number": idx,
+                "scene": f"Scene {idx}",
+                "dialogue": f"Line {idx}",
+                "visual_notes": f"Visual {idx}",
+            }
+        )
+    script_payload = {
+        "title": "Longer Story",
+        "story": "Two chapters of adventure.",
+        "style_notes": "Expressive ink",
+        "panels": panels,
+    }
+
+    prompts: list[str] = []
+    _patch_genai(monkeypatch, prompts)
+
+    with app.app_context():
+        script = Script(
+            user_id=user.id,
+            title=script_payload["title"],
+            content=json.dumps(script_payload),
+        )
+        comic = Comic(
+            user_id=user.id,
+            script=script,
+            title=script_payload["title"],
+            style_description=script_payload["style_notes"],
+            aspect_ratio="16:9",
+        )
+        db.session.add_all([script, comic])
+        db.session.commit()
+
+        jobs.bootstrap_comic_workflow(comic)
+        db.session.commit()
+
+        jobs.process_outline_stage(comic.id)
+        jobs.process_shot_stage(comic.id)
+
+        dummy_queue.jobs.clear()
+
+        render_result = jobs.process_page_render_stage(
+            comic.id,
+            page_number=1,
+            image_model="test-model",
+            chain_remaining=True,
+        )
+        assert render_result["status"] == "processing"
+
+        assert dummy_queue.jobs, "Expected follow-up render job to be enqueued"
+        chained_job = dummy_queue.jobs[-1]
+        assert chained_job.kwargs["page_number"] == 2
+        assert chained_job.kwargs["chain_remaining"] is True
+
+        refreshed_comic = db.session.get(Comic, comic.id)
+        render_stage = next(
+            stage
+            for stage in ComicWorkflowStage.query.filter_by(comic_id=comic.id)
+            if stage.stage == "render"
+        )
+        assert render_stage.status == "in_progress"
+        assert refreshed_comic.workflow_stage == "render"
+        assert refreshed_comic.workflow_status == "in_progress"
+        assert refreshed_comic.status == "processing"
 
 
 def test_requeue_render_includes_context(

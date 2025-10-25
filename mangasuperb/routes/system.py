@@ -8,6 +8,8 @@ from typing import Any
 from flask import Blueprint, current_app, jsonify, send_from_directory
 from sqlalchemy import text
 
+from rq import Worker
+
 from mangasuperb.extensions import db
 
 logger = logging.getLogger(__name__)
@@ -32,6 +34,7 @@ def health() -> Any:
                 "database": _check_database(),
                 "redis": _check_redis(),
                 "r2": _check_r2(),
+                "rq_workers": _check_workers(),
             },
         }
     )
@@ -56,6 +59,24 @@ def _check_redis() -> str:
     except Exception as exc:  # pragma: no cover - infrastructure
         logger.error("Redis check failed: %s", exc)
         return "disconnected"
+
+
+def _check_workers() -> dict[str, Any]:
+    queue = current_app.extensions.get("rq_queue")
+    if not queue:
+        return {"status": "unconfigured", "active": 0, "workers": []}
+    try:
+        workers = Worker.all(queue.connection)
+        attached: list[str] = []
+        for worker in workers:
+            queue_names = {q.name for q in getattr(worker, "queues", [])}
+            if queue.name in queue_names:
+                attached.append(worker.name or worker.key)
+        status = "active" if attached else "idle"
+        return {"status": status, "active": len(attached), "workers": attached}
+    except Exception as exc:  # pragma: no cover - infrastructure
+        logger.error("RQ worker check failed: %s", exc)
+        return {"status": "error", "active": 0, "workers": []}
 
 
 def _check_r2() -> str:

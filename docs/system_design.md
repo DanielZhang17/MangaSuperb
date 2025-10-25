@@ -80,6 +80,9 @@ graph TD
 | `/health` | GET | Liveness and dependency check for database, Redis, and R2. | Not required |
 | `/api/docs.json` | GET | Swagger definition used by Swagger UI. | Not required |
 
+- **Request parameters** – none (public endpoints).
+- **Response fields** – optional status blocks per dependency, including `rq_workers` with active worker details.
+
 ### Authentication
 
 | Endpoint | Method | Description | Auth |
@@ -92,6 +95,13 @@ graph TD
 | `/api/auth/email` | PATCH | Update email address with format and uniqueness enforcement. | Yes |
 | `/api/auth/password` | PATCH | Change password by submitting current and new secrets. | Yes |
 
+- **POST /api/auth/register** – Required JSON: `username`, `email`, `password`. Optional: none. Returns `user`.
+- **POST /api/auth/login** – Required JSON: `password` plus one of `username` or `email`. Optional: remember flags (future). Returns `user`.
+- **PATCH /api/auth/username** – Required JSON: `username`. Optional: none. Returns `user`.
+- **PATCH /api/auth/email** – Required JSON: `email`. Optional: none. Returns `user`.
+- **PATCH /api/auth/password** – Required JSON: `current_password`, `new_password`. Optional: none. Returns `message`.
+- **GET /api/auth/me** – No parameters. Returns `user` or `null`.
+
 ### Characters
 
 | Endpoint | Method | Description | Auth |
@@ -99,6 +109,10 @@ graph TD
 | `/api/characters` | POST | Create a character; optional optimisation and reference images enqueue portrait jobs and return `job_id`. | Yes |
 | `/api/characters` | GET | List characters owned by the user plus any marked `is_public`. | Yes |
 | `/api/characters/<id>` | GET | Retrieve a single character owned by the user. | Yes |
+
+- **POST /api/characters** – Required JSON: `description`. Optional: `name` (defaults to `unspecified`), `sex` (default `unspecified`), `is_public`, `optimize`, `style_prompt`, `reference_images`. Returns `character`, optional `job_id`.
+- **GET /api/characters** – Optional query: none; returns `characters` including public roster.
+- **GET /api/characters/<id>** – Path `id` required; returns `character`.
 
 ### Scripts
 
@@ -108,6 +122,10 @@ graph TD
 | `/api/scripts` | GET | List recent scripts for the current user (max 100). | Yes |
 | `/api/scripts/<id>` | GET | Fetch a single script owned by the user. | Yes |
 
+- **POST /api/scripts** – Required JSON: `title`, `content` (stringified JSON). Optional: none. Returns `script`.
+- **GET /api/scripts** – Optional query: `limit` (default 50, max 100). Returns `scripts`, `count`.
+- **GET /api/scripts/<id>** – Path `id` required; returns `script`.
+
 ### Comics
 
 | Endpoint | Method | Description | Auth |
@@ -115,6 +133,10 @@ graph TD
 | `/api/comics` | POST | Create a comic with associated script, aspect ratio, and optional character roster. | Yes |
 | `/api/comics` | GET | List comics belonging to the current user. | Yes |
 | `/api/comics/<id>` | GET | Retrieve a specific comic, including generated pages and status. | Yes |
+
+- **POST /api/comics** – Required JSON: `title`, `story` (or `script_content`), `style` (or `style_description`), `aspect_ratio`. Optional: `characters`, `character_ids`, `style_description`. Returns `comic`, `script`.
+- **GET /api/comics** – Optional query: `user_id` (must match self). Returns `comics`, `count`.
+- **GET /api/comics/<id>** – Path `id` required; returns `comic`.
 
 ### Stories, panels, and rendering
 
@@ -127,12 +149,27 @@ graph TD
 | `/api/panels/<comic_id>/layouts` | POST | Select a page layout and panel order, marking the comic for re-render. | Yes |
 | `/api/panels/<comic_id>/pages/<page_number>/render` | POST | Enqueue a specific page render job. | Yes |
 
+- **GET /api/stories/<comic_id>** – Path `comic_id` required; returns `comic`.
+- **POST /api/stories/<comic_id>** – Required JSON: `sections` (non-empty list). Optional: `characters`, `character_ids`. Returns `comic`.
+- **POST /api/stories/<comic_id>/optimize** – Path `comic_id`; no body. Returns `stage_jobs`, `comic`.
+- **PATCH /api/panels/<panel_id>** – Path `panel_id`; body optional fields among `description`, `dialogue`, `camera_notes`, `style_notes`, `status`, `page_number`, `panel_number`. Returns `panel`, `comic`.
+- **POST /api/panels/<comic_id>/layouts`** – Path `comic_id`; required body: `page_number`. Optional: `layout_key`, `notes`, `panel_order`. Returns `layout`, `comic`.
+- **POST /api/panels/<comic_id>/pages/<page_number>/render`** – Path params required; body optional. Returns `job_id`, `comic`.
+
 ### Jobs
 
 | Endpoint | Method | Description | Auth |
 |----------|--------|-------------|------|
 | `/api/jobs` | POST | Dispatch background work (`comic_generation`, `story_optimization`, `character_optimization`, `page_render`). | Yes |
 | `/api/jobs/<job_id>` | GET | Inspect queued or completed job status and associated payloads. | Yes |
+
+- **POST /api/jobs** – Required JSON varies by `job_type`:  
+  - `comic_generation` requires `prompt`; optional `style`, `aspect_ratio`, `characters`.  
+  - `story_optimization` requires `comic_id`.  
+  - `character_optimization` requires `character_id`, optional `description`.  
+  - `page_render` requires `comic_id`, `page_number`.  
+  Returns `job_id`, plus comic/script payloads per workflow.
+- **GET /api/jobs/<job_id>** – Path `job_id` required; returns `job_id`, `rq_status`, optional `comic`/`character`.
 
 ### Scaling considerations
 
@@ -169,7 +206,7 @@ This shared mental model should make it straightforward to onboard contributors,
 
 ### `characters`
 - `id` PK, `user_id` FK → `users.id` (`CASCADE` on delete).
-- Required fields: `name`, `description`; `sex` constrained in application to allowed vocabulary.
+- Required `description`; `name` defaults to `'unspecified'` when omitted so users can rename later.
 - Flags: `is_public` (indexed) and `image_status` for queue tracking.
 - Optional: `style_prompt`, `optimized_description`, `image_url`, `image_job_id`, `image_error`.
 - Relationship: many characters per user; joined to comics via `comic_characters`.
@@ -191,9 +228,9 @@ This shared mental model should make it straightforward to onboard contributors,
 - Unique constraint `uq_comic_character_link` prevents duplicate assignments of the same character to a comic.
 
 ### `comic_pages`
-- `id` PK, `comic_id` FK → `comics.id` (`CASCADE`).
+- `id` PK, `comic_id` FK → `comics.id` (`CASCADE`), `script_id` FK → `scripts.id` (`CASCADE`).
 - `page_number` + `comic_id` unique (`unique_comic_page`), enforcing one rendered asset per page per comic.
-- Stores `image_url` and optional `panel_text`.
+- Stores `image_url`, optional `panel_text`, and maintains a direct script reference for traceability.
 - Linked from `comic_page_layouts.comic_page_id`.
 
 ### `comic_workflow_stages`

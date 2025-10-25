@@ -34,7 +34,8 @@ ALLOWED_SEX_VALUES_MESSAGE = ", ".join(sorted(ALLOWED_SEX_VALUES))
 @swag_from(CHARACTER_CREATE_DOC)
 def create_character() -> Any:
     data = request.get_json(silent=True) or {}
-    name = (data.get("name") or "").strip()
+    raw_name = (data.get("name") or "").strip()
+    name = raw_name or "unspecified"
     description = (data.get("description") or "").strip()
     optimize_flag = bool(data.get("optimize", False))
     style_prompt = (data.get("style_prompt") or "").strip() or None
@@ -42,8 +43,6 @@ def create_character() -> Any:
     sex_value = (data.get("sex") or "unspecified").strip().lower()
     is_public = bool(data.get("is_public", False))
 
-    if not name:
-        return jsonify({"error": "Name is required"}), 400
     if not description:
         return jsonify({"error": "Description is required"}), 400
     if sex_value not in ALLOWED_SEX_VALUES:
@@ -52,6 +51,14 @@ def create_character() -> Any:
             400,
         )
 
+    logger.info(
+        "Character creation requested user_id=%s optimize=%s reference_images=%s name_supplied=%s",
+        current_user.id,
+        optimize_flag,
+        len(reference_images),
+        bool(raw_name),
+    )
+
     optimized_description = None
     prompt_for_image = description
 
@@ -59,6 +66,11 @@ def create_character() -> Any:
         try:
             optimized_description = optimize_character_description(description)
             prompt_for_image = optimized_description
+            logger.info(
+                "Character optimisation completed user_id=%s description_length=%s",
+                current_user.id,
+                len(optimized_description),
+            )
         except ValueError as exc:
             logger.error("Character optimization failed: %s", exc)
             return jsonify({"error": str(exc)}), 400
@@ -94,7 +106,10 @@ def create_character() -> Any:
         if normalized_refs:
             from mangasuperb.services.jobs import process_character_image_generation
 
-            queue = current_app.extensions["rq_queue"]
+            queue = current_app.extensions.get("rq_queue")
+            if not queue:
+                logger.error("RQ queue not configured for character image generation")
+                raise RuntimeError("Background queue is not configured")
             job = queue.enqueue(
                 process_character_image_generation,
                 character_id=character.id,
@@ -108,6 +123,19 @@ def create_character() -> Any:
             character.image_job_id = job.id
             character.image_error = None
             job_id = job.id
+            logger.info(
+                "Character image job enqueued user_id=%s character_id=%s job_id=%s references=%s",
+                current_user.id,
+                character.id,
+                job_id,
+                len(normalized_refs),
+            )
+        else:
+            logger.info(
+                "Character created without image job user_id=%s character_id=%s references=0",
+                current_user.id,
+                character.id,
+            )
 
         db.session.commit()
 

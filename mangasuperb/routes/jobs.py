@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, Tuple
 from flasgger import swag_from
 from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
+from rq import Worker
 from rq.job import Job
 
 from mangasuperb.extensions import db
@@ -45,7 +46,57 @@ def _require_queue():
     queue = current_app.extensions.get("rq_queue")
     if not queue:
         raise RuntimeError("Background queue is not configured")
+    _log_queue_snapshot(queue, "queue_required")
     return queue
+
+
+def _log_queue_snapshot(queue, context: str) -> None:
+    """Log current queue depth, registries, and workers for observability."""
+    try:
+        queued = len(queue)
+        scheduled = queue.scheduled_job_registry.count
+        deferred = queue.deferred_job_registry.count
+        failed = queue.failed_job_registry.count
+        workers = _queue_worker_snapshot(queue)["workers"]
+        logger.info(
+            "RQ snapshot (%s) queue=%s queued=%s scheduled=%s deferred=%s failed=%s workers=%s",
+            context,
+            queue.name,
+            queued,
+            scheduled,
+            deferred,
+            failed,
+            workers,
+        )
+    except Exception:  # pragma: no cover - logging safety
+        logger.exception("Unable to capture RQ snapshot for context=%s", context)
+
+
+def _queue_worker_snapshot(queue=None) -> dict[str, object]:
+    """Return information about workers attached to the configured queue."""
+    queue = queue or current_app.extensions.get("rq_queue")
+    if not queue:
+        return {"status": "unconfigured", "active": 0, "workers": []}
+    try:
+        workers = Worker.all(queue.connection)
+        attached: list[str] = []
+        for worker in workers:
+            queue_names = {q.name for q in getattr(worker, "queues", [])}
+            if queue.name in queue_names:
+                attached.append(worker.name or worker.key)
+        status = "active" if attached else "idle"
+        return {
+            "status": status,
+            "active": len(attached),
+            "workers": attached,
+            "queued": len(queue),
+            "deferred": queue.deferred_job_registry.count,
+            "scheduled": queue.scheduled_job_registry.count,
+            "failed": queue.failed_job_registry.count,
+        }
+    except Exception as exc:  # pragma: no cover - defensive safety
+        logger.error("Failed to collect worker snapshot: %s", exc)
+        return {"status": "error", "active": 0, "workers": []}
 
 
 def _handle_comic_generation(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
@@ -112,6 +163,7 @@ def _handle_comic_generation(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]
         job_id = pipeline_jobs["render_job_id"]
         db.session.refresh(comic)
         db.session.refresh(script)
+        _log_queue_snapshot(queue, "comic_generation_enqueued")
 
         logger.info("Comic generation enqueued job_id=%s for comic_id=%s", job_id, comic.id)
         return (
@@ -153,6 +205,7 @@ def _handle_story_optimization(data: Dict[str, Any]) -> Tuple[Dict[str, Any], in
         queue = _require_queue()
         stage_jobs = enqueue_story_optimization(queue, comic)
         db.session.refresh(comic)
+        _log_queue_snapshot(queue, "story_optimization_enqueued")
         return {"stage_jobs": stage_jobs, "comic": comic.to_dict()}, 202
     except RuntimeError as exc:
         logger.error("Story optimisation queue unavailable: %s", exc)
@@ -188,6 +241,7 @@ def _handle_character_optimization(data: Dict[str, Any]) -> Tuple[Dict[str, Any]
             result_ttl=current_app.config["RQ_RESULT_TTL"],
             description=f"Character optimisation for {character.id}",
         )
+        _log_queue_snapshot(queue, "character_optimization_enqueued")
         return {"job_id": job.id, "character_id": character.id}, 202
     except RuntimeError as exc:
         logger.error("Character optimisation queue unavailable: %s", exc)
@@ -220,6 +274,7 @@ def _handle_page_render(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
         queue = _require_queue()
         job = enqueue_page_render(queue, comic, page_number)
         db.session.refresh(comic)
+        _log_queue_snapshot(queue, "page_render_enqueued")
         return {"job_id": job.id, "comic": comic.to_dict()}, 202
     except RuntimeError as exc:
         logger.error("Page render queue unavailable: %s", exc)
@@ -263,16 +318,25 @@ def get_job_status(job_id: str) -> Any:
             logger.error("Failed to fetch RQ job: %s", exc)
             rq_status = "unknown"
 
+        worker_snapshot = _queue_worker_snapshot()
+
         comic = Comic.query.filter_by(job_id=job_id).first()
         if comic:
             response = {
                 "job_id": job_id,
                 "rq_status": rq_status,
                 "comic": comic.to_dict(),
+                "worker_snapshot": worker_snapshot,
             }
+            if worker_snapshot.get("active", 0) == 0:
+                response["warning"] = "No active RQ workers detected; job will remain queued."
             return jsonify(response), 200
 
-        return jsonify({"job_id": job_id, "rq_status": rq_status}), 200
+        payload = {"job_id": job_id, "rq_status": rq_status, "worker_snapshot": worker_snapshot}
+        if worker_snapshot.get("active", 0) == 0:
+            payload["warning"] = "No active RQ workers detected; job will remain queued."
+
+        return jsonify(payload), 200
 
     except Exception as exc:  # pragma: no cover - unexpected failure
         logger.error("Error getting job status: %s", exc)

@@ -62,7 +62,7 @@ class Character(db.Model):
         nullable=False,
         index=True,
     )
-    name = db.Column(db.String(100), nullable=False)
+    name = db.Column(db.String(100), nullable=False, default='unspecified', server_default='unspecified')
     description = db.Column(db.Text, nullable=False)
     sex = db.Column(db.String(20), nullable=False, default='unspecified')
     is_public = db.Column(db.Boolean, nullable=False, default=False, index=True)
@@ -364,6 +364,12 @@ class ComicPage(db.Model):
         nullable=False,
         index=True,
     )
+    script_id = db.Column(
+        db.Integer,
+        db.ForeignKey('scripts.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
     page_number = db.Column(db.Integer, nullable=False)
     image_url = db.Column(db.String(255), nullable=False)
     panel_text = db.Column(db.Text, nullable=True)
@@ -372,6 +378,8 @@ class ComicPage(db.Model):
     __table_args__ = (
         db.UniqueConstraint('comic_id', 'page_number', name='unique_comic_page'),
     )
+
+    script = db.relationship('Script', backref=db.backref('comic_pages', lazy=True))
 
     def __repr__(self):
         return f'<ComicPage {self.comic_id}-{self.page_number}>'
@@ -385,6 +393,7 @@ class ComicPage(db.Model):
             )
         return {
             'id': self.id,
+            'script_id': self.script_id,
             'comic_id': self.comic_id,
             'page_number': self.page_number,
             'image_url': self.image_url,
