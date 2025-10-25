@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from flasgger import swag_from
 from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
 
@@ -19,6 +20,7 @@ from mangasuperb.services.jobs import (
     set_comic_stage_status,
 )
 from models import Comic, ComicOutlineSection, ComicPageLayout, ComicPanelShot
+from swagger import STORY_GET_DOC, STORY_OPTIMIZE_DOC, STORY_UPSERT_DOC
 
 bp = Blueprint("stories", __name__, url_prefix="/api/stories")
 
@@ -32,6 +34,7 @@ def _load_comic_for_user(comic_id: int) -> Comic | None:
 
 @bp.get("/<int:comic_id>")
 @login_required
+@swag_from(STORY_GET_DOC)
 def get_story(comic_id: int) -> Any:
     comic = _load_comic_for_user(comic_id)
     if not comic:
@@ -42,6 +45,7 @@ def get_story(comic_id: int) -> Any:
 
 @bp.post("/<int:comic_id>")
 @login_required
+@swag_from(STORY_UPSERT_DOC)
 def upsert_story_outline(comic_id: int) -> Any:
     comic = _load_comic_for_user(comic_id)
     if not comic:
@@ -122,6 +126,7 @@ def upsert_story_outline(comic_id: int) -> Any:
 
 @bp.post("/<int:comic_id>/optimize")
 @login_required
+@swag_from(STORY_OPTIMIZE_DOC)
 def optimize_story(comic_id: int) -> Any:
     comic = _load_comic_for_user(comic_id)
     if not comic:

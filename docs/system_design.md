@@ -93,6 +93,7 @@ graph TD
 | `comic_page_layouts` / `comic_page_panels` | 用户或系统选择的布局与面板排序 | 支持手动调整后触发重新渲染 |
 | `comic_workflow_stages` | outline/shots/render/export 等阶段的 job_id、状态、时间戳、错误信息 | 用于 `/api/jobs/<id>` 与 UI 展示 |
 | `comic_characters` | 漫画与角色的桥表，记录 order/role 等 | |
+| `comic_likes` | 用户对漫画的点赞记录 | (`user_id`, `comic_id`) 唯一；用于热度排行 |
 
 ---
 
@@ -157,4 +158,3 @@ graph TD
 - 前端如需同步展示队列进度，可直接使用 `/api/jobs/<id>` 的 `worker_snapshot` 和 `comic.workflow_stages`。
 - 添加新类型的任务时，记得更新 `swagger.py` 中 `JOB_CREATE_DOC` 和 `JOB_STATUS_DOC`。
 - 如需扩展导出格式，可在 `process_export_stage` 中增加新的文件生成逻辑，并写入数据库字段。
-

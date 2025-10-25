@@ -133,3 +133,21 @@ def test_public_listing_returns_published_comic(
     detail = detail_response.get_json()
     assert detail["id"] == generated_comic.id
     assert detail["cover_image_url"] == published["cover_image_url"]
+
+
+def test_comic_like_toggle(app, auth_client, generated_comic: Comic):
+    like_response = auth_client.post(f"/api/comics/{generated_comic.id}/like")
+    assert like_response.status_code == 200
+    payload = like_response.get_json()
+    assert payload["like_count"] == 1
+    assert payload["comic"]["user_liked"] is True
+
+    like_again = auth_client.post(f"/api/comics/{generated_comic.id}/like")
+    assert like_again.status_code == 200
+    assert like_again.get_json()["like_count"] == 1
+
+    unlike_response = auth_client.delete(f"/api/comics/{generated_comic.id}/like")
+    assert unlike_response.status_code == 200
+    unlike_payload = unlike_response.get_json()
+    assert unlike_payload["like_count"] == 0
+    assert unlike_payload["comic"]["user_liked"] is False

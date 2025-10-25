@@ -37,6 +37,12 @@ class User(UserMixin, db.Model):
         lazy=True,
         cascade='all, delete-orphan',
     )
+    comic_likes = db.relationship(
+        'ComicLike',
+        backref='user',
+        lazy=True,
+        cascade='all, delete-orphan',
+    )
 
     def __repr__(self):
         return f'<User {self.username}>'
@@ -232,6 +238,12 @@ class Comic(db.Model):
         order_by='ComicCharacter.order_index',
         single_parent=True,
     )
+    likes = db.relationship(
+        'ComicLike',
+        backref='comic',
+        lazy=True,
+        cascade='all, delete-orphan',
+    )
 
     def __repr__(self):
         return f'<Comic {self.title} - {self.status}>'
@@ -283,6 +295,8 @@ class Comic(db.Model):
                 if self.character_links
                 else []
             ),
+            'like_count': getattr(self, '_like_count', len(self.likes) if self.likes else 0),
+            'user_liked': getattr(self, '_user_liked', False),
         }
 
     def to_public_dict(self):
@@ -295,7 +309,33 @@ class Comic(db.Model):
             'published_at': self.published_at.isoformat() if self.published_at else None,
             'style_description': self.style_description,
             'aspect_ratio': self.aspect_ratio,
+            'like_count': getattr(self, '_like_count', len(self.likes) if self.likes else 0),
         }
+
+
+class ComicLike(db.Model):
+    """User likes for comics."""
+
+    __tablename__ = 'comic_likes'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey('users.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
+    comic_id = db.Column(
+        db.Integer,
+        db.ForeignKey('comics.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'comic_id', name='uq_comic_like_user_comic'),
+    )
 
 
 class ComicCharacter(db.Model):

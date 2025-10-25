@@ -4,12 +4,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List
 
+from flasgger import swag_from
 from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
 
 from mangasuperb.extensions import db
 from mangasuperb.services.jobs import enqueue_page_render, set_comic_stage_status
 from models import Comic, ComicPageLayout, ComicPagePanel, ComicPanelShot
+from swagger import PANEL_LAYOUT_DOC, PANEL_RENDER_DOC, PANEL_UPDATE_DOC
 
 bp = Blueprint("panels", __name__, url_prefix="/api/panels")
 
@@ -32,6 +34,7 @@ def _load_panel_for_user(panel_id: int) -> ComicPanelShot | None:
 
 @bp.patch("/<int:panel_id>")
 @login_required
+@swag_from(PANEL_UPDATE_DOC)
 def update_panel(panel_id: int) -> Any:
     panel = _load_panel_for_user(panel_id)
     if not panel:
@@ -101,6 +104,7 @@ def update_panel(panel_id: int) -> Any:
 
 @bp.post("/<int:comic_id>/layouts")
 @login_required
+@swag_from(PANEL_LAYOUT_DOC)
 def update_layout(comic_id: int) -> Any:
     comic = _load_comic_for_user(comic_id)
     if not comic:
@@ -168,6 +172,7 @@ def update_layout(comic_id: int) -> Any:
 
 @bp.post("/<int:comic_id>/pages/<int:page_number>/render")
 @login_required
+@swag_from(PANEL_RENDER_DOC)
 def render_page(comic_id: int, page_number: int) -> Any:
     comic = _load_comic_for_user(comic_id)
     if not comic:
