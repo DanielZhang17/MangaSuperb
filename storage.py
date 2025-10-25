@@ -23,7 +23,8 @@ class R2Storage:
             config: Application config object with R2 credentials
         """
         self.bucket_name = config.R2_BUCKET_NAME
-        self.public_url = config.R2_PUBLIC_URL
+        base_url = getattr(config, 'R2_PUBLIC_URL', '') or ''
+        self.public_url = base_url.rstrip('/')
 
         # Create S3 client configured for R2
         self.s3_client = boto3.client(
@@ -69,7 +70,10 @@ class R2Storage:
             )
 
             # Construct public URL
-            public_url = f"{self.public_url}/{key}"
+            if self.public_url:
+                public_url = f"{self.public_url}/{key}"
+            else:
+                public_url = key
             logger.info(f"Image uploaded successfully: {public_url}")
 
             return public_url
@@ -136,7 +140,7 @@ class R2Storage:
             return None
 
         cleaned = url_or_key.strip()
-        if cleaned.startswith(self.public_url):
+        if self.public_url and cleaned.startswith(self.public_url):
             return cleaned[len(self.public_url):].lstrip('/')
 
         parsed = urlparse(cleaned)
