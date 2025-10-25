@@ -1,7 +1,14 @@
 import request from '@/service'
-import type { IComic, PublishComicResponse } from '@/service/types'
+import type { IComic, ListComicsResponse, PublishComicResponse } from '@/service/types'
 
 export const ComicsApi = {
+  // List comics for current user
+  list() {
+    return request<void, ListComicsResponse>({
+      url: '/api/comics',
+      method: 'GET',
+    })
+  },
   // Get a comic detail by id
   get(comicId: number) {
     return request<void, IComic>({

@@ -132,6 +132,8 @@ export interface JobDetail {
 export interface IComic {
   id: number
   title?: string | null
+  style_description?: string | null
+  aspect_ratio?: string | null
   cover_image_url?: string | null
   pdf_url?: string | null
   zip_url?: string | null
@@ -155,4 +157,9 @@ export interface SetPanelLayoutRequest {
   layout_key: string
   notes?: string
   panel_order?: number[]
+}
+
+export interface ListComicsResponse {
+  comics: IComic[]
+  count?: number
 }
