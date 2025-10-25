@@ -1,11 +1,15 @@
+import { useAtom } from 'jotai'
 import React from 'react'
 
+import { userAtom } from '@/atoms'
 import { InlineInput } from '@/components/common/inline-input'
 import { Button } from '@/components/ui/button'
 import {
   ToggleGroup,
   ToggleGroupItem,
 } from '@/components/ui/toggle-group'
+import { useAuth } from '@/hooks/use-auth'
+import { getAvatarUrl } from '@/lib/utils'
 
 const toggleItemClasses = `
   bg-card
@@ -50,27 +54,30 @@ const CharacterCard: React.FC<CharacterCardProps> = ({ imageUrl, label }) => (
 );
 
 export default function CharacterSettingsPage() {
+  const [user] = useAtom(userAtom)
+  const { updateUsername } = useAuth()
+  const username = user?.username ?? '未登录'
+  const avatarUrl = getAvatarUrl(user?.avatar_index ?? null)
+
   return (
     <div className="min-h-screen bg-background p-8 text-foreground lg:p-12">
       <header className="mb-10 flex items-center gap-4">
         <img
-          src="https://placehold.co/64x64/334155/e2e8f0?text=Hu"
-          alt="Hu Tao Avatar"
+          src={avatarUrl}
+          alt={username}
           className="h-16 w-16 rounded-full border-2 border-border"
         />
         <div className="min-w-0">
           <InlineInput
-            initialValue="Hu Tao"
+            initialValue={username}
             submitLabel="保存"
             placeholder="请输入新的昵称"
             renderDisplay={(val) => (
               <h1 className="text-3xl font-semibold truncate">{val}</h1>
             )}
             onSubmit={async (v) => {
-              // TODO: 在此处调用后端接口保存昵称
-              // await request.post('/api/me/name', { name: v })
-              void v; // Marking parameter as used
-              await new Promise((r) => setTimeout(r, 600));
+              if (!v || v === user?.username) return
+              await updateUsername({ username: v })
             }}
           />
         </div>

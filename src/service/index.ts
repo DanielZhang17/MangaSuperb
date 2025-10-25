@@ -1,50 +1,25 @@
 import type { AxiosError, AxiosInstance } from 'axios'
 import axios from 'axios'
 
-import type { CustomRequestConfig, IApiResponse } from './types'
+import type { CustomRequestConfig } from './types'
 
 function request<TRequest = any, TResponse = any>(
   config: CustomRequestConfig<TRequest>,
 ): Promise<TResponse> {
   const instance: AxiosInstance = axios.create({
-    baseURL: 'https://api.example.com',
+    baseURL: (import.meta as any).env?.VITE_API_BASE ?? '',
     timeout: 10000,
-    headers: { 'Content-Type': 'application/json;charset=UTF-8' },
+    withCredentials: true, 
+    headers: { 'Content-Type': 'application/json' },
   })
 
   instance.interceptors.request.use(
-    (config) => {
-      const token = localStorage.getItem('token')
-      if (token && config.headers) {
-        config.headers.Authorization = `Bearer ${token}`
-      }
-
-      return config
-    },
-    (error: AxiosError) => {
-      return Promise.reject(error)
-    },
+    (cfg) => cfg,
+    (error: AxiosError) => Promise.reject(error),
   )
 
   instance.interceptors.response.use(
-    (response) => {
-      const res = response.data as IApiResponse<TResponse>
-      if (res.code !== 0 && res.code !== 200) {
-        if (res.code === 401) {
-          console.error('Login expired, please log in again!')
-        }
-
-        if (config.showError !== false) {
-          console.error(res.message || 'Error')
-        }
-
-        return Promise.reject(new Error(res.message || 'Error'))
-      }
-
-      response.data = res.data
-
-      return response
-    },
+    (response) => response,
     (error: AxiosError) => {
       let message = ''
       if (error.response) {
@@ -53,7 +28,7 @@ function request<TRequest = any, TResponse = any>(
             message = 'Bad Request (400)'
             break
           case 401:
-            message = 'Unauthorized, please log in again (401)'
+            message = 'Unauthorized (401)'
             break
           case 403:
             message = 'Forbidden (403)'
@@ -65,14 +40,19 @@ function request<TRequest = any, TResponse = any>(
             message = 'Internal Server Error (500)'
             break
           default:
-            message = `Connection error (${error.response.status})!`
+            message = `Connection error (${error.response.status})`
+        }
+        
+        const data: any = error.response.data
+        if (data && typeof data === 'object' && (data.error || data.message)) {
+          message = data.error || data.message || message
         }
       }
       else if (error.request) {
-        message = 'Network connection timeout!'
+        message = 'Network connection timeout'
       }
       else {
-        message = 'Request failed, please check your network!'
+        message = 'Request failed, please check your network'
       }
 
       if (config.showError !== false) {
@@ -83,7 +63,7 @@ function request<TRequest = any, TResponse = any>(
     },
   )
 
-  return instance.request<any, TResponse>(config)
+  return instance.request<TResponse>(config).then((res) => res.data as TResponse)
 }
 
 export default request

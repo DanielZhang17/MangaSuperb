@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Rocket } from 'lucide-react' // Logo 占位符
 import { useForm } from 'react-hook-form'
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 import { z } from 'zod'
 
 import { Button } from '@/components/ui/button'
@@ -17,7 +17,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import request from '@/service'
+import { useAuth } from '@/hooks/use-auth'
 
 // 登录与注册校验规则
 const anyZodResolver = zodResolver as unknown as (schema: unknown) => any
@@ -61,6 +61,8 @@ const LeftPanel = () => (
 
 const AuthForm = () => {
   const navigate = useNavigate()
+  const location = useLocation() as any
+  const { login, register: registerAction, loginState, registerState } = useAuth()
 
   // login form
   const loginForm = useForm({
@@ -79,32 +81,19 @@ const AuthForm = () => {
   })
 
   async function onLoginSubmit(values: any) {
-    const res = await request<{ email: string; password: string }, { token: string }>({
-      method: 'POST',
-      url: '/auth/login',
-      data: { email: values.email, password: values.password },
-      showError: true,
-    })
-    localStorage.setItem('token', (res as any)?.token ?? '')
-    navigate('/')
+    await login({ email: values.email, password: values.password })
+    const to = location?.state?.from?.pathname ?? '/'
+    navigate(to, { replace: true })
   }
 
   async function onRegisterSubmit(values: any) {
-    const res = await request<
-      { username: string; email: string; password: string },
-      { token: string }
-    >({
-      method: 'POST',
-      url: '/auth/register',
-      data: {
-        username: values.username,
-        email: values.email,
-        password: values.password,
-      },
-      showError: true,
+    await registerAction({
+      username: values.username,
+      email: values.email,
+      password: values.password,
     })
-    localStorage.setItem('token', (res as any)?.token ?? '')
-    navigate('/')
+    const to = location?.state?.from?.pathname ?? '/'
+    navigate(to, { replace: true })
   }
 
   return (
@@ -176,10 +165,10 @@ const AuthForm = () => {
                 />
                 <Button
                   type="submit"
-                  disabled={loginForm.formState.isSubmitting}
+                  disabled={loginForm.formState.isSubmitting || loginState.isMutating}
                   className="mt-4 h-10 w-full py-6 text-lg font-semibold"
                 >
-                  {loginForm.formState.isSubmitting ? '处理中…' : 'LOGIN'}
+                  {loginForm.formState.isSubmitting || loginState.isMutating ? '处理中…' : 'LOGIN'}
                 </Button>
               </form>
             </Form>
@@ -260,10 +249,10 @@ const AuthForm = () => {
                 />
                 <Button
                   type="submit"
-                  disabled={registerForm.formState.isSubmitting}
+                  disabled={registerForm.formState.isSubmitting || registerState.isMutating}
                   className="mt-4 h-10 w-full py-6 text-lg font-semibold"
                 >
-                  {registerForm.formState.isSubmitting ? '处理中…' : '注册'}
+                  {registerForm.formState.isSubmitting || registerState.isMutating ? '处理中…' : '注册'}
                 </Button>
               </form>
             </Form>

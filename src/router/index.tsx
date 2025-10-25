@@ -1,6 +1,8 @@
 import { lazy } from 'react'
 import { createBrowserRouter, Navigate } from 'react-router'
 
+import RequireAuth from '@/pages/require-auth'
+
 const DashboardLayout = lazy(() => import('@/pages/dashboard-layout.tsx'))
 const HomePage = lazy(() => import('@/pages/home'))
 const IdeasPage = lazy(() => import('@/pages/ideas'))
@@ -16,11 +18,31 @@ const router = createBrowserRouter([
     element: <DashboardLayout />,
     children: [
       { index: true, element: <HomePage /> },
-      { path: 'ideas', element: <IdeasPage /> },
-      { path: 'comics', element: <ComicsPage /> },
-      { path: 'characters', element: <CharactersPage /> },
-      { path: 'create-character', element: <CharacterCreatorPage /> },
-      { path: 'me', element: <MePage /> },
+      { path: 'ideas', element: (
+        <RequireAuth>
+          <IdeasPage />
+        </RequireAuth>
+      ) },
+      { path: 'comics', element: (
+        <RequireAuth>
+          <ComicsPage />
+        </RequireAuth>
+      ) },
+      { path: 'characters', element: (
+        <RequireAuth>
+          <CharactersPage />
+        </RequireAuth>
+      ) },
+      { path: 'create-character', element: (
+        <RequireAuth>
+          <CharacterCreatorPage />
+        </RequireAuth>
+      ) },
+      { path: 'me', element: (
+        <RequireAuth>
+          <MePage />
+        </RequireAuth>
+      ) },
       { path: '*', element: <Navigate to="/" replace /> },
     ],
   },
