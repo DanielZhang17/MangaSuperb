@@ -113,3 +113,6 @@ pids
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Gemini settings file
+frontend/.gemini/settings.json
