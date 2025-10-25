@@ -19,6 +19,7 @@ from swagger import (
     CHARACTER_CREATE_DOC,
     CHARACTER_DETAIL_DOC,
     CHARACTER_LIST_DOC,
+    CHARACTER_RENAME_DOC,
 )
 
 logger = logging.getLogger(__name__)
@@ -180,3 +181,44 @@ def list_characters() -> Any:
         seen.add(character.id)
         payload.append(character.to_dict())
     return jsonify({"characters": payload}), 200
+
+
+@bp.patch("/<int:character_id>/name")
+@login_required
+@swag_from(CHARACTER_RENAME_DOC)
+def rename_character(character_id: int) -> Any:
+    data = request.get_json(silent=True) or {}
+    new_name = (data.get("name") or "").strip()
+
+    if not new_name:
+        return jsonify({"error": "Name is required"}), 400
+    if len(new_name) > 100:
+        return jsonify({"error": "Name must be 100 characters or fewer"}), 400
+
+    character = db.session.get(Character, character_id)
+    if not character or character.user_id != current_user.id:
+        return jsonify({"error": "Character not found"}), 404
+
+    previous_name = character.name
+    character.name = new_name
+
+    try:
+        db.session.commit()
+    except Exception:  # pragma: no cover - database errors
+        db.session.rollback()
+        logger.exception(
+            "Failed to rename character user_id=%s character_id=%s",  # pragma: no cover
+            current_user.id,
+            character_id,
+        )
+        return jsonify({"error": "Failed to update character name"}), 500
+
+    logger.info(
+        "Character renamed user_id=%s character_id=%s previous_name=%s new_name=%s",
+        current_user.id,
+        character_id,
+        previous_name,
+        new_name,
+    )
+
+    return jsonify({"character": character.to_dict()}), 200

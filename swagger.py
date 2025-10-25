@@ -489,6 +489,56 @@ CHARACTER_DETAIL_DOC = {
     'security': [{'sessionCookie': []}],
 }
 
+CHARACTER_RENAME_DOC = {
+    'tags': ['Characters'],
+    'summary': 'Rename a character',
+    'description': 'Updates only the name of a character owned by the authenticated user.',
+    'parameters': [
+        {
+            'name': 'character_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        },
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['name'],
+                'properties': {
+                    'name': {
+                        'type': 'string',
+                        'maxLength': 100,
+                        'example': 'Aiko the Mechanist',
+                        'description': 'New character name (1-100 characters).',
+                    }
+                },
+            },
+        },
+    ],
+    'responses': {
+        '200': {
+            'description': 'Updated character payload',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'character': CHARACTER_CREATE_DOC['responses']['201']['schema']['properties']['character'],
+                },
+            },
+        },
+        '400': {
+            'description': 'Validation error',
+            'examples': {
+                'application/json': {'error': 'Name is required'},
+            },
+        },
+        '404': {'description': 'Character not found'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
 SCRIPT_CREATE_DOC = {
     'tags': ['Scripts'],
     'summary': 'Create a script',
@@ -1376,6 +1426,7 @@ __all__ = [
     'AUTH_UPDATE_PASSWORD_DOC',
     'CHARACTER_CREATE_DOC',
     'CHARACTER_LIST_DOC',
+    'CHARACTER_RENAME_DOC',
     'SCRIPT_CREATE_DOC',
     'SCRIPT_LIST_DOC',
     'SCRIPT_DETAIL_DOC',

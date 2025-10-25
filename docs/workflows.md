@@ -71,7 +71,21 @@ Once the worker finishes, `GET /api/characters/<character_id>` shows
 
 ---
 
-## 4. Generate a comic via the job endpoint
+## 4. Rename an existing character
+
+```bash
+curl -b /tmp/manga_cookies.txt \
+  -X PATCH https://mangasuperb.anranz.xyz/api/characters/<character_id>/name \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Updated Alias"}'
+```
+
+The response echoes the updated character payload. Only the `name` field changes; all
+other properties remain untouched.
+
+---
+
+## 5. Generate a comic via the job endpoint
 
 ```bash
 curl -b /tmp/manga_cookies.txt \
@@ -109,7 +123,7 @@ curl -b /tmp/manga_cookies.txt \
 
 ---
 
-## 5. Set a layout for page 2 (optional manual arrangement)
+## 6. Set a layout for page 2 (optional manual arrangement)
 
 ```bash
 curl -b /tmp/manga_cookies.txt \
@@ -127,7 +141,7 @@ This aligns panel shots 7–9 to page 2 in the specified order.
 
 ---
 
-## 6. Trigger a targeted page render
+## 7. Trigger a targeted page render
 
 ```bash
 curl -b /tmp/manga_cookies.txt \
@@ -141,7 +155,7 @@ comic detail to verify the rendered image URL for page 2.
 
 ---
 
-## 7. Run the publish workflow (export → cover → publish)
+## 8. Run the publish workflow (export → cover → publish)
 
 ```bash
 curl -b /tmp/manga_cookies.txt \
