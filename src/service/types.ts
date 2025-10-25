@@ -94,3 +94,28 @@ export interface ListCharactersResponse {
   characters: ICharacter[]
   count?: number
 }
+
+// ===== Scripts =====
+export interface IScript {
+  id: number
+  user_id: number
+  title: string
+  content: string // JSON string persisted by backend
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateScriptRequest {
+  title: string
+  content: string // send JSON stringified content
+}
+
+export interface CreateScriptResponse {
+  script: IScript
+}
+
+export type GetScriptResponse = IScript
+
+export interface ListScriptsResponse {
+  scripts: IScript[]
+}
