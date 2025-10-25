@@ -119,3 +119,40 @@ export type GetScriptResponse = IScript
 export interface ListScriptsResponse {
   scripts: IScript[]
 }
+
+// ===== Jobs / Comics / Panels =====
+export type JobStatus = 'queued' | 'started' | 'finished' | 'failed' | 'deferred'
+
+export interface JobDetail {
+  id: string
+  rq_status: JobStatus
+  [k: string]: any
+}
+
+export interface IComic {
+  id: number
+  title?: string | null
+  cover_image_url?: string | null
+  pdf_url?: string | null
+  zip_url?: string | null
+  workflow_stage?: string | null
+  workflow_status?: string | null
+  // Backend may include panels/pages and other metadata
+  [k: string]: any
+}
+
+export interface PublishComicResponse {
+  stage_jobs: {
+    cover_job_id?: string
+    export_job_id?: string
+    publish_job_id?: string
+    [k: string]: string | undefined
+  }
+}
+
+export interface SetPanelLayoutRequest {
+  page_number: number
+  layout_key: string
+  notes?: string
+  panel_order?: number[]
+}
