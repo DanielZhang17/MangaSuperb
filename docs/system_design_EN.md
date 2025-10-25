@@ -109,10 +109,12 @@ graph TD
 | `/api/characters` | POST | Create a character; optional optimisation and reference images enqueue portrait jobs and return `job_id`. | Yes |
 | `/api/characters` | GET | List characters owned by the user plus any marked `is_public`. | Yes |
 | `/api/characters/<id>` | GET | Retrieve a single character owned by the user. | Yes |
+| `/api/characters/<id>/name` | PATCH | Rename a character owned by the user. | Yes |
 
 - **POST /api/characters** – Required JSON: `description`. Optional: `name` (defaults to `unspecified`), `sex` (default `unspecified`), `is_public`, `optimize`, `style_prompt`, `reference_images`. Returns `character`, optional `job_id`.
 - **GET /api/characters** – Optional query: none; returns `characters` including public roster.
 - **GET /api/characters/<id>** – Path `id` required; returns `character`.
+- **PATCH /api/characters/<id>/name** – Required JSON: `name` (1–100 characters). Returns the updated `character`.
 
 ### Scripts
 

@@ -110,3 +110,58 @@ def test_create_character_without_name(auth_client) -> None:
     assert character["name"] == "unspecified"
     assert character["description"].startswith("A newly conceived character")
     assert character["sex"] == "non-binary"
+
+
+def test_rename_character_updates_only_name(app: Flask, auth_client, user: Any) -> None:
+    with app.app_context():
+        owner = db.session.get(User, user.id)
+        assert owner is not None
+        character = _make_character(user_id=owner.id, name="Old Alias")
+        db.session.commit()
+        character_id = character.id
+
+    response = auth_client.patch(
+        f"/api/characters/{character_id}/name",
+        json={"name": "New Alias"},
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["character"]["name"] == "New Alias"
+
+    with app.app_context():
+        persisted = db.session.get(Character, character_id)
+        assert persisted is not None
+        assert persisted.name == "New Alias"
+
+
+def test_rename_character_rejects_blank_name(app: Flask, auth_client, user: Any) -> None:
+    with app.app_context():
+        owner = db.session.get(User, user.id)
+        assert owner is not None
+        character = _make_character(user_id=owner.id, name="Nomad")
+        db.session.commit()
+        character_id = character.id
+
+    response = auth_client.patch(
+        f"/api/characters/{character_id}/name",
+        json={"name": "   "},
+    )
+    assert response.status_code == 400
+    data = response.get_json()
+    assert data["error"] == "Name is required"
+
+
+def test_rename_character_requires_owner(app: Flask, auth_client, user: Any) -> None:
+    with app.app_context():
+        other = _create_user("other", "other@example.com")
+        character = _make_character(user_id=other.id, name="Shadow")
+        db.session.commit()
+        character_id = character.id
+
+    response = auth_client.patch(
+        f"/api/characters/{character_id}/name",
+        json={"name": "Sunrise"},
+    )
+    assert response.status_code == 404
+    data = response.get_json()
+    assert data["error"] == "Character not found"
