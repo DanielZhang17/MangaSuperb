@@ -5,24 +5,24 @@ import { ComicsApi } from '@/apis/comics'
 import { ShareCard } from '@/components/common/share-card'
 import { Card } from '@/components/ui/card'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { useI18n } from '@/hooks/use-i18n'
 import { cn } from '@/lib/utils'
 import type { IComic } from '@/service/types'
-
-const comicCategories = ['日漫', '美漫风', '宫崎骏']
+const comicCategoryKeys = ['home.category.jp', 'home.category.us', 'home.category.miyazaki'] as const
 
 // Heuristic: map comic.style_description to one of our UI categories
 function inferCategory(comic: IComic): string {
   const style = (comic.style_description || '').toLowerCase()
-  if (/宫崎骏|miyazaki/.test(style)) return '宫崎骏'
-  if (/美漫|noir|ink|comic/.test(style)) return '美漫风'
+  if (/宫崎骏|miyazaki/.test(style)) return 'home.category.miyazaki'
+  if (/美漫|noir|ink|comic/.test(style)) return 'home.category.us'
 
-  return '日漫'
+  return 'home.category.jp'
 }
 
 const categoryCoverStyles: Record<string, string> = {
-  日漫: 'bg-gradient-to-br from-pink-200/60 via-pink-100 to-white',
-  美漫风: 'bg-gradient-to-br from-sky-200/60 via-sky-100 to-white',
-  宫崎骏: 'bg-gradient-to-br from-amber-200/60 via-amber-100 to-white',
+  'home.category.jp': 'bg-gradient-to-br from-pink-200/60 via-pink-100 to-white',
+  'home.category.us': 'bg-gradient-to-br from-sky-200/60 via-sky-100 to-white',
+  'home.category.miyazaki': 'bg-gradient-to-br from-amber-200/60 via-amber-100 to-white',
 }
 
 const creatorShares = [
@@ -49,7 +49,8 @@ const creatorShares = [
 ]
 
 export default function HomePage() {
-  const [selectedCategories, setSelectedCategories] = useState<string[]>(comicCategories)
+  const { t } = useI18n(['home', 'common'])
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([...comicCategoryKeys])
 
   // SWR: fetch current user's comics
   const { data, isLoading, error } = useSWR('comics:list', () => ComicsApi.list())
@@ -61,15 +62,15 @@ export default function HomePage() {
       id: String(c.id),
       category: inferCategory(c),
       cover: c.cover_image_url || null,
-      title: c.title || `漫画 #${c.id}`,
+      title: c.title || String(t('home.title.fallback', { id: c.id })),
     }))
-  }, [data])
+  }, [data, t])
 
   return (
     <div className="space-y-10">
       <section className="space-y-6">
         <div className="space-y-4">
-          <h2 className="text-xl font-semibold">精选漫画</h2>
+          <h2 className="text-xl font-semibold">{String(t('home.section.featured'))}</h2>
           <ToggleGroup
             type="multiple"
             value={selectedCategories}
@@ -78,13 +79,13 @@ export default function HomePage() {
             onValueChange={setSelectedCategories}
             className="flex w-fit gap-2"
           >
-            {comicCategories.map((category) => (
+            {comicCategoryKeys.map((key) => (
               <ToggleGroupItem
-                key={category}
-                value={category}
+                key={key}
+                value={key}
                 className="rounded-full px-5 py-2 text-sm data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
               >
-                {category}
+                {String(t(key))}
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
@@ -98,7 +99,7 @@ export default function HomePage() {
           ))}
 
           {error && (
-            <div className="col-span-full text-sm text-destructive">加载漫画失败，请稍后重试。</div>
+            <div className="col-span-full text-sm text-destructive">{String(t('home.error.loadComics'))}</div>
           )}
 
           {!isLoading && !error && uiItems
@@ -123,7 +124,7 @@ export default function HomePage() {
       </section>
 
       <section className="space-y-6">
-        <h2 className="text-xl font-semibold">创作分享</h2>
+        <h2 className="text-xl font-semibold">{String(t('home.section.shares'))}</h2>
         <div className="grid gap-4 justify-items-start md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
           {creatorShares.map((share) => (
             <ShareCard

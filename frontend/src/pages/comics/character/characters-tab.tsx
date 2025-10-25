@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { useI18n } from '@/hooks/use-i18n'
 
 import { activeTabAtom, charactersCompletedAtom } from '../atoms'
 
@@ -14,6 +15,7 @@ const charactersData = [
 ]
 
 function SelectionView() {
+  const { t } = useI18n('comics')
   const [, setActiveTab] = useAtom(activeTabAtom)
   const [, setCharactersCompleted] = useAtom(charactersCompletedAtom)
 
@@ -73,20 +75,20 @@ function SelectionView() {
             <div className="rounded-xl bg-background/70 p-3">
               <Star className="h-6 w-6" />
             </div>
-            <p>更多人物</p>
+            <p>{String(t('characters.more'))}</p>
           </CardContent>
         </Card>
       </div>
 
       <div className="flex items-center justify-between rounded-lg bg-muted/50 px-6 py-4">
         <div>
-          <p className="mb-2 text-foreground text-xl">请为你的人物选择形象
+          <p className="mb-2 text-foreground text-xl">{String(t('characters.selectPrompt'))}
           </p>
           <p className='text-muted-foreground'>
-          已根据故事为你识别到 {totalRecognized} 个角色
+            {String(t('characters.recognized', { count: totalRecognized }))}
           </p>
         </div>
-        <Button variant="default" onClick={handleQuickPick}>一键选择人物</Button>
+        <Button variant="default" onClick={handleQuickPick}>{String(t('characters.quickPick'))}</Button>
       </div>
 
       {/* 下一步 */}
@@ -99,7 +101,7 @@ function SelectionView() {
           }}
           disabled={!canProceed}
         >
-          下一步
+          {String(t('common.next'))}
         </Button>
       </div>
     </div>

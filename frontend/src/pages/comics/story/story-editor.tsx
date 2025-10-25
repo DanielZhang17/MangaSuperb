@@ -5,10 +5,12 @@ import InlineInput from '@/components/common/inline-input'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
+import { useI18n } from '@/hooks/use-i18n'
 
 import { mangaTitleAtom, storyPanelsAtom, storyStepAtom } from '../atoms'
 
 export function StoryEditor(){
+  const { t } = useI18n('comics')
   const [title, setTitle] = useAtom(mangaTitleAtom)
   const [panels] = useAtom(storyPanelsAtom)
 
@@ -18,16 +20,16 @@ export function StoryEditor(){
         <InlineInput
           initialValue={title}
           onSubmit={(val) => setTitle(val)}
-          placeholder="输入故事名称"
+          placeholder={String(t('editor.placeholderTitle'))}
           renderDisplay={(val) => (
-            <div className="text-2xl font-semibold tracking-tight w-fit">{val || '未命名'}</div>
+            <div className="text-2xl font-semibold tracking-tight w-fit">{val || String(t('editor.untitled'))}</div>
           )}
-          submitLabel="保存"
+          submitLabel={String(t('editor.save'))}
         />
       </div>
       <div className="relative">
         <Textarea
-          placeholder="秦飞扬就宛如一个皮球般，伴随着痛苦的惨叫声，顺着石梯，朝下方滚去..."
+          placeholder="..."
           className="resize-none text-xl md:text-xl h-[800px]"
           defaultValue={panels.map((p) => p.text).join('\n\n')}
         />
@@ -40,6 +42,7 @@ export function StoryEditor(){
 }
 
 export function PanelsView() {
+  const { t } = useI18n('comics')
   const [, setStoryStep] = useAtom(storyStepAtom)
   const [panels, setPanels] = useAtom(storyPanelsAtom)
 
@@ -62,8 +65,8 @@ export function PanelsView() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label="删除分镜"
-                  title="删除分镜"
+                  aria-label={String(t('panels.delete'))}
+                  title={String(t('panels.delete'))}
                   onClick={() => handleDelete(index)}
                 >
                   <Trash2 className="size-4" />
@@ -74,8 +77,8 @@ export function PanelsView() {
         </CardContent>
       </Card>
       <div className="flex justify-center gap-4">
-        <Button size="lg" variant="outline" onClick={() => setStoryStep('input')}>返回编辑</Button>
-        <Button size="lg" onClick={() => setStoryStep('generate')}>下一步</Button>
+        <Button size="lg" variant="outline" onClick={() => setStoryStep('input')}>{String(t('common.back'))}</Button>
+        <Button size="lg" onClick={() => setStoryStep('generate')}>{String(t('common.next'))}</Button>
       </div>
     </div>
   )

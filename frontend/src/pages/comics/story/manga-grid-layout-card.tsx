@@ -5,6 +5,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { useI18n } from '@/hooks/use-i18n'
 
 const LayoutVisual = ({ type }: { type: string }) => {
   const baseBoxClasses = 'bg-gray-400 rounded-sm'
@@ -57,25 +58,31 @@ const LayoutVisual = ({ type }: { type: string }) => {
 }
 
 export function MangaGridLayoutCard() {
-  const layouts = ['四宫格', '左主右辅', '右侧长栏', '上下错列']
+  const { t } = useI18n('comics')
+  const layouts = [
+    { key: 'grid.4panel', label: String(t('grid.4panel')) },
+    { key: 'grid.leftMainRightMinor', label: String(t('grid.leftMainRightMinor')) },
+    { key: 'grid.rightLongBar', label: String(t('grid.rightLongBar')) },
+    { key: 'grid.staggered', label: String(t('grid.staggered')) },
+  ]
 
   return (
     <Card>
       <CardHeader className="p-4">
-        <CardTitle className="text-center text-lg">漫画网格布局</CardTitle>
+        <CardTitle className="text-center text-lg">{String(t('grid.title'))}</CardTitle>
       </CardHeader>
       <CardContent className="p-4 pt-0">
         <ToggleGroup
           type="single"
-          defaultValue="四宫格"
+          defaultValue={String(t('grid.4panel'))}
           className="grid grid-cols-2 xl:grid-cols-4 gap-2 w-fit mx-auto"
         >
           {layouts.map((layout) => (
-            <ToggleGroupItem key={layout} value={layout} className="flex flex-col h-auto p-1">
+            <ToggleGroupItem key={layout.key} value={layout.label} className="flex flex-col h-auto p-1">
               <div className="w-30 h-20 bg-gray-200 rounded-md mb-2 p-2">
-                <LayoutVisual type={layout} />
+                <LayoutVisual type={layout.label} />
               </div>
-              <span>{layout}</span>
+              <span>{layout.label}</span>
             </ToggleGroupItem>
           ))}
         </ToggleGroup>

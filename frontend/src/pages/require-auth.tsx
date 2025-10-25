@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { Navigate, useLocation } from 'react-router'
 
 import AuthApi from '@/apis/auth'
+import { useI18n } from '@/hooks/use-i18n'
 
 export function RequireAuth({ children }: { children: React.ReactElement }) {
+  const { t } = useI18n('common')
   const location = useLocation()
   const [loading, setLoading] = useState(true)
   const [isAuthed, setIsAuthed] = useState<boolean | null>(null)
@@ -31,7 +33,7 @@ export function RequireAuth({ children }: { children: React.ReactElement }) {
 
   if (loading) {
     return (
-      <div className="w-full h-[60vh] flex items-center justify-center text-muted-foreground">Loading…</div>
+      <div className="w-full h-[60vh] flex items-center justify-center text-muted-foreground">{String(t('loading'))}</div>
     )
   }
 

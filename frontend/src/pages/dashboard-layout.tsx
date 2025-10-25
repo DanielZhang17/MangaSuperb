@@ -7,6 +7,7 @@ import SidebarToggle from '@/components/common/operations/sidebar-toggle'
 import { sidebarCollapsedAtom } from '@/components/layout/atoms'
 import { DashboardSidebar } from '@/components/layout/sidebar'
 import { useAutoCollapseSidebar } from '@/hooks/use-auto-collapse-sidebar'
+import { useI18n } from '@/hooks/use-i18n'
 
 export default function DashboardLayout() {
   useAutoCollapseSidebar(1024)
@@ -34,9 +35,11 @@ export default function DashboardLayout() {
 }
 
 function PageFallback() {
+  const { t } = useI18n('common')
+
   return (
     <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-      正在加载内容…
+      {String(t('loading'))}
     </div>
   )
 }

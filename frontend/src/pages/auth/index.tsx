@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/hooks/use-auth'
+import { useI18n } from '@/hooks/use-i18n'
 
 // 登录与注册校验规则
 const anyZodResolver = zodResolver as unknown as (schema: unknown) => any
@@ -49,7 +50,7 @@ const LeftPanel = () => (
     
     <div className="mx-auto w-full max-w-2xl rounded-lg bg-card p-2 shadow-lg">
       <div className="flex aspect-4/3 w-full items-center justify-center rounded bg-muted">
-        <span className="text-muted-foreground">漫画图片占位符</span>
+        <span className="text-muted-foreground">Placeholder</span>
       </div>
     </div>
     
@@ -63,6 +64,7 @@ const AuthForm = () => {
   const navigate = useNavigate()
   const location = useLocation() as any
   const { login, register: registerAction, loginState, registerState } = useAuth()
+  const { t } = useI18n(['auth', 'common'])
 
   // login form
   const loginForm = useForm({
@@ -102,8 +104,8 @@ const AuthForm = () => {
         <Tabs defaultValue="login" className="w-full">
           <div className="flex w-full items-center justify-center">
             <TabsList className="grid w-[280px] grid-cols-2">
-              <TabsTrigger value="login">登录</TabsTrigger>
-              <TabsTrigger value="register">注册</TabsTrigger>
+              <TabsTrigger value="login">{String(t('auth:tabs.login'))}</TabsTrigger>
+              <TabsTrigger value="register">{String(t('auth:tabs.register'))}</TabsTrigger>
             </TabsList>
           </div>
 
@@ -117,9 +119,9 @@ const AuthForm = () => {
                   name="email"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>邮箱</FormLabel>
+                      <FormLabel>{String(t('auth:form.email'))}</FormLabel>
                       <FormControl>
-                        <Input type="email" placeholder="邮箱" className="h-12" {...field} />
+                        <Input type="email" placeholder={String(t('auth:form.email.placeholder'))} className="h-12" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -131,9 +133,9 @@ const AuthForm = () => {
                   name="password"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>密码</FormLabel>
+                      <FormLabel>{String(t('auth:form.password'))}</FormLabel>
                       <FormControl>
-                        <Input type="password" placeholder="密码" className="h-12" {...field} />
+                        <Input type="password" placeholder={String(t('auth:form.password.placeholder'))} className="h-12" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -153,10 +155,12 @@ const AuthForm = () => {
                           />
                         </FormControl>
                         <Label className="text-sm text-muted-foreground">
-                          我已阅读并同意
-                          <a href="#" className="px-1 text-primary hover:underline">《用户协议》</a>
-                          以及
-                          <a href="#" className="pl-1 text-primary hover:underline">《隐私政策》</a>
+                          {String(t('common:terms.label'))}
+                          <a href="#" className="px-1 text-primary hover:underline">{String(t('common:terms.userAgreement'))}</a>
+                          {' '}
+                          &
+                          {' '}
+                          <a href="#" className="pl-1 text-primary hover:underline">{String(t('common:terms.privacyPolicy'))}</a>
                         </Label>
                       </div>
                       <FormMessage />
@@ -168,7 +172,9 @@ const AuthForm = () => {
                   disabled={loginForm.formState.isSubmitting || loginState.isMutating}
                   className="mt-4 h-10 w-full py-6 text-lg font-semibold"
                 >
-                  {loginForm.formState.isSubmitting || loginState.isMutating ? '处理中…' : 'LOGIN'}
+                  {loginForm.formState.isSubmitting || loginState.isMutating
+                    ? String(t('common:action.processing'))
+                    : String(t('auth:submit.login'))}
                 </Button>
               </form>
             </Form>
@@ -176,8 +182,8 @@ const AuthForm = () => {
 
           <TabsContent value="register" className="mt-8">
             <div className="mb-10">
-              <h1 className="text-3xl font-semibold text-foreground">欢迎注册MangaSuperb</h1>
-              <p className="mt-2 text-muted-foreground">根据小说AI生成相应漫画</p>
+              <h1 className="text-3xl font-semibold text-foreground">{String(t('auth:title.register'))}</h1>
+              <p className="mt-2 text-muted-foreground">{String(t('auth:subtitle.register'))}</p>
             </div>
             <Form {...registerForm}>
               <form className="space-y-6" onSubmit={registerForm.handleSubmit(onRegisterSubmit)}>
@@ -187,9 +193,9 @@ const AuthForm = () => {
                   name="username"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>用户名</FormLabel>
+                      <FormLabel>{String(t('auth:form.username'))}</FormLabel>
                       <FormControl>
-                        <Input placeholder="请输入用户名" className="h-12" {...field} />
+                        <Input placeholder={String(t('auth:form.username.placeholder'))} className="h-12" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -201,9 +207,9 @@ const AuthForm = () => {
                   name="email"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>邮箱</FormLabel>
+                      <FormLabel>{String(t('auth:form.email'))}</FormLabel>
                       <FormControl>
-                        <Input type="email" placeholder="请输入邮箱" className="h-12" {...field} />
+                        <Input type="email" placeholder={String(t('auth:form.email.placeholder'))} className="h-12" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -215,9 +221,9 @@ const AuthForm = () => {
                   name="password"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>密码</FormLabel>
+                      <FormLabel>{String(t('auth:form.password'))}</FormLabel>
                       <FormControl>
-                        <Input type="password" placeholder="请输入密码" className="h-12" {...field} />
+                        <Input type="password" placeholder={String(t('auth:form.password.placeholder'))} className="h-12" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -237,10 +243,12 @@ const AuthForm = () => {
                           />
                         </FormControl>
                         <Label className="text-sm text-muted-foreground">
-                          我已阅读并同意
-                          <a href="#" className="px-1 text-primary hover:underline">《用户协议》</a>
-                          以及
-                          <a href="#" className="pl-1 text-primary hover:underline">《隐私政策》</a>
+                          {String(t('common:terms.label'))}
+                          <a href="#" className="px-1 text-primary hover:underline">{String(t('common:terms.userAgreement'))}</a>
+                          {' '}
+                          &
+                          {' '}
+                          <a href="#" className="pl-1 text-primary hover:underline">{String(t('common:terms.privacyPolicy'))}</a>
                         </Label>
                       </div>
                       <FormMessage />
@@ -252,7 +260,9 @@ const AuthForm = () => {
                   disabled={registerForm.formState.isSubmitting || registerState.isMutating}
                   className="mt-4 h-10 w-full py-6 text-lg font-semibold"
                 >
-                  {registerForm.formState.isSubmitting || registerState.isMutating ? '处理中…' : '注册'}
+                  {registerForm.formState.isSubmitting || registerState.isMutating
+                    ? String(t('common:action.processing'))
+                    : String(t('auth:submit.register'))}
                 </Button>
               </form>
             </Form>

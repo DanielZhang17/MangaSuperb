@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useI18n } from '@/hooks/use-i18n'
 
 import CharactersGrid from './parts/characters-grid.tsx'
 import IdeasGrid from './parts/ideas-grid.tsx'
 
 export default function IdeasPage() {
+  const { t } = useI18n('ideas')
   const [searchParams, setSearchParams] = useSearchParams()
   const initialTab = searchParams.get('tab') === 'characters' ? 'characters' : 'ideas'
   const [tab, setTab] = useState<'ideas' | 'characters'>(initialTab as 'ideas' | 'characters')
@@ -27,8 +29,8 @@ export default function IdeasPage() {
   return (
     <Tabs value={tab} onValueChange={onTabChange}>
       <TabsList>
-        <TabsTrigger value="ideas">我的创意</TabsTrigger>
-        <TabsTrigger value="characters">我的人物</TabsTrigger>
+        <TabsTrigger value="ideas">{String(t('tab.ideas'))}</TabsTrigger>
+        <TabsTrigger value="characters">{String(t('tab.characters'))}</TabsTrigger>
       </TabsList>
       <TabsContent value="ideas">
         <IdeasGrid />

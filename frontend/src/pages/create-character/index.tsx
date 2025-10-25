@@ -12,11 +12,13 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useCreateCharacter } from '@/hooks/use-characters'
+import { useI18n } from '@/hooks/use-i18n'
 
 import { LoadingModal } from './loading-modal'
 import { CreationSuccessModal } from './success-modal'
 
 export default function CharacterCreatorPage() {
+  const { t } = useI18n(['createCharacter', 'common', 'home'])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [loadingOpen, setLoadingOpen] = useState(false)
   const [files, setFiles] = useState<File[] | undefined>(undefined)
@@ -93,30 +95,30 @@ export default function CharacterCreatorPage() {
     <div className="flex w-full min-h-screen p-8 bg-background text-foreground">
       <div className="flex flex-col w-1/2 space-y-6 pr-8">
         <header className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold">新建AI人物</h1>
+          <h1 className="text-2xl font-semibold">{String(t('createCharacter:title.new'))}</h1>
           <div className="flex items-center space-x-2">
-            <Label htmlFor="ai-optimize" className="text-muted-foreground">AI优化</Label>
+            <Label htmlFor="ai-optimize" className="text-muted-foreground">{String(t('createCharacter:aiOptimize'))}</Label>
             <Switch id="ai-optimize" checked={optimize} onCheckedChange={setOptimize} />
           </div>
         </header>
         <div>
-          <Button variant="secondary">随机生成</Button>
+          <Button variant="secondary">{String(t('createCharacter:random'))}</Button>
         </div>
         <div className="p-4 rounded-lg bg-card text-card-foreground shadow-sm">
           <Textarea
             value={characterDescription}
             onChange={(e) => setCharacterDescription(e.target.value)}
             className="min-h-[150px] resize-y"
-            placeholder="请输入人物描述..."
+            placeholder={String(t('createCharacter:description.placeholder'))}
           />
         </div>
         <div className="space-y-3">
           <div className="flex items-baseline justify-between">
-            <h2 className="text-lg font-medium">参考图片 (可选)</h2>
-            <span className="text-sm text-muted-foreground">{(files?.length ?? 0)}/3张图片</span>
+            <h2 className="text-lg font-medium">{String(t('createCharacter:reference.title'))}</h2>
+            <span className="text-sm text-muted-foreground">{String(t('createCharacter:reference.count', { count: files?.length ?? 0 }))}</span>
           </div>
           <p className="text-sm text-muted-foreground">
-            上传一张头像图片，生成与该头像相似的角色
+            {String(t('createCharacter:reference.tip'))}
           </p>
           
           <Dropzone
@@ -144,7 +146,7 @@ export default function CharacterCreatorPage() {
             disabled={state.isMutating}
             onClick={handleCreate}
           >
-            生成人物
+            {String(t('createCharacter:generate'))}
           </Button>
         </div>
 
