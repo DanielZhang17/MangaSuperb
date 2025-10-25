@@ -1,6 +1,4 @@
-
 import { ShareCard } from '@/components/common/share-card'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 const creatorShares = [
   {
@@ -30,40 +28,12 @@ const creatorShares = [
   },
 ]
 
-export default function IdeasPage() {
-  return (
-    <Tabs defaultValue="ideas">
-      <TabsList>
-        <TabsTrigger value="ideas">我的创意</TabsTrigger>
-        <TabsTrigger value="characters">我的人物</TabsTrigger>
-      </TabsList>
-      <TabsContent value="ideas">
-        <IdeasGrid />
-      </TabsContent>
-      <TabsContent value="characters">
-        <CharactersGrid />
-      </TabsContent>
-    </Tabs>
-  )
-}
-
-function IdeasGrid() {
+export default function IdeasGrid() {
   return (
     <div className="grid gap-4 justify-items-start md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
       {creatorShares.map((share) => (
-        <ShareCard
-          key={share.id}
-          share={share}
-        />
+        <ShareCard key={share.id} share={share} />
       ))}
-    </div>
-  )
-}
-
-function CharactersGrid() {
-  return (
-    <div className="grid gap-4 lg:grid-cols-3">
-      <div className="aspect-square w-full rounded-xl bg-muted" />
     </div>
   )
 }

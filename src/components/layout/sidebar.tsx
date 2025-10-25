@@ -20,11 +20,13 @@ interface DashboardSidebarProps {
   collapsed: boolean
 }
 
-const primaryNav: SidebarItem[] = [{ label: '我的创意', to: '/ideas', icon: Sparkles }]
+const primaryNav: SidebarItem[] = [
+  { label: '我的创意', to: '/ideas', icon: Sparkles },
+]
 
 const creationNav: SidebarItem[] = [
   { label: '漫画创作', to: '/comics', icon: Grid2X2 },
-  { label: '新建AI人物', to: '/characters', icon: SmilePlus },
+  { label: '新建AI人物', to: '/create-character', icon: SmilePlus },
 ]
 
 export function DashboardSidebar({ collapsed }: DashboardSidebarProps) {

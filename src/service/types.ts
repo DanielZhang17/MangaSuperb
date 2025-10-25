@@ -57,3 +57,40 @@ export interface AuthUpdateUsernameRequest {
 export interface AuthUpdateUsernameResponse {
   user: IUser
 }
+
+// ===== Characters =====
+export interface ICharacter {
+  id: number
+  user_id: number
+  name: string
+  description: string
+  style_prompt: string | null
+  optimized_description: string | null
+  image_status: string
+  image_url: string | null
+  image_job_id: string | null
+  image_error: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface CreateCharacterRequest {
+  name: string
+  description: string
+  optimize?: boolean
+  reference_images?: string[] // base64-encoded data URLs
+  style_prompt?: string
+  api_key?: string // required when optimization or reference images are used
+}
+
+export interface CreateCharacterResponse {
+  character: ICharacter
+  job_id: string | null
+}
+
+export type GetCharacterResponse = ICharacter
+
+export interface ListCharactersResponse {
+  characters: ICharacter[]
+  count?: number
+}
