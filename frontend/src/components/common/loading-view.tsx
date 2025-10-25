@@ -13,6 +13,7 @@ export function LoadingView({ initialText, onCompletion, textChanges = [] }: Loa
   const [text, setText] = useState(initialText)
 
   useEffect(() => {
+    // 100ms * 100 steps = ~10s total duration
     const timer = setInterval(() => {
       setProgress((prev) => {
         if (prev >= 100) {
@@ -28,7 +29,7 @@ export function LoadingView({ initialText, onCompletion, textChanges = [] }: Loa
 
         return prev + 1
       })
-    }, 50)
+    }, 100)
 
     return () => {
       clearInterval(timer)

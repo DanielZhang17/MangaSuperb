@@ -88,11 +88,34 @@ export interface CreateCharacterResponse {
   job_id: string | null
 }
 
-export type GetCharacterResponse = ICharacter
+// Backend returns a wrapped object for detail: { character: ICharacter }
+export interface GetCharacterResponse {
+  character: ICharacter
+}
 
 export interface ListCharactersResponse {
   characters: ICharacter[]
   count?: number
+}
+
+export interface UpdateCharacterNameRequest {
+  name: string
+}
+
+export interface UpdateCharacterNameResponse {
+  character: ICharacter
+}
+
+export interface DeleteCharacterResponse {
+  message: string
+}
+
+export interface UpdateCharacterNameRequest {
+  name: string
+}
+
+export interface UpdateCharacterNameResponse {
+  character: ICharacter
 }
 
 // ===== Scripts =====

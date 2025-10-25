@@ -45,7 +45,8 @@ export default defineConfig({
         target: 'https://storage.mangasuperb.anranz.xyz',
         changeOrigin: true,
         secure: true,
-        rewrite: (p: string) => p,
+        // strip '/static' prefix so '/static/manga/...' -> 'https://storage.../manga/...'
+        rewrite: (p: string) => p.replace(/^\/static/, ''),
         configure: (proxy: any) => {
           proxy.on('proxyReq', (proxyReq: any) => {
             proxyReq.setHeader('Referer', 'https://storage.mangasuperb.anranz.xyz/')

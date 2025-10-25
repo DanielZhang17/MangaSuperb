@@ -1,32 +1,52 @@
 import { useAtom } from 'jotai'
-import { Check, Star } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { Check, Image as ImageIcon, Star } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { useCharactersList } from '@/hooks/use-characters'
 import { useI18n } from '@/hooks/use-i18n'
 
 import { activeTabAtom, charactersCompletedAtom } from '../atoms'
 
-const charactersData = [
-  { id: 1, name: '秦飞扬', gender: '男', desc: '阳光少年，性格果断，擅长临场应变与团队协作。' },
-  { id: 2, name: '马红梅', gender: '女', desc: '理性可靠，细节控，擅长情报分析与策略制定。' },
-  { id: 3, name: '三殿主', gender: '男', desc: '冷静强势，外表高冷但内心重义，拥有神秘力量。' },
-]
+function normalizeStorageUrl(url?: string | null) {
+  if (!url) return undefined
+  if ((import.meta as any).env?.DEV) {
+    try {
+      if (/^https?:\/\//i.test(url)) {
+        const u = new URL(url)
+        if (u.hostname === 'storage.mangasuperb.anranz.xyz') {
+          const p = u.pathname.replace(/^\/+/, '/')
+
+          return `/static${p}`
+        }
+      } else if (url.startsWith('/manga')) {
+        return `/static${url}`
+      }
+    } catch {
+      return url
+    }
+  }
+
+  return url
+}
 
 function SelectionView() {
   const { t } = useI18n('comics')
   const [, setActiveTab] = useAtom(activeTabAtom)
   const [, setCharactersCompleted] = useAtom(charactersCompletedAtom)
 
+  // 拉取我的人物
+  const { characters, loading, error, refresh } = useCharactersList()
+
   // 多选：默认不选择
   const [selectedIds, setSelectedIds] = useState<number[]>([])
 
-  const totalRecognized = useMemo(() => charactersData.length, [])
+  const totalRecognized = useMemo(() => characters.length, [characters])
 
   const handleQuickPick = () => {
     // 一键选择：全部选择
-    setSelectedIds(charactersData.map((c) => c.id))
+    setSelectedIds(characters.map((c) => c.id))
   }
 
   const toggleSelect = (id: number) => {
@@ -35,12 +55,55 @@ function SelectionView() {
 
   const canProceed = selectedIds.length > 0
 
+  // 当存在 pending 项目时，轻量轮询列表刷新，直到 ready/failed 或超时
+  const [tries, setTries] = useState(0)
+  const timerRef = useRef<number | null>(null)
+  const MAX_TRIES = 40 // ~2 分钟（40 * 3s）
+
+  useEffect(() => {
+    const hasPending = characters.some((c) => c.image_status === 'pending' && !c.image_url)
+
+    // 清理已有定时器
+    if (timerRef.current) {
+      window.clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+
+    if (!loading && hasPending && tries < MAX_TRIES) {
+      timerRef.current = window.setInterval(async () => {
+        await refresh()
+        setTries((t) => t + 1)
+      }, 3000)
+    }
+
+    return () => {
+      if (timerRef.current) {
+        window.clearInterval(timerRef.current)
+        timerRef.current = null
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [characters, loading])
+
   return (
     <div className="space-y-6 mt-4">
+      {loading && <div className="text-sm text-muted-foreground">加载中...</div>}
+      {error && (
+        <div className="text-sm text-destructive">加载失败：{(error as any)?.message ?? 'Unknown error'}</div>
+      )}
+
+      {!loading && !error && characters.length === 0 && (
+        <div className="rounded-xl border border-dashed p-10 text-center text-muted-foreground">
+          暂无人 物，去创建一个吧！
+        </div>
+      )}
+
       {/* 角色网格 */}
       <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-6">
-        {charactersData.map((char) => {
+        {characters.map((char) => {
           const selected = selectedIds.includes(char.id)
+          const imgSrc = normalizeStorageUrl(char.image_url)
+          const sexPrefix = (char as any)?.sex ? `${(char as any).sex}，` : ''
 
           return (
             <Card
@@ -56,14 +119,29 @@ function SelectionView() {
                 </div>
               )}
               <CardContent className="p-4 flex flex-col gap-3">
-                <div className="w-full aspect-3/4 rounded-md bg-muted" />
+                <div className="w-full aspect-3/4 rounded-md bg-muted overflow-hidden flex items-center justify-center">
+                  {imgSrc ? (
+                    <img src={imgSrc} alt={char.name} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full flex-col items-center justify-center text-muted-foreground text-xs">
+                      <ImageIcon className="h-8 w-8 mb-1" />
+                      暂无图片
+                    </div>
+                  )}
+                </div>
                 <div className="space-y-1">
-                  <p className="font-semibold">
-                    {char.gender}，{char.name}
+                  <p className="font-semibold text-sm">
+                    <span className="text-muted-foreground">{sexPrefix}</span>
+                    {char.name || '—'}
                   </p>
-                  <p className="text-sm text-muted-foreground leading-snug overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                    {char.desc}
-                  </p>
+                  {char.description && (
+                    <p
+                      className="text-sm text-muted-foreground leading-snug overflow-hidden"
+                      style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}
+                    >
+                      {char.description}
+                    </p>
+                  )}
                 </div>
               </CardContent>
             </Card>

@@ -1,5 +1,5 @@
 import { Plus, User } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 
 import { Button } from '@/components/ui/button'
@@ -13,6 +13,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useCreateCharacter } from '@/hooks/use-characters'
 import { useI18n } from '@/hooks/use-i18n'
+import usePollCharacter from '@/hooks/use-poll-character'
 
 import { LoadingModal } from './loading-modal'
 import { CreationSuccessModal } from './success-modal'
@@ -44,6 +45,27 @@ export default function CharacterCreatorPage() {
       reader.onerror = (e) => reject(e)
       reader.readAsDataURL(file)
     })
+
+  const { startPolling, stopPolling } = usePollCharacter({
+    intervalMs: 2000,
+    maxAttempts: 30,
+    onUpdate: (c) => setCreatedCharacter(c),
+    onComplete: (c) => {
+      setCreatedCharacter(c)
+      setLoadingOpen(false)
+      setIsModalOpen(true)
+      toast.success('人物创建完成')
+    },
+    onTimeout: () => {
+      setLoadingOpen(false)
+      setIsModalOpen(true)
+      toast.error('生成超时，请稍后在“我的人物”中查看')
+    },
+  })
+
+  useEffect(() => {
+    return () => stopPolling()
+  }, [stopPolling])
 
   const handleCreate = async () => {
     setLoadingOpen(true)
@@ -82,9 +104,17 @@ export default function CharacterCreatorPage() {
       setCreatedCharacter(res.character)
       setJobId(res.job_id)
       setGeneratedImageUrl(res.character?.image_url || placeholderImage)
-      setLoadingOpen(false)
-      setIsModalOpen(true)
-      toast.success('人物创建成功')
+
+      // 只有当后端已经是 completed 且有 image_url 时，才直接进入成功态；
+      // 其它状态（包含 pending/processing/finished 等）都继续轮询，保持 loading 打开。
+      if (res.character?.image_status === 'completed' && res.character?.image_url) {
+        setLoadingOpen(false)
+        setIsModalOpen(true)
+        toast.success('人物创建成功')
+      } else if (res.character?.id) {
+        setLoadingOpen(true)
+        startPolling(res.character.id)
+      }
     } catch (err: any) {
       setLoadingOpen(false)
       toast.error(err?.message || '创建失败，请稍后重试')
@@ -157,10 +187,6 @@ export default function CharacterCreatorPage() {
       <LoadingModal
         open={loadingOpen}
         onOpenChange={setLoadingOpen}
-        onDone={() => {
-          setLoadingOpen(false)
-          setIsModalOpen(true)
-        }}
       />
       <CreationSuccessModal 
         open={isModalOpen}

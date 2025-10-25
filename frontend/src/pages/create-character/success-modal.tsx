@@ -1,10 +1,15 @@
+import { type ReactNode, useState } from 'react'
+import toast from 'react-hot-toast'
+import { useNavigate } from 'react-router'
+
+import CharactersApi from '@/apis/characters'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogClose,
   DialogContent,
 } from '@/components/ui/dialog'
-import { InputButton, InputButtonAction, InputButtonInput, InputButtonProvider, InputButtonSubmit } from '@/components/ui/shadcn-io/input-button'
+import { InputButton, InputButtonAction, InputButtonInput, InputButtonProvider, InputButtonSubmit, useInputButton } from '@/components/ui/shadcn-io/input-button'
 import { useI18n } from '@/hooks/use-i18n'
 import type { ICharacter } from '@/service/types'
 
@@ -16,10 +21,82 @@ interface SuccessModalProps {
   fallbackImageUrl?: string
 }
 
-export function CreationSuccessModal({ open, onOpenChange, character, jobId, fallbackImageUrl }: SuccessModalProps) {
+function NameSubmitButton({
+  characterId,
+  nameInput,
+  submitting,
+  setSubmitting,
+  onSaved,
+  children,
+}: {
+  characterId?: number
+  nameInput: string
+  submitting: boolean
+  setSubmitting: (v: boolean) => void
+  onSaved: (newName: string) => void
+  children: ReactNode
+}) {
+  const { setShowInput } = useInputButton()
+
+  return (
+    <InputButtonSubmit
+      disabled={!characterId || !nameInput?.trim() || submitting}
+      onClick={async (e) => {
+        e.preventDefault()
+        if (!characterId) return
+        const newName = nameInput.trim()
+        if (!newName) return
+
+        try {
+          setSubmitting(true)
+          const res = await CharactersApi.updateName(characterId, { name: newName })
+          onSaved(res.character.name)
+          setShowInput(false)
+          toast.success('名称已更新')
+        } catch (err: any) {
+          toast.error(err?.message || '更新名称失败')
+        } finally {
+          setSubmitting(false)
+        }
+      }}
+    >
+      {children}
+    </InputButtonSubmit>
+  )
+}
+
+export function CreationSuccessModal({ open, onOpenChange, character, fallbackImageUrl }: SuccessModalProps) {
   const { t } = useI18n('createCharacter')
-  const imageUrl = character?.image_url ?? fallbackImageUrl
-  const status = character?.image_status
+  const navigate = useNavigate()
+  const [submitting, setSubmitting] = useState(false)
+  const [nameInput, setNameInput] = useState<string>(character?.name ?? '')
+  const rawImageUrl = character?.image_url ?? fallbackImageUrl
+  const imageUrl = (() => {
+    if (!rawImageUrl) return undefined
+    // In dev, route storage assets through Vite proxy '/static' so Referer/Origin headers are set
+    if ((import.meta as any).env?.DEV) {
+      try {
+        // If already a full URL, check host
+        if (/^https?:\/\//i.test(rawImageUrl)) {
+          const u = new URL(rawImageUrl)
+          if (u.hostname === 'storage.mangasuperb.anranz.xyz') {
+            const normalizedPath = u.pathname.replace(/^\/+/, '/')
+
+            return `/static${normalizedPath}`
+          }
+        } else if (rawImageUrl.startsWith('/manga')) {
+          // Pure path from storage, prefix with /static
+          return `/static${rawImageUrl}`
+        }
+      } catch {
+        // fall back to raw url on any parsing error
+        return rawImageUrl
+      }
+    }
+    
+    return rawImageUrl
+  })()
+  const displayName = nameInput || character?.name
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -28,13 +105,6 @@ export function CreationSuccessModal({ open, onOpenChange, character, jobId, fal
           <span className="sr-only">{String(t('success.close'))}</span>
         </DialogClose>
         
-        {status && (
-          <div className="mt-2 text-xs text-muted-foreground">
-            {String(t('success.imageStatus'))}{status}
-            {jobId ? ` · ${String(t('success.jobId'))}${jobId}` : ''}
-          </div>
-        )}
-
         {imageUrl && (
           <div className="mt-6">
             <img
@@ -45,15 +115,38 @@ export function CreationSuccessModal({ open, onOpenChange, character, jobId, fal
           </div>
         )}
 
+        {displayName && (
+          <div className="mt-4 text-center">
+            <h3 className="text-lg font-semibold">{displayName}</h3>
+          </div>
+        )}
+
         <div className="flex flex-col gap-4 mt-6">
           <InputButtonProvider>
             <InputButton>
               <InputButtonAction>{String(t('success.name.prompt'))}</InputButtonAction>
-              <InputButtonSubmit>{String(t('success.name.submit'))}</InputButtonSubmit>
+              <NameSubmitButton
+                characterId={character?.id}
+                nameInput={nameInput}
+                submitting={submitting}
+                setSubmitting={setSubmitting}
+                onSaved={(newName) => setNameInput(newName)}
+              >
+                {submitting ? '保存中…' : String(t('success.name.submit'))}
+              </NameSubmitButton>
             </InputButton>
-            <InputButtonInput type="text" placeholder={String(t('success.name.placeholder'))} defaultValue={character?.name} />
+            <InputButtonInput
+              type="text"
+              placeholder={String(t('success.name.placeholder'))}
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+            />
           </InputButtonProvider>
-          <Button variant="default" className="w-full">
+          <Button
+            variant="default"
+            className="w-full"
+            onClick={() => navigate('/ideas?tab=characters')}
+          >
             {String(t('success.viewIdeas'))}
           </Button>
         </div>
