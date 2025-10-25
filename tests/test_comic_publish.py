@@ -1,7 +1,9 @@
 """Tests for publishing comics and exposing public listings."""
 from __future__ import annotations
 
+import io
 import json
+import zipfile
 
 import pytest
 
@@ -71,8 +73,8 @@ def test_publish_endpoint_enqueues_workflow(
         "cover_job_id",
         "publish_job_id",
     }
-    assert dummy_queue.jobs[0].func is jobs.process_export_stage
-    assert dummy_queue.jobs[1].func is jobs.process_cover_generation
+    assert dummy_queue.jobs[0].func is jobs.process_cover_generation
+    assert dummy_queue.jobs[1].func is jobs.process_export_stage
     assert dummy_queue.jobs[2].func is finalize_publish_stage
 
     with app.app_context():
@@ -84,7 +86,7 @@ def test_publish_endpoint_enqueues_workflow(
             .first()
         )
         assert stage is not None
-        assert stage.job_id == dummy_queue.jobs[0].id
+        assert stage.job_id == dummy_queue.jobs[1].id
 
 
 def test_public_listing_returns_published_comic(
@@ -97,15 +99,20 @@ def test_public_listing_returns_published_comic(
     cover_prompts: list[tuple[str, str]] = []
 
     with app.app_context():
-        export_result = jobs.process_export_stage(generated_comic.id)
-        assert export_result["status"] == "completed"
-
         _patch_cover_models(monkeypatch, cover_prompts)
         cover_result = jobs.process_cover_generation(generated_comic.id)
         assert cover_result["status"] == "completed"
 
+        export_result = jobs.process_export_stage(generated_comic.id)
+        assert export_result["status"] == "completed"
+
         publish_result = finalize_publish_stage(generated_comic.id)
         assert publish_result["status"] == "completed"
+
+        zip_payload = dummy_storage.files[export_result["zip_url"]]
+        zip_names = zipfile.ZipFile(io.BytesIO(zip_payload)).namelist()
+        assert zip_names[0] == "cover.png"
+        assert any(name.startswith("page-") for name in zip_names[1:])
 
     list_response = client.get("/api/comics/public")
     assert list_response.status_code == 200

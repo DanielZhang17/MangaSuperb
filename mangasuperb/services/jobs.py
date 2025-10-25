@@ -529,30 +529,30 @@ def enqueue_publish_workflow(
     timeout = current_app.config["RQ_JOB_TIMEOUT"]
     result_ttl = current_app.config["RQ_RESULT_TTL"]
 
+    cover_job = queue.enqueue(
+        process_cover_generation,
+        comic_id=comic.id,
+        image_model=image_model,
+        job_timeout=timeout,
+        result_ttl=result_ttl,
+        description=f"Generate cover for comic {comic.id}",
+    )
+
     export_job = queue.enqueue(
         process_export_stage,
         comic_id=comic.id,
+        depends_on=cover_job,
         job_timeout=timeout,
         result_ttl=result_ttl,
         description=f"Export bundle for comic {comic.id}",
     )
     _assign_stage_job(comic, "export", export_job.id)
 
-    cover_job = queue.enqueue(
-        process_cover_generation,
-        comic_id=comic.id,
-        image_model=image_model,
-        depends_on=export_job,
-        job_timeout=timeout,
-        result_ttl=result_ttl,
-        description=f"Generate cover for comic {comic.id}",
-    )
-
     publish_job = queue.enqueue(
         finalize_publish_stage,
         comic_id=comic.id,
         make_public=make_public,
-        depends_on=cover_job,
+        depends_on=export_job,
         job_timeout=timeout,
         result_ttl=result_ttl,
         description=f"Finalize publish for comic {comic.id}",
@@ -1067,12 +1067,34 @@ def process_export_stage(comic_id: int) -> dict[str, Any]:
             _set_stage_status(comic, "export", "in_progress")
             db.session.commit()
 
-            image_payload = _load_page_images(storage, pages)
+            image_payload: list[tuple[int, bytes]] = []
+            if comic.cover_image_url:
+                cover_bytes = storage.download_file(comic.cover_image_url)
+                if cover_bytes:
+                    logger.info(
+                        "Including cover image in export for comic_id=%s job_id=%s",
+                        comic_id,
+                        job_id,
+                    )
+                    image_payload.append((0, cover_bytes))
+                else:
+                    logger.warning(
+                        "Cover image unavailable for comic_id=%s url=%s",
+                        comic_id,
+                        comic.cover_image_url,
+                    )
+
+            page_payload = _load_page_images(storage, pages)
+            image_payload.extend(page_payload)
+            image_payload.sort(key=lambda item: item[0])
 
             zip_buffer = BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
                 for page_number, data in image_payload:
-                    archive_name = f"page-{page_number:03d}.png"
+                    if page_number == 0:
+                        archive_name = "cover.png"
+                    else:
+                        archive_name = f"page-{page_number:03d}.png"
                     bundle.writestr(archive_name, data)
 
             pdf_bytes = _build_pdf_bytes(image_payload)

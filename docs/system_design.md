@@ -1,43 +1,45 @@
-# MangaSuperb system design
+# MangaSuperb 系统设计（中文版本）
 
-This document captures how requests traverse the modernised backend and the shared services that support manga creation, regeneration, and download flows.
+本文总结当前后端的整体结构、模块责任、关键数据表以及主要 API 流程，便于新成员快速理解项目架构。英文旧版已迁移至 `docs/system_design_EN.md`，后续如有改动请同步两份文档。
 
-## High-level architecture
+---
+
+## 1. 架构概览
 
 ```mermaid
 graph TD
-    subgraph User
-        A[Browser]
+    subgraph 用户端
+        A[用户浏览器]
     end
 
-    subgraph Infrastructure
+    subgraph 基础设施
         B[Nginx]
-        C[Flask]
-        D[PostgreSQL]
+        C[Flask Web服务器]
+        D[PostgreSQL数据库]
         E[Redis]
         F[RQ Worker]
-        G[Cloudflare R2]
+        G[云存储S3]
     end
 
-    subgraph External
+    subgraph 外部服务
         H[Gemini API]
     end
 
-    A -- HTTP --> B
-    B -- Reverse proxy --> C
+    A -- HTTP请求 --> B
+    B -- 转发请求 --> C
 
-    C -- CURD --> D
-    C -- Enqueue Job --> E
-    F -- Dequeue Job --> E
+    C -- 读/写数据 --> D
+    C -- 入队任务 (Enqueue Job) --> E
+    F -- 出队任务 (Dequeue Job) --> E
 
-    F -- 1. API Call --> H
-    H -- 2. Return response --> F
-    F -- 3. Upload image --> G
-    F -- 4. Update job status--> D
+    F -- 1. 调用API --> H
+    H -- 2. 返回结果 --> F
+    F -- 3. 上传图片/PDF --> G
+    F -- 4. 更新任务状态 --> D
 
-    C -- Query Job status --> D
-    A -- Get URL --> C
-    A -- Access URL --> G
+    C -- 查询任务状态/结果 --> D
+    A -- 获取漫画URL --> C
+    A -- 通过URL直接访问 --> G
 
     linkStyle 0 stroke-width:2px,fill:none,stroke:blue;
     linkStyle 1 stroke-width:2px,fill:none,stroke:blue;
@@ -53,212 +55,106 @@ graph TD
     linkStyle 11 stroke-width:2px,fill:none,stroke:red;
 ```
 
-### Request lifecycle
+- **Flask API (`app.py`)**：提供 REST 接口、认证、业务校验；所有耗时操作都转交 RQ。
+- **RQ Worker (`worker.py`)**：在应用上下文中执行 `mangasuperb/services/jobs.py`，负责 Gemini 文本/图像生成、PDF/ZIP 导出等。
+- **PostgreSQL**：存储用户、角色、脚本、漫画及其子表（页面、布局、阶段状态等）。
+- **Redis**：既作为 Session 缓存（Flask-Login 使用 cookie）也作为 RQ 的队列与 registry。
+- **Cloudflare R2**：保存生成的角色图片、漫画页面、封面和导出文件。
+- **Gemini API**：用于脚本生成、角色优化、图像生成、封面生成。
 
-1. **Authentication** – Credentials are posted to `/api/auth/*` and processed by the auth blueprint. Flask-Login stores the session cookie which is reused by subsequent requests.
-2. **Scripting & character creation** – Authoring routes live under `/api/scripts` and `/api/characters`. They persist raw JSON payloads to PostgreSQL and optionally call Gemini synchronously for lightweight optimisation.
-3. **Comic generation** – `/api/jobs` collects the story prompt, persists a pending `Comic` + `Script`, and enqueues the staged workflow in Redis. Per `mangasuperb/routes/jobs.py:create_job`, the immediate API response returns the job id and generated script while outline, shot, and render stages continue asynchronously.
-4. **Background processing** – The RQ worker loads the same job implementation (`mangasuperb.services.jobs`) used by the API. It calls Gemini image models, uploads the results to Cloudflare R2, and updates the comic status plus generated pages.
-5. **Retrieval & download** – Clients poll `/api/jobs/<id>` for status updates or fetch `/api/comics/<id>` once the PDF/assets are ready. Because R2 URLs are persisted, subsequent downloads do not require recomputation.
+---
 
-### Module responsibilities
+## 2. 模块职责
 
-- **`mangasuperb/__init__.py`** – Application factory that wires extensions, blueprints, Swagger, logging, and shared storage/queue clients.
-- **`mangasuperb/extensions.py`** – Central definitions for SQLAlchemy, bcrypt, login manager, CORS, and RQ queue initialisation.
-- **`mangasuperb/routes/*`** – Thin HTTP layers focused on validation, persistence, and orchestrating services for each domain.
-- **`mangasuperb/services/generation.py`** – Gemini helpers for script creation, character optimisation, payload validation, and aspect ratio enforcement.
-- **`mangasuperb/services/jobs.py`** – Background job implementations reused by the API and worker so asynchronous logic stays in sync.
-- **`worker.py`** – Minimal bootstrap that creates the Flask app, pushes an application context, and starts the RQ worker loop.
+| 模块/文件 | 职责描述 |
+|-----------|----------|
+| `mangasuperb/routes/auth.py` | 注册/登录、更新邮箱/用户名/密码、返回当前用户信息 |
+| `mangasuperb/routes/characters.py` | 角色 CRUD；可请求文本优化及角色图像生成（含 RQ 任务） |
+| `mangasuperb/routes/scripts.py` | 自定义脚本保存与列表查询 |
+| `mangasuperb/routes/comics.py` | 漫画创建（同步写入 Script + Comic + 角色关联）、列表、详情、发布（导出） |
+| `mangasuperb/routes/jobs.py` | `/api/jobs` 动态分发：漫画生成、脚本优化、角色优化、页面重渲染；提供 `/api/jobs/<id>` 状态查询并返回 `worker_snapshot` |
+| `mangasuperb/routes/system.py` | `/health` 增强版：返回 database / redis / r2 / rq_workers 状态；根路径提供 SPA |
+| `mangasuperb/services/generation.py` | 封装 Gemini 文本交互、角色描述优化、图片参考校验、宽高比校验 |
+| `mangasuperb/services/jobs.py` | RQ 任务实现：从脚本生成、角色图像、页面渲染，到导出 PDF/ZIP、封面生成、发布 |
+| `mangasuperb/extensions.py` | 初始化 SQLAlchemy、Bcrypt、LoginManager、Redis/RQ Queue |
 
-## API endpoints
+---
 
-### System
+## 3. 关键数据表
 
-| Endpoint | Method | Description | Auth |
-|----------|--------|-------------|------|
-| `/` | GET | Serves the SPA entry (`static/index.html`). | Not required |
-| `/health` | GET | Liveness and dependency check for database, Redis, and R2. | Not required |
-| `/api/docs.json` | GET | Swagger definition used by Swagger UI. | Not required |
+| 表名 | 说明 | 关联合约 |
+|------|------|---------|
+| `users` | 用户账号（唯一 username、email、avatar_index） | 拥有 `characters`、`scripts`、`comics` |
+| `characters` | 角色描述、样式提示、性别、公共标记；可记录 RQ 图像任务 | 与 `comic_characters` 多对多 |
+| `scripts` | 手动或自动生成的脚本 JSON | 被 `comics` 引用 |
+| `comics` | 漫画元数据（状态、样式说明、aspect_ratio、导出链接、封面等） | 关联 `scripts`、`comic_pages`、`comic_panel_shots` 等 |
+| `comic_pages` | 每页渲染结果（image_url、panel_text）并与脚本建立追踪 | `script_id` 外键追溯来源 |
+| `comic_panel_shots` | 面板描述、台词等；可映射到页面和布局 | 关联 `comic_page_layouts` |
+| `comic_page_layouts` / `comic_page_panels` | 用户或系统选择的布局与面板排序 | 支持手动调整后触发重新渲染 |
+| `comic_workflow_stages` | outline/shots/render/export 等阶段的 job_id、状态、时间戳、错误信息 | 用于 `/api/jobs/<id>` 与 UI 展示 |
+| `comic_characters` | 漫画与角色的桥表，记录 order/role 等 | |
 
-- **Request parameters** – none (public endpoints).
-- **Response fields** – optional status blocks per dependency, including `rq_workers` with active worker details.
+---
 
-### Authentication
+## 4. 队列流程与日志
 
-| Endpoint | Method | Description | Auth |
-|----------|--------|-------------|------|
-| `/api/auth/register` | POST | Create an account; enforces unique username and email, returns logged-in session. | No |
-| `/api/auth/login` | POST | Authenticate with username or email plus password; issues session cookie. | No |
-| `/api/auth/logout` | POST | Invalidate the active session. | Yes |
-| `/api/auth/me` | GET | Return the current user profile or `null`. | Optional |
-| `/api/auth/username` | PATCH | Update username after validation and uniqueness checks. | Yes |
-| `/api/auth/email` | PATCH | Update email address with format and uniqueness enforcement. | Yes |
-| `/api/auth/password` | PATCH | Change password by submitting current and new secrets. | Yes |
+1. **漫画生成 (`/api/jobs` with `comic_generation`)**  
+   - API 写入 Script + Comic，并立即调用 `enqueue_comic_workflow`：  
+     outline → shots → render（最后一个 job_id 会回传给前端）。  
+   - 工作进度可在 `/api/jobs/<render_job_id>` 查看，返回结构示例：  
+     ```json
+     {
+       "job_id": "...",
+       "rq_status": "finished",
+       "comic": { ... },
+       "worker_snapshot": {
+         "status": "active",
+         "active": 2,
+         "workers": ["manga-worker-136759", "manga-worker-135194"],
+         "queued": 0,
+         "deferred": 0,
+         "failed": 6
+       }
+     }
+     ```
+   - 如果 `active` 为 0，会在响应中附带 warning，提醒 worker 未运行。
 
-- **POST /api/auth/register** – Required JSON: `username`, `email`, `password`. Optional: none. Returns `user`.
-- **POST /api/auth/login** – Required JSON: `password` plus one of `username` or `email`. Optional: remember flags (future). Returns `user`.
-- **PATCH /api/auth/username** – Required JSON: `username`. Optional: none. Returns `user`.
-- **PATCH /api/auth/email** – Required JSON: `email`. Optional: none. Returns `user`.
-- **PATCH /api/auth/password** – Required JSON: `current_password`, `new_password`. Optional: none. Returns `message`.
-- **GET /api/auth/me** – No parameters. Returns `user` or `null`.
+2. **页面重渲染**  
+   - `POST /api/panels/<comic_id>/layouts` 先调整布局；随后 `POST /api/panels/<comic_id>/pages/<page>/render` 入队再渲染单页。
 
-### Characters
+3. **角色图像生成**  
+   - `POST /api/characters` 附带 `reference_images` 时会调用 `process_character_image_generation`，完成后写入 `image_url`。
 
-| Endpoint | Method | Description | Auth |
-|----------|--------|-------------|------|
-| `/api/characters` | POST | Create a character; optional optimisation and reference images enqueue portrait jobs and return `job_id`. | Yes |
-| `/api/characters` | GET | List characters owned by the user plus any marked `is_public`. | Yes |
-| `/api/characters/<id>` | GET | Retrieve a single character owned by the user. | Yes |
+4. **导出与发布**  
+   - `POST /api/comics/<id>/publish` 顺序：封面生成 → 导出 PDF/ZIP → finalize。  
+   - `process_export_stage` 会在开头插入 `cover.png`，PDF 第一页即封面，ZIP 包含封面 + page-XXX.png。  
+   - 发布完成后可设置 `make_public=true` 让漫画出现在 `/api/comics/public`。
 
-- **POST /api/characters** – Required JSON: `description`. Optional: `name` (defaults to `unspecified`), `sex` (default `unspecified`), `is_public`, `optimize`, `style_prompt`, `reference_images`. Returns `character`, optional `job_id`.
-- **GET /api/characters** – Optional query: none; returns `characters` including public roster.
-- **GET /api/characters/<id>** – Path `id` required; returns `character`.
+5. **健康检查**  
+   - `/health` 返回 `rq_workers.status` / `active` / `workers` 数组，便于确认队列是否存在 worker实例。
 
-### Scripts
+---
 
-| Endpoint | Method | Description | Auth |
-|----------|--------|-------------|------|
-| `/api/scripts` | POST | Save a custom script draft (title + JSON content). | Yes |
-| `/api/scripts` | GET | List recent scripts for the current user (max 100). | Yes |
-| `/api/scripts/<id>` | GET | Fetch a single script owned by the user. | Yes |
+## 5. 安全与配置
 
-- **POST /api/scripts** – Required JSON: `title`, `content` (stringified JSON). Optional: none. Returns `script`.
-- **GET /api/scripts** – Optional query: `limit` (default 50, max 100). Returns `scripts`, `count`.
-- **GET /api/scripts/<id>** – Path `id` required; returns `script`.
+- 所有密钥必须放在 `.env`；不要把.env或API key上传到仓库。
+- R2 资源当前默认公开访问。
+- Gemini 请求需处理失败重试；若凭证缺失，任务会抛 `RuntimeError` 并更新阶段状态为失败。
+- 角色/漫画导出需确认 R2 Bucket 可写、且 `R2_PUBLIC_URL` 正确配置以生成可点击的公共链接。
 
-### Comics
+---
 
-| Endpoint | Method | Description | Auth |
-|----------|--------|-------------|------|
-| `/api/comics` | POST | Create a comic with associated script, aspect ratio, and optional character roster. | Yes |
-| `/api/comics` | GET | List comics belonging to the current user. | Yes |
-| `/api/comics/<id>` | GET | Retrieve a specific comic, including generated pages and status. | Yes |
+## 6. 日志排查指南
 
-- **POST /api/comics** – Required JSON: `title`, `story` (or `script_content`), `style` (or `style_description`), `aspect_ratio`. Optional: `characters`, `character_ids`, `style_description`. Returns `comic`, `script`.
-- **GET /api/comics** – Optional query: `user_id` (must match self). Returns `comics`, `count`.
-- **GET /api/comics/<id>** – Path `id` required; returns `comic`.
+- 所有 RQ 任务在 `mangasuperb/services/jobs.py` 都记录 `=== ... job_id=... ===`，首尾各一条。
+- 失败时，会通过 `logger.exception` 保存堆栈，并更新 `comic.character` 等模型的 `image_error`、`workflow_stages.error_message`。
+- 如果 `/api/jobs/<id>` 显示 `rq_status: "failed"`，请检查 worker 终端日志以及 R2/Gemini 凭证。
 
-### Stories, panels, and rendering
+---
 
-| Endpoint | Method | Description | Auth |
-|----------|--------|-------------|------|
-| `/api/stories/<comic_id>` | GET | Return the comic payload including outline, panels, and pages. | Yes |
-| `/api/stories/<comic_id>` | POST | Replace outline sections, optionally reassign characters, and reset workflow stages. | Yes |
-| `/api/stories/<comic_id>/optimize` | POST | Enqueue Gemini outline optimisation for the comic. | Yes |
-| `/api/panels/<panel_id>` | PATCH | Update panel metadata (text, ordering, status) and flag the render stage pending. | Yes |
-| `/api/panels/<comic_id>/layouts` | POST | Select a page layout and panel order, marking the comic for re-render. | Yes |
-| `/api/panels/<comic_id>/pages/<page_number>/render` | POST | Enqueue a specific page render job. | Yes |
+## 7. 后续工作
 
-- **GET /api/stories/<comic_id>** – Path `comic_id` required; returns `comic`.
-- **POST /api/stories/<comic_id>** – Required JSON: `sections` (non-empty list). Optional: `characters`, `character_ids`. Returns `comic`.
-- **POST /api/stories/<comic_id>/optimize** – Path `comic_id`; no body. Returns `stage_jobs`, `comic`.
-- **PATCH /api/panels/<panel_id>** – Path `panel_id`; body optional fields among `description`, `dialogue`, `camera_notes`, `style_notes`, `status`, `page_number`, `panel_number`. Returns `panel`, `comic`.
-- **POST /api/panels/<comic_id>/layouts`** – Path `comic_id`; required body: `page_number`. Optional: `layout_key`, `notes`, `panel_order`. Returns `layout`, `comic`.
-- **POST /api/panels/<comic_id>/pages/<page_number>/render`** – Path params required; body optional. Returns `job_id`, `comic`.
+- 前端如需同步展示队列进度，可直接使用 `/api/jobs/<id>` 的 `worker_snapshot` 和 `comic.workflow_stages`。
+- 添加新类型的任务时，记得更新 `swagger.py` 中 `JOB_CREATE_DOC` 和 `JOB_STATUS_DOC`。
+- 如需扩展导出格式，可在 `process_export_stage` 中增加新的文件生成逻辑，并写入数据库字段。
 
-### Jobs
-
-| Endpoint | Method | Description | Auth |
-|----------|--------|-------------|------|
-| `/api/jobs` | POST | Dispatch background work (`comic_generation`, `story_optimization`, `character_optimization`, `page_render`). | Yes |
-| `/api/jobs/<job_id>` | GET | Inspect queued or completed job status and associated payloads. | Yes |
-
-- **POST /api/jobs** – Required JSON varies by `job_type`:  
-  - `comic_generation` requires `prompt`; optional `style`, `aspect_ratio`, `characters`.  
-  - `story_optimization` requires `comic_id`.  
-  - `character_optimization` requires `character_id`, optional `description`.  
-  - `page_render` requires `comic_id`, `page_number`.  
-  Returns `job_id`, plus comic/script payloads per workflow.
-- **GET /api/jobs/<job_id>** – Path `job_id` required; returns `job_id`, `rq_status`, optional `comic`/`character`.
-
-### Scaling considerations
-
-- **Horizontal API scaling** – The stateless blueprint architecture allows multiple Flask instances to be started behind a load balancer. Sessions are backed by secure cookies, while shared resources (PostgreSQL, Redis, R2) remain external.
-- **Job throughput** – Additional worker processes can be launched by calling `python worker.py` in separate containers or machines. Because the job logic is pure Python with explicit context management, no extra configuration is needed.
-- **Future extensions** – Additional services (PDF renderer, collaborative editing, analytics) can be added as new blueprints or background jobs without modifying the existing modules. The `docs/system_design.md` diagram should be updated as new dependencies join the flow.
-
-### Data entities
-
-| Entity      | Purpose                                                   | Key relationships |
-|-------------|-----------------------------------------------------------|-------------------|
-| `User`      | Authenticates artists and writers via username/password.  | Owns scripts, characters, comics. |
-| `Script`    | Stores the structured outline returned by Gemini.         | Linked to comics. |
-| `Comic`     | Tracks generation status, style, aspect ratio, and PDFs.  | References a script and collection of pages. |
-| `ComicPage` | Individual rendered pages generated by the worker.        | Belongs to a comic. |
-| `Character` | Optional character bios and generated portraits.          | Owned by a user and may queue its own job. |
-| `ComicWorkflowStage` | Tracks outline, shot, and render stage status for a comic. | Belongs to a comic; one row per stage with timing metadata. |
-| `ComicOutlineSection` | Stores ordered outline beats derived from the prompt. | Belongs to a comic; linked to panel shots. |
-| `ComicPanelShot` | Describes individual panels including dialogue and style notes. | Belongs to a comic; optionally tied to an outline section and page assignments. |
-| `ComicPageLayout` | Records page-level layout selections and panel placement. | Belongs to a comic; owns ordered `ComicPagePanel` assignments and may reference a rendered page. |
-| `ComicPagePanel` | Maps panel shots to positions within a page layout. | Belongs to a page layout and references a `ComicPanelShot`. |
-| `ComicCharacter` | Joins characters to comics with roles and ordering.  | Many-to-many bridge between `Comic` and `Character`. |
-
-This shared mental model should make it straightforward to onboard contributors, reason about failure modes, and plan for future scalability milestones.
-
-## Database schema
-
-### `users`
-- `id` PK, auto-increment.
-- `username` unique, indexed length ≤ 80; enforced uniqueness at DB and application level.
-- `email` unique, indexed length ≤ 255; login accepts either username or email.
-- `password_hash`, `avatar_index`, `created_at`.
-- Cascading deletes remove child `characters`, `scripts`, and `comics`.
-
-### `characters`
-- `id` PK, `user_id` FK → `users.id` (`CASCADE` on delete).
-- Required `description`; `name` defaults to `'unspecified'` when omitted so users can rename later.
-- Flags: `is_public` (indexed) and `image_status` for queue tracking.
-- Optional: `style_prompt`, `optimized_description`, `image_url`, `image_job_id`, `image_error`.
-- Relationship: many characters per user; joined to comics via `comic_characters`.
-
-### `scripts`
-- `id` PK, `user_id` FK → `users.id` (`CASCADE`).
-- Required `title`, `content` (JSON string).
-- Relationship: one user owns many scripts; each script may back multiple comics.
-
-### `comics`
-- `id` PK, `user_id` FK → `users.id`, `script_id` FK → `scripts.id` (both `CASCADE`).
-- Workflow columns: `status`, `workflow_stage`, `workflow_status`, timestamps, optional `job_id` (unique), `error_message`.
-- Presentation data: `title`, `style_description`, `aspect_ratio`, optional `pdf_url`.
-- Relationships: one comic has many pages, stages, outline sections, panel shots, page layouts, and `comic_characters`.
-
-### `comic_characters`
-- Bridge table: `comic_id` FK → `comics.id`, `character_id` FK → `characters.id` (both `CASCADE`).
-- `order_index` (display ordering) and optional `role`.
-- Unique constraint `uq_comic_character_link` prevents duplicate assignments of the same character to a comic.
-
-### `comic_pages`
-- `id` PK, `comic_id` FK → `comics.id` (`CASCADE`), `script_id` FK → `scripts.id` (`CASCADE`).
-- `page_number` + `comic_id` unique (`unique_comic_page`), enforcing one rendered asset per page per comic.
-- Stores `image_url`, optional `panel_text`, and maintains a direct script reference for traceability.
-- Linked from `comic_page_layouts.comic_page_id`.
-
-### `comic_workflow_stages`
-- `id` PK, `comic_id` FK → `comics.id` (`CASCADE`).
-- `stage` (outline/shots/render) constrained at application level; unique per comic (`unique_comic_stage`).
-- Tracks `status`, optional `job_id`, timestamps, `error_message`.
-
-### `comic_outline_sections`
-- `id` PK, `comic_id` FK → `comics.id` (`CASCADE`).
-- `order_index` unique per comic (`unique_outline_order`), with optional `title`, required `summary`.
-- Backref: `panel_shots` (one-to-many).
-
-### `comic_panel_shots`
-- `id` PK, `comic_id` FK → `comics.id` (`CASCADE`), `outline_section_id` FK → `comic_outline_sections.id` (`SET NULL`).
-- Unique `sequence_index` per comic (`unique_panel_sequence`); optional `page_number` / `panel_number`.
-- Stores description, dialogue, camera/style notes, status, timestamps.
-- Backref from `comic_page_panels` for layout placement.
-
-### `comic_page_layouts`
-- `id` PK, `comic_id` FK → `comics.id` (`CASCADE`), optional `comic_page_id` FK → `comic_pages.id` (`SET NULL`).
-- Unique `page_number` per comic (`unique_layout_page`).
-- Fields: `layout_key`, `notes`, `status`, optional `selected_at`.
-- One-to-many with `comic_page_panels`.
-
-### `comic_page_panels`
-- `id` PK, `page_layout_id` FK → `comic_page_layouts.id` (`CASCADE`), `panel_shot_id` FK → `comic_panel_shots.id` (`CASCADE`).
-- `position` integer; unique constraints on `(page_layout_id, position)` and `(page_layout_id, panel_shot_id)` enforce ordering without duplicates.
-
-### Queue-related helpers
-- Characters store `image_job_id`; comics track pipeline via `job_id` plus `comic_workflow_stages`.
-- All job IDs refer to Redis RQ identifiers stored as strings; foreign keys are not enforced for jobs, keeping queue coupling loose.
