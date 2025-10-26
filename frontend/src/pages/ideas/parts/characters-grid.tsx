@@ -8,28 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { useCharactersList } from '@/hooks/use-characters'
-
-function normalizeStorageUrl(url?: string | null) {
-  if (!url) return undefined
-  if ((import.meta as any).env?.DEV) {
-    try {
-      if (/^https?:\/\//i.test(url)) {
-        const u = new URL(url)
-        if (u.hostname === 'storage.mangasuperb.anranz.xyz') {
-          const p = u.pathname.replace(/^\/+/, '/')
-
-          return `/static${p}`
-        }
-      } else if (url.startsWith('/manga')) {
-        return `/static${url}`
-      }
-    } catch {
-      return url
-    }
-  }
-
-  return url
-}
+import { proxiedStatic } from '@/lib/utils'
 
 export default function CharactersGrid() {
   const { characters, loading, error, refresh } = useCharactersList()
@@ -87,7 +66,7 @@ export default function CharactersGrid() {
 
 function CharacterCard({ character, onChanged, onDeleted }: { character: ReturnType<typeof useCharactersList>['characters'][number]; onChanged: () => void; onDeleted: () => void; }) {
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const imgSrc = useMemo(() => normalizeStorageUrl(character.image_url), [character.image_url])
+  const imgSrc = useMemo(() => proxiedStatic(character.image_url || undefined), [character.image_url])
   const sexPrefix = (character as any)?.sex ? `${(character as any).sex}，` : ''
 
   const handleRename = async (name: string) => {

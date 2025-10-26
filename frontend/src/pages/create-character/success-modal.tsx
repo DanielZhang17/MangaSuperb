@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dialog'
 import { InputButton, InputButtonAction, InputButtonInput, InputButtonProvider, InputButtonSubmit, useInputButton } from '@/components/ui/shadcn-io/input-button'
 import { useI18n } from '@/hooks/use-i18n'
+import { proxiedStatic } from '@/lib/utils'
 import type { ICharacter } from '@/service/types'
 
 interface SuccessModalProps {
@@ -71,31 +72,7 @@ export function CreationSuccessModal({ open, onOpenChange, character, fallbackIm
   const [submitting, setSubmitting] = useState(false)
   const [nameInput, setNameInput] = useState<string>(character?.name ?? '')
   const rawImageUrl = character?.image_url ?? fallbackImageUrl
-  const imageUrl = (() => {
-    if (!rawImageUrl) return undefined
-    // In dev, route storage assets through Vite proxy '/static' so Referer/Origin headers are set
-    if ((import.meta as any).env?.DEV) {
-      try {
-        // If already a full URL, check host
-        if (/^https?:\/\//i.test(rawImageUrl)) {
-          const u = new URL(rawImageUrl)
-          if (u.hostname === 'storage.mangasuperb.anranz.xyz') {
-            const normalizedPath = u.pathname.replace(/^\/+/, '/')
-
-            return `/static${normalizedPath}`
-          }
-        } else if (rawImageUrl.startsWith('/manga')) {
-          // Pure path from storage, prefix with /static
-          return `/static${rawImageUrl}`
-        }
-      } catch {
-        // fall back to raw url on any parsing error
-        return rawImageUrl
-      }
-    }
-    
-    return rawImageUrl
-  })()
+  const imageUrl = proxiedStatic(rawImageUrl || undefined) || undefined
   const displayName = nameInput || character?.name
 
   return (

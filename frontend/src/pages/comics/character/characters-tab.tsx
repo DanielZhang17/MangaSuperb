@@ -8,30 +8,9 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCharactersList } from '@/hooks/use-characters'
 import { useI18n } from '@/hooks/use-i18n'
+import { proxiedStatic } from '@/lib/utils'
 
 import { activeTabAtom, charactersCompletedAtom, selectedCharacterIdsAtom, selectedCharacterRolesAtom } from '../atoms'
-
-function normalizeStorageUrl(url?: string | null) {
-  if (!url) return undefined
-  if ((import.meta as any).env?.DEV) {
-    try {
-      if (/^https?:\/\//i.test(url)) {
-        const u = new URL(url)
-        if (u.hostname === 'storage.mangasuperb.anranz.xyz') {
-          const p = u.pathname.replace(/^\/+/, '/')
-
-          return `/static${p}`
-        }
-      } else if (url.startsWith('/manga')) {
-        return `/static${url}`
-      }
-    } catch {
-      return url
-    }
-  }
-
-  return url
-}
 
 function SelectionView() {
   const { t } = useI18n('comics')
@@ -145,7 +124,7 @@ function SelectionView() {
       <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-6">
         {characters.map((char) => {
           const selected = selectedIds.includes(char.id)
-          const imgSrc = normalizeStorageUrl(char.image_url)
+          const imgSrc = proxiedStatic(char.image_url || undefined)
           const sexPrefix = (char as any)?.sex ? `${(char as any).sex}，` : ''
 
           return (

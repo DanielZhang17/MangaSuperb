@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { cn } from '@/lib/utils'
+import { cn, proxiedStatic } from '@/lib/utils'
 
 import { activeTabAtom, currentComicDetailAtom, currentComicIdAtom, storyStepAtom, styleAtom } from '../atoms'
 
@@ -85,7 +85,7 @@ function SceneSidebar({
                 label={scene.label}
                 isActive={scene.id === selectedScene}
                 onClick={() => onSelectScene(scene.id)}
-                imageUrl={toProxiedStatic(p?.image_url)}
+                imageUrl={proxiedStatic(p?.image_url)}
               />
             )
           })}
@@ -180,20 +180,7 @@ function StoryboardCanvas({ onPreview, imageUrl }: { onPreview: () => void; imag
   )
 }
 
-// Ensure storage images go through dev proxy: '/static' -> storage origin with Referer/Origin
-function toProxiedStatic(url?: string | null): string | undefined {
-  if (!url) return undefined
-  try {
-    const u = new URL(url)
-    if (u.hostname === 'storage.mangasuperb.anranz.xyz') {
-      return '/static' + u.pathname + (u.search || '')
-    }
-  } catch {
-    // non-absolute or invalid URLs: leave as-is
-  }
-
-  return url || undefined
-}
+// 去除本地实现，统一使用全局 proxiedStatic
 
 function PropertyPanel({
   styleValue,
@@ -542,7 +529,7 @@ export function ImageGeneration() {
         />
         <StoryboardCanvas
           onPreview={previewHandler}
-          imageUrl={toProxiedStatic(pages.find((p) => p.page_number === selectedScene)?.image_url)}
+          imageUrl={proxiedStatic(pages.find((p) => p.page_number === selectedScene)?.image_url)}
         />
         <PropertyPanel
           styleValue={style}
@@ -558,7 +545,7 @@ export function ImageGeneration() {
           onOpenPublish={() => setPublishOpen(true)}
           onExportImage={() => {
             const p = pages.find((x) => x.page_number === selectedScene)
-            const url = toProxiedStatic(p?.image_url)
+            const url = proxiedStatic(p?.image_url)
             if (!url) {
               toast.error('当前页暂无图片可导出')
 
@@ -622,7 +609,7 @@ export function ImageGeneration() {
                         clearPdfPoll()
                         setIsPublishing(false)
                         // 下载 PDF（开发态使用代理，避免防盗链）
-                        const href = toProxiedStatic(pdfUrl) || pdfUrl
+                        const href = proxiedStatic(pdfUrl) || pdfUrl
                         const a = document.createElement('a')
                         a.href = href
                         a.download = `comic_${comicId}.pdf`

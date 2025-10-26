@@ -1,5 +1,4 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Rocket } from 'lucide-react' // Logo 占位符
 import { useForm } from 'react-hook-form'
 import { useLocation, useNavigate } from 'react-router'
 import { z } from 'zod'
@@ -19,6 +18,7 @@ import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/hooks/use-auth'
 import { useI18n } from '@/hooks/use-i18n'
+import { proxiedStatic } from '@/lib/utils'
 
 // 登录与注册校验规则
 const anyZodResolver = zodResolver as unknown as (schema: unknown) => any
@@ -39,26 +39,35 @@ const RegisterFormSchema = z.object({
 /**
  * 左侧的品牌展示面板
  */
-const LeftPanel = () => (
-  <div className="hidden h-screen flex-col justify-between bg-muted p-10 text-muted-foreground lg:flex">
-    <div className="flex items-center gap-3">
-      <div className="rounded-full bg-background p-2 text-foreground">
-        <Rocket className="h-6 w-6" />
+const LeftPanel = () => {
+  const logoSrc = proxiedStatic('https://storage.mangasuperb.anranz.xyz/static/logo.png')
+  const demoSrc = proxiedStatic('https://storage.mangasuperb.anranz.xyz/static/%E7%94%9F%E6%88%90%E7%9A%84%E6%BC%AB%E7%94%BB2.png')
+
+  return (
+    <div className="hidden h-screen flex-col justify-between bg-muted p-10 text-muted-foreground lg:flex">
+      <div className="flex items-center gap-3">
+        <img
+          src={logoSrc}
+          alt="logo"
+          className="h-8 w-8 rounded object-cover invert dark:invert-0"
+        />
+        <span className="text-2xl font-bold text-foreground">MangaSuperb</span>
       </div>
-      <span className="text-2xl font-bold text-foreground">MangaSuperb</span>
-    </div>
-    
-    <div className="mx-auto w-full max-w-2xl rounded-lg bg-card p-2 shadow-lg">
-      <div className="flex aspect-4/3 w-full items-center justify-center rounded bg-muted">
-        <span className="text-muted-foreground">Placeholder</span>
+
+      <div className="mx-auto w-full max-w-2xl rounded-lg bg-card p-2 shadow-lg">
+        <div
+          className="aspect-4/3 w-full rounded bg-muted bg-cover bg-center"
+          style={{ backgroundImage: `url(${demoSrc})` }}
+          aria-label="首页示例展示"
+        />
       </div>
+
+      <p className="text-center text-sm">
+        Power by MangaSuperb
+      </p>
     </div>
-    
-    <p className="text-center text-sm">
-      Power by MangaSuperb
-    </p>
-  </div>
-)
+  )
+}
 
 const AuthForm = () => {
   const navigate = useNavigate()
