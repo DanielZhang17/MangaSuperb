@@ -10,13 +10,21 @@ export interface JobDetail {
   [k: string]: any
 }
 
-export interface CreateComicJobRequest {
-  job_type: 'comic_generation'
-  prompt: string
-  style?: string
-  aspect_ratio?: string
-  characters: { id: number }[]
-}
+export type CreateComicJobRequest =
+  | {
+      job_type: 'story_optimization'
+      comic_id: number
+    }
+  | {
+      job_type: 'comic_generation'
+      comic_id: number
+      page_number: number
+      prompt: string
+      description?: string
+      style?: string
+      aspect_ratio?: string
+      characters: { id: number }[]
+    }
 
 export interface CreateComicJobResponse {
   job_id?: string | null
@@ -37,12 +45,13 @@ export const JobsApi = {
     })
   },
 
-  // Create a comic-generation orchestrated job
+  // Create a job for comics workflow
   createComic(body: CreateComicJobRequest) {
     return request<CreateComicJobRequest, CreateComicJobResponse>({
       url: '/api/jobs',
       method: 'POST',
       data: body,
+      timeout: 60000,
     })
   },
 }

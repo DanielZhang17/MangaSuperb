@@ -1,5 +1,5 @@
 import request from '@/service'
-import type { IComic, ListComicsResponse, PublishComicResponse } from '@/service/types'
+import type { CreateComicRequest, CreateComicResponse, IComic, ListComicsResponse, PublishComicResponse } from '@/service/types'
 
 export const ComicsApi = {
   // List comics for current user
@@ -23,6 +23,16 @@ export const ComicsApi = {
       url: `/api/comics/${comicId}/publish`,
       method: 'POST',
       data: body,
+    })
+  },
+
+  // Create a comic with story and settings
+  create(body: CreateComicRequest) {
+    return request<CreateComicRequest, CreateComicResponse>({
+      url: '/api/comics',
+      method: 'POST',
+      data: body,
+      timeout: 60000,
     })
   },
 }

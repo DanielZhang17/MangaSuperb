@@ -1,7 +1,10 @@
+import { useAtom } from 'jotai'
 import { ChevronDown, ChevronUp, Image as ImageIcon, Plus } from 'lucide-react'
 import { useState } from 'react'
 import toast from 'react-hot-toast'
 
+import ComicsApi from '@/apis/comics'
+import PanelsApi from '@/apis/panels'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -13,7 +16,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { useCreateComic } from '@/hooks/use-comics'
+import { useCreateComicJob } from '@/hooks/use-jobs'
 import { cn } from '@/lib/utils'
+
+import { currentComicDetailAtom, currentComicIdAtom, fullStoryAtom, mangaTitleAtom, selectedCharacterIdsAtom } from '../atoms'
 
 interface Scene {
   id: number
@@ -316,6 +323,14 @@ export function ImageGeneration() {
   const [fontSize, setFontSize] = useState(FONT_SIZE_OPTIONS[1])
   const [bubbleShape, setBubbleShape] = useState(BUBBLE_SHAPES[0].value)
   const [hasTail, setHasTail] = useState(true)
+  const { create: createComic, state: createComicState } = useCreateComic()
+  const { state: createJobState } = useCreateComicJob()
+  const [selectedIds] = useAtom(selectedCharacterIdsAtom)
+  const [comicId, setComicId] = useAtom(currentComicIdAtom)
+  // const [panels] = useAtom(storyPanelsAtom) // 不再用于 story_optimization 入口
+  const [, setComicDetail] = useAtom(currentComicDetailAtom)
+  const [title] = useAtom(mangaTitleAtom)
+  const [fullStory] = useAtom(fullStoryAtom)
 
   const handleAddScene = () => {
     setScenes((prev) => {
@@ -336,29 +351,136 @@ export function ImageGeneration() {
     )
   }
 
+  const handleCreateComic = async () => {
+    if (!selectedIds || selectedIds.length === 0) {
+      toast.error('请先在“人物”页选择出镜人物')
+
+      return
+    }
+
+    // 角色编排：第一个为 protagonist，其余为 supporting
+    const characters = selectedIds.map((id, idx) => ({
+      id,
+      order_index: idx + 1,
+      role: idx === 0 ? 'protagonist' : 'supporting',
+    }))
+
+    try {
+      const res = await createComic({
+        title: title || '未命名漫画',
+        story: fullStory,
+        style: 'Classic manga black and white linework.',
+        aspect_ratio: '16:9',
+        characters,
+      })
+      const id = (res as any)?.comic?.id ?? (res as any)?.comic_id ?? null
+      if (id) {
+        setComicId(Number(id))
+        toast.success('漫画创建成功，接下来可以生图了')
+      } else {
+        toast.success('漫画创建已提交')
+      }
+    } catch (err: any) {
+      toast.error(err?.message || '创建漫画失败')
+    }
+  }
+
+  const handleGenerate = async () => {
+    if (!comicId) {
+      toast.error('请先创建漫画（点击“生成漫画”）')
+
+      return
+    }
+
+    try {
+      const pageNumber = selectedScene
+
+      // 若后端需要先确定页面布局，则根据当前漫画详情为该页设置布局（若存在建议布局）
+      const detail = await (async () => {
+        // 优先使用已缓存的详情
+        const [, setDetail] = [null, setComicDetail]
+        try {
+          const d = await ComicsApi.get(comicId)
+          setDetail(d)
+
+          return d
+        } catch {
+          return null as any
+        }
+      })()
+
+      try {
+        const layout = detail?.page_layouts?.find((l: any) => l.page_number === pageNumber)
+        if (layout?.layout_key) {
+          const panel_order = Array.isArray(layout.panel_assignments)
+            ? layout.panel_assignments
+              .slice()
+              .sort((a: any, b: any) => (a.position ?? 0) - (b.position ?? 0))
+              .map((x: any) => x.panel_shot_id)
+            : undefined
+
+          await PanelsApi.setLayout(comicId, {
+            page_number: pageNumber,
+            layout_key: layout.layout_key,
+            panel_order,
+          })
+        }
+      } catch (e) {
+        // 设置布局失败不阻断渲染
+        console.warn('设置布局失败，继续渲染当前页面', e)
+      }
+
+      // 触发生图：POST /panels/{comic_id}/pages/{page_number}/render
+      const renderRes = await PanelsApi.renderPage(comicId, pageNumber)
+      const jobId = (renderRes as any)?.job_id || '—'
+      toast.success(`第 ${pageNumber} 页渲染任务已创建（Job: ${jobId}）`)
+
+      // 随后拉取漫画详情，存入全局 atom 以便后续使用
+      try {
+        const detail = await ComicsApi.get(comicId)
+        setComicDetail(detail)
+      } catch (e) {
+        // 详情获取失败不阻断主流程
+        console.warn('获取漫画详情失败', e)
+      }
+    } catch (err: any) {
+      toast.error(err?.message || '生图任务创建失败')
+    }
+  }
+
   return (
-    <div className="flex w-full gap-6 rounded-3xl border border-border/60 bg-card p-6 shadow-sm">
-      <SceneSidebar
-        scenes={scenes}
-        selectedScene={selectedScene}
-        onSelectScene={setSelectedScene}
-        onAddScene={() => {
-          handleAddScene()
-        }}
-      />
-      <StoryboardCanvas onPreview={previewHandler} />
-      <PropertyPanel
-        selectedCharacters={selectedCharacters}
-        onToggleCharacter={toggleCharacter}
-        fontFamily={fontFamily}
-        onFontFamilyChange={setFontFamily}
-        fontSize={fontSize}
-        onFontSizeChange={setFontSize}
-        bubbleShape={bubbleShape}
-        onBubbleShapeChange={setBubbleShape}
-        hasTail={hasTail}
-        onToggleTail={() => setHasTail((prev) => !prev)}
-      />
+    <div className="flex w-full flex-col gap-4">
+      <div className="flex w-full gap-6 rounded-3xl border border-border/60 bg-card p-6 shadow-sm">
+        <SceneSidebar
+          scenes={scenes}
+          selectedScene={selectedScene}
+          onSelectScene={setSelectedScene}
+          onAddScene={() => {
+            handleAddScene()
+          }}
+        />
+        <StoryboardCanvas onPreview={previewHandler} />
+        <PropertyPanel
+          selectedCharacters={selectedCharacters}
+          onToggleCharacter={toggleCharacter}
+          fontFamily={fontFamily}
+          onFontFamilyChange={setFontFamily}
+          fontSize={fontSize}
+          onFontSizeChange={setFontSize}
+          bubbleShape={bubbleShape}
+          onBubbleShapeChange={setBubbleShape}
+          hasTail={hasTail}
+          onToggleTail={() => setHasTail((prev) => !prev)}
+        />
+      </div>
+      <div className="flex w-full justify-center gap-4">
+        <Button size="lg" onClick={handleCreateComic} disabled={createComicState.isMutating}>
+          {createComicState.isMutating ? '创建中...' : (comicId ? '重新生成漫画' : '生成漫画')}
+        </Button>
+        <Button size="lg" onClick={handleGenerate} disabled={createJobState.isMutating || !comicId}>
+          {createJobState.isMutating ? '生成中...' : '生图'}
+        </Button>
+      </div>
     </div>
   )
 }

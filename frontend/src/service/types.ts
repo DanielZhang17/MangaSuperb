@@ -186,3 +186,23 @@ export interface ListComicsResponse {
   comics: IComic[]
   count?: number
 }
+
+// Create Comic
+export interface CreateComicRequest {
+  aspect_ratio: string
+  story: string // Full story narrative or JSON payload
+  style: string // allow empty string
+  title: string
+  // Optional: include selected characters for initial creation
+  characters?: {
+    id: number
+    order_index: number
+    role: string
+  }[]
+}
+
+export interface CreateComicResponse {
+  comic?: IComic
+  // backend may also return job ids or workflow info; keep flexible
+  [k: string]: any
+}

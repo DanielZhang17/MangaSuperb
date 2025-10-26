@@ -1,5 +1,7 @@
 import { atom } from 'jotai'
 
+import type { IComic } from '@/service/types'
+
 export type StoryStep = 'input' | 'panels' | 'generate'
 
 export const storyStepAtom = atom<StoryStep>('input')
@@ -13,6 +15,11 @@ export const activeTabAtom = atom('story')
 
 export const storyCompletedAtom = atom(false)
 export const charactersCompletedAtom = atom(false)
+// 选中的人物（仅存 id 数组）
+export const selectedCharacterIdsAtom = atom<number[]>([])
+// 当前故事创建得到的漫画 ID（供生图阶段使用）
+export const currentComicIdAtom = atom<number | null>(null)
+export const currentComicDetailAtom = atom<IComic | null>(null)
 
 export interface StoryPanel { id: number; text: string }
 
@@ -44,4 +51,32 @@ const initialStoryPanels: StoryPanel[] = [
   { id: 9, text: '三殿主疑惑道：“那他怎么滚下去了？”' },
 ]
 
-export const storyPanelsAtom = atom<StoryPanel[]>(initialStoryPanels)
+// 旧的直存 panels 被下方的派生 atom 替代
+
+// ===== Story content/panels sync =====
+// 1) 完整故事（编辑器文本域）作为单一数据源
+export const fullStoryAtom = atom(
+  initialStoryPanels.map((p) => p.text).join('\n\n'),
+)
+
+function splitPanelsFromStory(story: string): StoryPanel[] {
+  return story
+    .split(/\n\s*\n+/) // 以空行作为分段
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((text, idx) => ({ id: idx + 1, text }))
+}
+
+// 2) Panels 派生自完整故事；写入时回写 fullStoryAtom
+export const derivedStoryPanelsAtom = atom(
+  (get) => splitPanelsFromStory(get(fullStoryAtom)),
+  (get, set, update: StoryPanel[] | ((prev: StoryPanel[]) => StoryPanel[])) => {
+    const prev = splitPanelsFromStory(get(fullStoryAtom))
+    const next = typeof update === 'function' ? (update as (p: StoryPanel[]) => StoryPanel[])(prev) : update
+    const joined = next.map((p) => p.text).join('\n\n')
+    set(fullStoryAtom, joined)
+  },
+)
+
+// 为向后兼容，导出名称保持不变
+export { derivedStoryPanelsAtom as storyPanelsAtom }

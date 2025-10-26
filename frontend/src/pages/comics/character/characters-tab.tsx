@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { useCharactersList } from '@/hooks/use-characters'
 import { useI18n } from '@/hooks/use-i18n'
 
-import { activeTabAtom, charactersCompletedAtom } from '../atoms'
+import { activeTabAtom, charactersCompletedAtom, selectedCharacterIdsAtom } from '../atoms'
 
 function normalizeStorageUrl(url?: string | null) {
   if (!url) return undefined
@@ -39,8 +39,8 @@ function SelectionView() {
   // 拉取我的人物
   const { characters, loading, error, refresh } = useCharactersList()
 
-  // 多选：默认不选择
-  const [selectedIds, setSelectedIds] = useState<number[]>([])
+  // 多选：存入全局 atom（只存 id）
+  const [selectedIds, setSelectedIds] = useAtom(selectedCharacterIdsAtom)
 
   const totalRecognized = useMemo(() => characters.length, [characters])
 
@@ -84,6 +84,13 @@ function SelectionView() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [characters, loading])
+
+  // 同步选择集与当前列表：当列表变化时，移除已不存在的 id
+  useEffect(() => {
+    const idSet = new Set(characters.map((c) => c.id))
+    setSelectedIds((prev) => prev.filter((id) => idSet.has(id)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [characters])
 
   return (
     <div className="space-y-6 mt-4">

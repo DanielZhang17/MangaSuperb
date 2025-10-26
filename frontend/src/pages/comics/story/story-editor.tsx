@@ -7,12 +7,15 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
 import { useI18n } from '@/hooks/use-i18n'
 
-import { mangaTitleAtom, storyPanelsAtom, storyStepAtom } from '../atoms'
+import { fullStoryAtom, mangaTitleAtom, storyPanelsAtom, storyStepAtom } from '../atoms'
 
 export function StoryEditor(){
   const { t } = useI18n('comics')
   const [title, setTitle] = useAtom(mangaTitleAtom)
-  const [panels] = useAtom(storyPanelsAtom)
+  const [content, setContent] = useAtom(fullStoryAtom)
+  // 创建漫画逻辑已移动到“生图”阶段，这里仅编辑文本与标题
+
+  const charCount = content.replace(/\s/g, '').length
 
   return (
     <div className="md:col-span-2 space-y-4">
@@ -31,10 +34,11 @@ export function StoryEditor(){
         <Textarea
           placeholder="..."
           className="resize-none text-xl md:text-xl h-[800px]"
-          defaultValue={panels.map((p) => p.text).join('\n\n')}
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
         />
         <div className="absolute bottom-4 right-4 text-sm text-muted-foreground">
-              260/1000字
+          {charCount}/1000字
         </div>
       </div>
     </div>
