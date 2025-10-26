@@ -20,7 +20,7 @@ DEFAULT_ASPECT_RATIO = "16:9"
 
 SCRIPT_PROMPT_TEMPLATE = """You are a professional manga scriptwriter. Based on the following idea, create a detailed manga script with:
 1. A brief story summary
-2. 4-6 panel descriptions with dialogue and scene details
+2. 3-4 panel descriptions with dialogue and scene details
 3. Character descriptions
 4. Visual style notes that can prompt the image generation model to create fitting manga-style images.
 
