@@ -3,34 +3,36 @@ import { type ComponentType } from 'react'
 import { Link, NavLink, useLocation } from 'react-router'
 
 import { Badge } from '@/components/ui/badge'
-import { cn } from '@/lib/utils'
+import { useI18n } from '@/hooks/use-i18n'
+import { cn, proxiedStatic } from '@/lib/utils'
 import { InfoCard } from '@/pages/me/info-card'
 
 import I18nToggle from '../common/operations/i18n'
 import { MessageToolTip } from '../common/operations/message-tooltip'
 
 interface SidebarItem {
-  label: string
-  to: string
-  icon: ComponentType<{ className?: string }>
-  description?: string
+    labelKey: string
+    to: string
+    icon: ComponentType<{ className?: string }>
+    description?: string
 }
 
 interface DashboardSidebarProps {
-  collapsed: boolean
+    collapsed: boolean
 }
 
 const primaryNav: SidebarItem[] = [
-  { label: '我的创意', to: '/ideas', icon: Sparkles },
+  { labelKey: 'common:nav.myIdeas', to: '/ideas', icon: Sparkles },
 ]
 
 const creationNav: SidebarItem[] = [
-  { label: '漫画创作', to: '/comics', icon: Grid2X2 },
-  { label: '新建AI人物', to: '/create-character', icon: SmilePlus },
+  { labelKey: 'common:nav.comicCreation', to: '/comics', icon: Grid2X2 },
+  { labelKey: 'common:nav.createCharacter', to: '/create-character', icon: SmilePlus },
 ]
 
 export function DashboardSidebar({ collapsed }: DashboardSidebarProps) {
   const location = useLocation()
+  const { t } = useI18n('common')
 
   return (
     <aside
@@ -46,11 +48,18 @@ export function DashboardSidebar({ collapsed }: DashboardSidebarProps) {
         )}
       >
         <Link to="/" className="flex items-center gap-2">
-          <div className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground font-semibold">
-            MS
-          </div>
-          {!collapsed && (
-            <span className="text-lg font-semibold">MangaSuperb</span>
+          {!collapsed &&<img
+            src={proxiedStatic('https://storage.mangasuperb.anranz.xyz/static/logo_s.png')}
+            alt="MangaSuperb"
+            className="h-10 w-40 rounded-xl object-cover invert dark:invert-0"
+          />
+          }
+          {collapsed && (
+            <img
+              src={proxiedStatic('https://storage.mangasuperb.anranz.xyz/static/logo.png')}
+              alt="MangaSuperb"
+              className="h-10 w-10 rounded-full object-cover invert dark:invert-0"
+            />
           )}
         </Link>
         <div className={cn('flex items-center gap-2', !collapsed && 'ml-auto')} />
@@ -78,7 +87,7 @@ export function DashboardSidebar({ collapsed }: DashboardSidebarProps) {
               collapsed && 'w-fit px-2',
             )}
           >
-            AI 创作
+            {String(t('badge.aiCreation'))}
           </Badge>
         </div>
 
@@ -86,7 +95,7 @@ export function DashboardSidebar({ collapsed }: DashboardSidebarProps) {
           {creationNav.map((item) => (
             <SidebarLink
               key={item.to}
-              item={item}
+              item={{ ...item, labelKey: item.labelKey }}
               collapsed={collapsed}
               currentPath={location.pathname}
             />
@@ -109,12 +118,13 @@ function SidebarLink({
   collapsed,
   currentPath,
 }: {
-  item: SidebarItem
-  collapsed: boolean
-  currentPath: string
+    item: SidebarItem
+    collapsed: boolean
+    currentPath: string
 }) {
+  const { t } = useI18n('common')
   const isActive =
-    item.to === '/' ? currentPath === '/' : currentPath.startsWith(item.to)
+        item.to === '/' ? currentPath === '/' : currentPath.startsWith(item.to)
 
   return (
     <NavLink
@@ -123,11 +133,11 @@ function SidebarLink({
         'mx-4 flex items-center gap-3 rounded-lg px-4 py-2 text-sm font-medium transition-colors hover:bg-accent',
         collapsed && 'mx-2 justify-center px-2',
         isActive &&
-          'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground',
+                'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground',
       )}
     >
       <item.icon className="size-5" />
-      {!collapsed && <span>{item.label}</span>}
+      {!collapsed && <span>{String(t(item.labelKey))}</span>}
     </NavLink>
   )
 }

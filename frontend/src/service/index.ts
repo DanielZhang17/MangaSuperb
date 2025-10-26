@@ -7,7 +7,12 @@ function request<TRequest = any, TResponse = any>(
   config: CustomRequestConfig<TRequest>,
 ): Promise<TResponse> {
   const instance: AxiosInstance = axios.create({
-    baseURL: (import.meta as any).env?.VITE_API_BASE ?? '',
+    // In dev, use relative URLs so Vite proxy (/api -> target) avoids CORS
+    // In prod, respect explicit VITE_API_BASE if provided
+    baseURL:
+      (import.meta as any).env?.DEV
+        ? ''
+        : ((import.meta as any).env?.VITE_API_BASE ?? ''),
     timeout: 10000,
     withCredentials: true, 
     headers: { 'Content-Type': 'application/json' },

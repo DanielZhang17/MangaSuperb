@@ -88,11 +88,34 @@ export interface CreateCharacterResponse {
   job_id: string | null
 }
 
-export type GetCharacterResponse = ICharacter
+// Backend returns a wrapped object for detail: { character: ICharacter }
+export interface GetCharacterResponse {
+  character: ICharacter
+}
 
 export interface ListCharactersResponse {
   characters: ICharacter[]
   count?: number
+}
+
+export interface UpdateCharacterNameRequest {
+  name: string
+}
+
+export interface UpdateCharacterNameResponse {
+  character: ICharacter
+}
+
+export interface DeleteCharacterResponse {
+  message: string
+}
+
+export interface UpdateCharacterNameRequest {
+  name: string
+}
+
+export interface UpdateCharacterNameResponse {
+  character: ICharacter
 }
 
 // ===== Scripts =====
@@ -118,4 +141,70 @@ export type GetScriptResponse = IScript
 
 export interface ListScriptsResponse {
   scripts: IScript[]
+}
+
+// ===== Jobs / Comics / Panels =====
+export type JobStatus = 'queued' | 'started' | 'finished' | 'failed' | 'deferred'
+
+export interface JobDetail {
+  id: string
+  rq_status: JobStatus
+  [k: string]: any
+}
+
+export interface IComic {
+  id: number
+  title?: string | null
+  style_description?: string | null
+  aspect_ratio?: string | null
+  cover_image_url?: string | null
+  pdf_url?: string | null
+  zip_url?: string | null
+  like_count?: number
+  published_at?: string | null
+  workflow_stage?: string | null
+  workflow_status?: string | null
+  // Backend may include panels/pages and other metadata
+  [k: string]: any
+}
+
+export interface PublishComicResponse {
+  stage_jobs: {
+    cover_job_id?: string
+    export_job_id?: string
+    publish_job_id?: string
+    [k: string]: string | undefined
+  }
+}
+
+export interface SetPanelLayoutRequest {
+  page_number: number
+  layout_key: string
+  notes?: string
+  panel_order?: number[]
+}
+
+export interface ListComicsResponse {
+  comics: IComic[]
+  count?: number
+}
+
+// Create Comic
+export interface CreateComicRequest {
+  aspect_ratio: string
+  story: string // Full story narrative or JSON payload
+  style: string // allow empty string
+  title: string
+  // Optional: include selected characters for initial creation
+  characters?: {
+    id: number
+    order_index: number
+    role: string
+  }[]
+}
+
+export interface CreateComicResponse {
+  comic?: IComic
+  // backend may also return job ids or workflow info; keep flexible
+  [k: string]: any
 }

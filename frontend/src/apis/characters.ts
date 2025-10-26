@@ -2,8 +2,11 @@ import request from '@/service'
 import type {
   CreateCharacterRequest,
   CreateCharacterResponse,
+  DeleteCharacterResponse,
   GetCharacterResponse,
   ListCharactersResponse,
+  UpdateCharacterNameRequest,
+  UpdateCharacterNameResponse,
 } from '@/service/types'
 
 export const CharactersApi = {
@@ -21,6 +24,8 @@ export const CharactersApi = {
     return request<void, GetCharacterResponse>({
       url: `/api/characters/${characterId}`,
       method: 'GET',
+      // Add a cache buster to ensure fresh status during polling
+      params: { _: Date.now() },
     })
   },
 
@@ -29,6 +34,23 @@ export const CharactersApi = {
     return request<void, ListCharactersResponse>({
       url: '/api/characters',
       method: 'GET',
+    })
+  },
+
+  // Update character name
+  updateName(characterId: number, body: UpdateCharacterNameRequest) {
+    return request<UpdateCharacterNameRequest, UpdateCharacterNameResponse>({
+      url: `/api/characters/${characterId}/name`,
+      method: 'PATCH',
+      data: body,
+    })
+  },
+
+  // Delete a character
+  delete(characterId: number) {
+    return request<void, DeleteCharacterResponse>({
+      url: `/api/characters/${characterId}`,
+      method: 'DELETE',
     })
   },
 }

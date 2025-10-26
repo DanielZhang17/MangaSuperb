@@ -1,4 +1,5 @@
 import './styles/global.css'
+import './i18n'
 
 import { createRoot } from 'react-dom/client'
 import { Toaster } from 'react-hot-toast'

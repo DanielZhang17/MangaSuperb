@@ -1,5 +1,5 @@
+import { useState } from 'react'
 import useSWR from 'swr'
-import useSWRMutation from 'swr/mutation'
 
 import CharactersApi from '@/apis/characters'
 import type {
@@ -28,7 +28,7 @@ export function useCharacterDetail(id?: number) {
   const { data, error, isLoading, mutate } = useSWR<GetCharacterResponse>(key)
 
   return {
-    character: data,
+    character: data?.character,
     loading: isLoading,
     error,
     refresh: () => mutate(),
@@ -36,16 +36,23 @@ export function useCharacterDetail(id?: number) {
 }
 
 export function useCreateCharacter() {
-  const mutation = useSWRMutation<CreateCharacterResponse, any, string, CreateCharacterRequest>(
-    KEY_LIST,
-    async (_key, { arg }) => CharactersApi.create(arg),
-    { revalidate: true },
-  )
+  const [isMutating, setIsMutating] = useState(false)
 
-  return {
-    create: (arg: CreateCharacterRequest) => mutation.trigger(arg),
-    state: { isMutating: mutation.isMutating },
+  async function create(arg: CreateCharacterRequest): Promise<CreateCharacterResponse> {
+    try {
+      setIsMutating(true)
+
+      const res = await CharactersApi.create(arg)
+
+      // 可选：创建成功后手动让列表重新拉取（若调用方使用了 useCharactersList）
+      // 这里不依赖 SWR，调用方如需刷新可以显式调用 refresh。
+      return res
+    } finally {
+      setIsMutating(false)
+    }
   }
+
+  return { create, state: { isMutating } }
 }
 
 export default function useCharacters() {

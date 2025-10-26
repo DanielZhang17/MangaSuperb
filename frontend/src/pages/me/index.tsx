@@ -9,7 +9,8 @@ import {
   ToggleGroupItem,
 } from '@/components/ui/toggle-group'
 import { useAuth } from '@/hooks/use-auth'
-import { getAvatarUrl } from '@/lib/utils'
+import { useI18n } from '@/hooks/use-i18n'
+import { getAvatarUrl, proxiedStatic } from '@/lib/utils'
 
 const toggleItemClasses = `
   bg-card
@@ -54,10 +55,18 @@ const CharacterCard: React.FC<CharacterCardProps> = ({ imageUrl, label }) => (
 );
 
 export default function CharacterSettingsPage() {
+  const { t } = useI18n(['me', 'common'])
   const [user] = useAtom(userAtom)
   const { updateUsername } = useAuth()
-  const username = user?.username ?? '未登录'
+  const username = user?.username ?? String(t('me:username.guest'))
   const avatarUrl = getAvatarUrl(user?.avatar_index ?? null)
+
+  // 人物偏好示例图（走存储代理）
+  const base = 'https://storage.mangasuperb.anranz.xyz/static/'
+  const personaImages = [1, 2, 3, 4].map((i) => ({
+    imageUrl: proxiedStatic(base + encodeURIComponent(`形象${i}.png`)),
+    label: `形象${i}`,
+  }))
 
   return (
     <div className="min-h-screen bg-background p-8 text-foreground lg:p-12">
@@ -70,8 +79,8 @@ export default function CharacterSettingsPage() {
         <div className="min-w-0">
           <InlineInput
             initialValue={username}
-            submitLabel="保存"
-            placeholder="请输入新的昵称"
+            submitLabel={String(t('me:username.save'))}
+            placeholder={String(t('me:username.placeholder'))}
             renderDisplay={(val) => (
               <h1 className="text-3xl font-semibold truncate">{val}</h1>
             )}
@@ -86,70 +95,56 @@ export default function CharacterSettingsPage() {
       <main className="grid grid-cols-1 lg:grid-cols-3 gap-12">
         <section className="flex flex-col gap-10 lg:col-span-2">
           
-          <PreferenceGroup title="默认喜好">
+          <PreferenceGroup title={String(t('me:preference.default'))}>
             <ToggleGroup type="single" defaultValue="jp" className="flex flex-wrap">
               <ToggleGroupItem value="jp" className={toggleItemClasses}>
-                日漫
+                {String(t('home:category.jp'))}
               </ToggleGroupItem>
               <ToggleGroupItem value="us" className={toggleItemClasses}>
-                美漫
+                {String(t('home:category.us'))}
               </ToggleGroupItem>
               <ToggleGroupItem value="cn" className={toggleItemClasses}>
-                国漫
+                国漫风
               </ToggleGroupItem>
               <ToggleGroupItem value="kr" className={toggleItemClasses}>
-                韩漫
+                韩漫风
               </ToggleGroupItem>
             </ToggleGroup>
           </PreferenceGroup>
 
-          <PreferenceGroup title="漫画网格布局">
+          <PreferenceGroup title={String(t('me:preference.grid'))}>
             <ToggleGroup type="single" defaultValue="4-panel" className="flex flex-wrap">
               <ToggleGroupItem value="4-panel" className={toggleItemClasses}>
-                四宫格
+                {String(t('me:grid.4panel'))}
               </ToggleGroupItem>
               <ToggleGroupItem value="left-right" className={toggleItemClasses}>
-                左右主辅
+                {String(t('me:grid.leftRight'))}
               </ToggleGroupItem>
               <ToggleGroupItem value="right-long" className={toggleItemClasses}>
-                右侧长栏
+                {String(t('me:grid.rightLong'))}
               </ToggleGroupItem>
               <ToggleGroupItem value="top-down" className={toggleItemClasses}>
-                上下排列
+                {String(t('me:grid.topDown'))}
               </ToggleGroupItem>
             </ToggleGroup>
           </PreferenceGroup>
           
-          <PreferenceGroup title="漫画语言">
+          <PreferenceGroup title={String(t('me:preference.language'))}>
             <Button
               className="h-auto px-6 py-2"
             >
-              跟随漫画语言
+              {String(t('me:preference.followComicLanguage'))}
             </Button>
           </PreferenceGroup>
 
         </section>
 
         <aside className="lg:col-span-1">
-          <h2 className="mb-4 text-lg font-medium text-foreground">人物偏好</h2>
+          <h2 className="mb-4 text-lg font-medium text-foreground">{String(t('me:aside.title'))}</h2>
           <div className="grid grid-cols-2 gap-4">
-            
-            <CharacterCard 
-              imageUrl="https://placehold.co/150x200/404040/9ca3af?text=男" 
-              label="男, 年轻" 
-            />
-            <CharacterCard 
-              imageUrl="https://placehold.co/150x200/404040/9ca3af?text=女" 
-              label="女, 年轻" 
-            />
-            <CharacterCard 
-              imageUrl="https://placehold.co/150x200/404040/9ca3af?text=男2" 
-              label="男, 少年" 
-            />
-            <CharacterCard 
-              imageUrl="https://placehold.co/150x200/404040/9ca3af?text=男3" 
-              label="男, 大叔" 
-            />
+            {personaImages.map((p) => (
+              <CharacterCard key={p.label} imageUrl={p.imageUrl} label={p.label} />
+            ))}
 
           </div>
         </aside>

@@ -1,28 +1,14 @@
-import { Image as ImageIcon, RefreshCw } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { Image as ImageIcon, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import toast from 'react-hot-toast'
 
-import { Badge } from '@/components/ui/badge'
+import CharactersApi from '@/apis/characters'
+import InlineInput from '@/components/common/inline-input'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { useCharactersList } from '@/hooks/use-characters'
-
-function StatusBadge({ status }: { status?: string }) {
-  const variant = (() => {
-    switch (status) {
-      case 'ready':
-        return 'default'
-      case 'pending':
-        return 'secondary'
-      case 'failed':
-      case 'error':
-        return 'destructive'
-      default:
-        return 'outline'
-    }
-  })()
-
-  return <Badge variant={variant as any}>{status ?? 'unknown'}</Badge>
-}
+import { proxiedStatic } from '@/lib/utils'
 
 export default function CharactersGrid() {
   const { characters, loading, error, refresh } = useCharactersList()
@@ -58,13 +44,6 @@ export default function CharactersGrid() {
 
   return (
     <div className="flex w-full flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div className="text-base font-semibold text-foreground/80">我的人物</div>
-        <Button variant="ghost" size="sm" onClick={() => refresh()} disabled={loading}>
-          <RefreshCw className="mr-2 h-4 w-4" /> 刷新
-        </Button>
-      </div>
-
       {loading && <div className="text-sm text-muted-foreground">加载中...</div>}
       {error && (
         <div className="text-sm text-destructive">加载失败：{(error as any)?.message ?? 'Unknown error'}</div>
@@ -78,41 +57,87 @@ export default function CharactersGrid() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {characters.map((c) => (
-          <Card key={c.id} className="overflow-hidden">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base font-semibold flex items-center justify-between">
-                <span className="truncate" title={c.name}>
-                  {c.name}
-                </span>
-                <StatusBadge status={c.image_status} />
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div
-                className={
-                  `aspect-video w-full overflow-hidden rounded-md bg-muted flex items-center justify-center ${
-                    !c.image_url && c.image_status === 'pending' ? 'animate-pulse' : ''
-                  }`
-                }
-              >
-                {c.image_url ? (
-                  <img src={c.image_url} alt={c.name} className="h-full w-full object-cover" />
-                ) : (
-                  <div className="flex h-full w-full flex-col items-center justify-center text-muted-foreground text-xs">
-                    <ImageIcon className="h-8 w-8 mb-1" />
-                    {c.image_status === 'pending' ? '生成中…' : '暂无图片'}
-                  </div>
-                )}
-              </div>
-              {c.description && (
-                <p className="mt-3 line-clamp-2 text-sm text-muted-foreground" title={c.description}>
-                  {c.description}
-                </p>
-              )}
-            </CardContent>
-          </Card>
+          <CharacterCard key={c.id} character={c} onChanged={refresh} onDeleted={refresh} />
         ))}
       </div>
     </div>
+  )
+}
+
+function CharacterCard({ character, onChanged, onDeleted }: { character: ReturnType<typeof useCharactersList>['characters'][number]; onChanged: () => void; onDeleted: () => void; }) {
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const imgSrc = useMemo(() => proxiedStatic(character.image_url || undefined), [character.image_url])
+  const sexPrefix = (character as any)?.sex ? `${(character as any).sex}，` : ''
+
+  const handleRename = async (name: string) => {
+    try {
+      await CharactersApi.updateName(character.id, { name })
+      toast.success('名称已更新')
+      onChanged()
+    } catch (err: any) {
+      toast.error(err?.message || '更新失败')
+    }
+  }
+
+  const handleDelete = async () => {
+    try {
+      await CharactersApi.delete(character.id)
+      toast.success('已删除')
+      setConfirmOpen(false)
+      onDeleted()
+    } catch (err: any) {
+      toast.error(err?.message || '删除失败')
+    }
+  }
+
+  return (
+    <Card className="overflow-hidden relative">
+      <button
+        type="button"
+        aria-label="删除"
+        className="absolute right-2 top-2 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full bg-background/70 hover:bg-background text-muted-foreground hover:text-foreground shadow"
+        onClick={() => setConfirmOpen(true)}
+      >
+        <X className="h-4 w-4" />
+      </button>
+
+      <CardContent className="pt-4">
+        <div className="aspect-3/4 w-full overflow-hidden rounded-md bg-muted flex items-center justify-center">
+          {imgSrc ? (
+            <img src={imgSrc} alt={character.name} className="h-full w-full object-cover" />
+          ) : (
+            <div className="flex h-full w-full flex-col items-center justify-center text-muted-foreground text-xs">
+              <ImageIcon className="h-8 w-8 mb-1" />
+              暂无图片
+            </div>
+          )}
+        </div>
+
+        <div className="mt-3">
+          <InlineInput
+            initialValue={character.name}
+            onSubmit={handleRename}
+            placeholder="输入新名称"
+            renderDisplay={(val) => (
+              <span className="text-sm text-foreground">
+                <span className="text-muted-foreground">{sexPrefix}</span>
+                {val || '—'}
+              </span>
+            )}
+          />
+        </div>
+      </CardContent>
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent className="max-w-xs">
+          <div className="py-4">
+            <div className="text-base font-semibold mb-4">确定删除？</div>
+            <Button variant="destructive" className="w-full" onClick={handleDelete}>
+              确定
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </Card>
   )
 }

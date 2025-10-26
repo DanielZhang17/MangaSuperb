@@ -45,6 +45,20 @@ export default defineConfig({
         target: 'https://storage.mangasuperb.anranz.xyz',
         changeOrigin: true,
         secure: true,
+        // keep '/static' path so '/static/avatar...' -> 'https://storage.../static/avatar...'
+        rewrite: (p: string) => p,
+        configure: (proxy: any) => {
+          proxy.on('proxyReq', (proxyReq: any) => {
+            proxyReq.setHeader('Referer', 'https://storage.mangasuperb.anranz.xyz/')
+            proxyReq.setHeader('Origin', 'https://storage.mangasuperb.anranz.xyz')
+          })
+        },
+      },
+      // Also proxy '/manga' path which exists on storage for generated assets
+      '/manga': {
+        target: 'https://storage.mangasuperb.anranz.xyz',
+        changeOrigin: true,
+        secure: true,
         rewrite: (p: string) => p,
         configure: (proxy: any) => {
           proxy.on('proxyReq', (proxyReq: any) => {
