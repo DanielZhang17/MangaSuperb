@@ -19,6 +19,23 @@ export const PanelsApi = {
       data: {},
     })
   },
+
+  // Update a single panel shot by its id
+  updatePanel(panelId: number, body: Partial<{
+    camera_notes: string | null
+    description: string | null
+    dialogue: string
+    page_number: number | null
+    panel_number: number | null
+    status: string
+    style_notes: string | null
+  }>) {
+    return request<typeof body, any>({
+      url: `/api/panels/${panelId}`,
+      method: 'PATCH',
+      data: body,
+    })
+  },
 }
 
 export default PanelsApi

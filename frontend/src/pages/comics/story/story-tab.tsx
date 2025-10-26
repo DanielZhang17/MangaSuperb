@@ -8,11 +8,12 @@ import { activeTabAtom, storyCompletedAtom, storyStepAtom } from '../atoms'
 import { AIModelCard } from './ai-model-card'
 import { MangaGridLayoutCard } from './manga-grid-layout-card'
 import { MangaStyleCard } from './manga-style-card'
-import { PanelsView, StoryEditor } from './story-editor'
+import { StoryEditor } from './story-editor'
 
 function InputView() {
   const { t } = useI18n('comics')
-  const [, setStoryStep] = useAtom(storyStepAtom)
+  const [, setActiveTab] = useAtom(activeTabAtom)
+  const [, setStoryCompleted] = useAtom(storyCompletedAtom)
 
   return (
     <div className="flex flex-col gap-4 p-4">
@@ -28,7 +29,16 @@ function InputView() {
           <MangaGridLayoutCard />
         </div>
       </div>
-      <Button size="lg" onClick={() => setStoryStep('panels')} className="self-center">{String(t('common.next'))}</Button>
+      <Button
+        size="lg"
+        onClick={() => {
+          setStoryCompleted(true)
+          setActiveTab('characters')
+        }}
+        className="self-center"
+      >
+        {String(t('common.next'))}
+      </Button>
     </div>
   )
 }
@@ -45,9 +55,7 @@ export function StoryTab() {
     setStoryCompleted(true)
   }
 
-  if (storyStep === 'panels') {
-    return <PanelsView />
-  }
+  // 独立的“分镜”步骤已迁移到单独的 Tab，此处不再渲染 PanelsView
   
   if (storyStep === 'generate') {
     return <LoadingView 

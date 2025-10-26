@@ -1,30 +1,40 @@
+/* eslint-disable simple-import-sort/imports */
 import { useAtom } from 'jotai'
 import { ChevronDown, ChevronUp, Image as ImageIcon, Plus } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 
 import ComicsApi from '@/apis/comics'
+import JobsApi from '@/apis/jobs'
 import PanelsApi from '@/apis/panels'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCreateComic } from '@/hooks/use-comics'
-import { useCreateComicJob } from '@/hooks/use-jobs'
 import { cn } from '@/lib/utils'
 
-import { currentComicDetailAtom, currentComicIdAtom, fullStoryAtom, mangaTitleAtom, selectedCharacterIdsAtom } from '../atoms'
+import {
+  aspectRatioAtom,
+  activeTabAtom,
+  currentComicDetailAtom,
+  currentComicIdAtom,
+  previousComicDetailAtom,
+  fullStoryAtom,
+  mangaTitleAtom,
+  selectedCharacterIdsAtom,
+  selectedCharacterRolesAtom,
+  storyStepAtom,
+  styleAtom,
+} from '../atoms'
+/* eslint-enable simple-import-sort/imports */
 
 interface Scene {
+  // Use page_number as id for selection consistency
   id: number
   label: string
+  pageId?: number
 }
 
 interface Character {
@@ -56,14 +66,29 @@ const BUBBLE_SHAPES = [
   { value: 'rect', label: '矩形' },
   { value: 'round', label: '圆角' },
 ]
+const LAYOUT_OPTIONS = [
+  { value: 'auto-grid', label: '自动布局 (auto-grid)' },
+  { value: 'grid-2x2', label: '四宫格 (grid-2x2)' },
+  { value: 'vertical', label: '竖版长条 (vertical)' },
+  { value: 'cinematic', label: '宽银幕 (cinematic)' },
+]
+
+const STYLE_PRESETS = [
+  { value: 'Classic manga black and white linework.', label: '经典黑白漫画线稿' },
+  { value: 'High-contrast ink with splashy gradients', label: '高对比墨线 + 渐变' },
+  { value: 'Moebius-inspired clean lines, minimal shading', label: '莫比乌斯风·干净线条' },
+  { value: 'Gritty seinen style with textured shading', label: '青年向质感阴影' },
+]
 
 function SceneSidebar({
   scenes,
+  pages,
   selectedScene,
   onSelectScene,
   onAddScene,
 }: {
   scenes: Scene[]
+  pages: { page_id: number; page_number: number; image_url: string | null }[]
   selectedScene: number
   onSelectScene: (sceneId: number) => void
   onAddScene: () => void
@@ -77,14 +102,19 @@ function SceneSidebar({
         <ChevronUp className="h-5 w-5 text-muted-foreground" />
       </Button>
       <div className="mt-4 flex flex-1 flex-col items-center gap-4">
-        {scenes.map((scene) => (
-          <SceneThumbnail
-            key={scene.id}
-            label={scene.label}
-            isActive={scene.id === selectedScene}
-            onClick={() => onSelectScene(scene.id)}
-          />
-        ))}
+        {scenes.map((scene) => {
+          const p = pages.find((x) => x.page_number === scene.id)
+
+          return (
+            <SceneThumbnail
+              key={scene.id}
+              label={scene.label}
+              isActive={scene.id === selectedScene}
+              onClick={() => onSelectScene(scene.id)}
+              imageUrl={toProxiedStatic(p?.image_url)}
+            />
+          )
+        })}
         <button
           type="button"
           onClick={onAddScene}
@@ -121,10 +151,12 @@ function SceneThumbnail({
   label,
   isActive,
   onClick,
+  imageUrl,
 }: {
   label: string
   isActive: boolean
   onClick: () => void
+  imageUrl?: string
 }) {
   return (
     <Card
@@ -137,30 +169,62 @@ function SceneThumbnail({
     >
       <CardContent className="h-full w-full p-2">
         <span className="absolute left-2 top-2 text-xs font-medium text-muted-foreground">{label}</span>
-        <div className="flex h-full w-full items-center justify-center rounded-md bg-muted">
-          <ImageIcon className="h-8 w-8 text-muted-foreground/60" />
+        <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-md bg-muted">
+          {imageUrl ? (
+            <img alt="thumb" src={imageUrl} className="h-full w-full object-cover" />
+          ) : (
+            <ImageIcon className="h-8 w-8 text-muted-foreground/60" />
+          )}
         </div>
       </CardContent>
     </Card>
   )
 }
 
-function StoryboardCanvas({ onPreview }: { onPreview: () => void }) {
+function StoryboardCanvas({ onPreview, imageUrl }: { onPreview: () => void; imageUrl?: string | null }) {
   return (
     <main className="flex min-h-[540px] flex-1 flex-col items-center gap-6">
       <Button variant="secondary" onClick={onPreview} className="px-8">
         预览
       </Button>
-      <div className="flex w-full flex-1 items-center justify-center rounded-3xl border border-dashed border-muted-foreground/40 bg-muted/80">
-        <ImageIcon className="h-24 w-24 text-muted-foreground/50" />
+      <div className="flex w-full flex-1 items-center justify-center overflow-hidden rounded-3xl border border-dashed border-muted-foreground/40 bg-muted/80">
+        {imageUrl ? (
+          <img
+            alt="page preview"
+            src={imageUrl}
+            className="max-h-full max-w-full object-contain"
+          />
+        ) : (
+          <ImageIcon className="h-24 w-24 text-muted-foreground/50" />
+        )}
       </div>
     </main>
   )
 }
 
+// Ensure storage images go through dev proxy: '/static' -> storage origin with Referer/Origin
+function toProxiedStatic(url?: string | null): string | undefined {
+  if (!url) return undefined
+  try {
+    const u = new URL(url)
+    if (u.hostname === 'storage.mangasuperb.anranz.xyz') {
+      return '/static' + u.pathname + (u.search || '')
+    }
+  } catch {
+    // non-absolute or invalid URLs: leave as-is
+  }
+
+  return url || undefined
+}
+
 function PropertyPanel({
   selectedCharacters,
   onToggleCharacter,
+  selectedLayout,
+  onLayoutChange,
+  styleValue,
+  onStyleChange,
+  panelShots,
   fontFamily,
   onFontFamilyChange,
   fontSize,
@@ -172,6 +236,11 @@ function PropertyPanel({
 }: {
   selectedCharacters: number[]
   onToggleCharacter: (characterId: number) => void
+  selectedLayout: string
+  onLayoutChange: (value: string) => void
+  styleValue: string
+  onStyleChange: (value: string) => void
+  panelShots?: { panel_number: number; description: string }[]
   fontFamily: string
   onFontFamilyChange: (value: string) => void
   fontSize: string
@@ -183,6 +252,53 @@ function PropertyPanel({
 }) {
   return (
     <aside className="flex w-72 flex-col gap-4">
+      <PanelCard title="布局">
+        <LabelRow label="页面布局">
+          <Select value={selectedLayout} onValueChange={onLayoutChange}>
+            <SelectTrigger className="w-40">
+              <SelectValue placeholder="选择布局" />
+            </SelectTrigger>
+            <SelectContent>
+              {LAYOUT_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </LabelRow>
+      </PanelCard>
+      {!!(panelShots && panelShots.length) && (
+        <PanelCard title="分镜头（当前页）">
+          <div className="flex flex-col gap-2 max-h-60 overflow-auto pr-1">
+            {panelShots!.map((ps) => (
+              <div key={ps.panel_number} className="rounded-md border p-2 text-xs leading-snug text-foreground/80">
+                <span className="mr-2 inline-block w-5 text-center rounded bg-muted text-muted-foreground">
+                  {ps.panel_number}
+                </span>
+                <span className="align-middle">{ps.description}</span>
+              </div>
+            ))}
+          </div>
+        </PanelCard>
+      )}
+
+      <PanelCard title="风格">
+        <LabelRow label="渲染风格">
+          <Select value={styleValue} onValueChange={onStyleChange}>
+            <SelectTrigger className="w-40">
+              <SelectValue placeholder="选择风格" />
+            </SelectTrigger>
+            <SelectContent>
+              {STYLE_PRESETS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </LabelRow>
+      </PanelCard>
       <PanelCard title="出镜人物">
         <CharacterPicker selected={selectedCharacters} onToggle={onToggleCharacter} />
       </PanelCard>
@@ -318,31 +434,61 @@ function LabelRow({ label, children }: { label: string; children: React.ReactNod
 export function ImageGeneration() {
   const [scenes, setScenes] = useState(INITIAL_SCENES)
   const [selectedScene, setSelectedScene] = useState(INITIAL_SCENES[0]?.id ?? 1)
+  // Pages data from images API
+  const [pages, setPages] = useState<{ page_id: number; page_number: number; image_url: string | null }[]>([])
   const [selectedCharacters, setSelectedCharacters] = useState<number[]>([1, 2])
   const [fontFamily, setFontFamily] = useState(FONT_OPTIONS[0].value)
   const [fontSize, setFontSize] = useState(FONT_SIZE_OPTIONS[1])
   const [bubbleShape, setBubbleShape] = useState(BUBBLE_SHAPES[0].value)
   const [hasTail, setHasTail] = useState(true)
+  const [isRendering, setIsRendering] = useState(false)
+  const [pollTries, setPollTries] = useState(0)
+  const MAX_POLL_TRIES = 15 // 15 * 2s = 30s
+  const pollTimerRef = useRef<number | null>(null)
+  const triesRef = useRef<number>(0)
+  const [selectedLayout, setSelectedLayout] = useState<string>(LAYOUT_OPTIONS[0].value)
   const { create: createComic, state: createComicState } = useCreateComic()
-  const { state: createJobState } = useCreateComicJob()
-  const [selectedIds] = useAtom(selectedCharacterIdsAtom)
+  const [selectedIds, setSelectedIds] = useAtom(selectedCharacterIdsAtom)
   const [comicId, setComicId] = useAtom(currentComicIdAtom)
-  // const [panels] = useAtom(storyPanelsAtom) // 不再用于 story_optimization 入口
-  const [, setComicDetail] = useAtom(currentComicDetailAtom)
+  const [prevComicDetail, setPrevComicDetail] = useAtom(previousComicDetailAtom)
+  const [comicDetail, setComicDetail] = useAtom(currentComicDetailAtom)
   const [title] = useAtom(mangaTitleAtom)
   const [fullStory] = useAtom(fullStoryAtom)
+  const [style, setStyle] = useAtom(styleAtom)
+  const [aspectRatio] = useAtom(aspectRatioAtom)
+  const [rolesMap, setRolesMap] = useAtom(selectedCharacterRolesAtom)
+  const [, setActiveTab] = useAtom(activeTabAtom)
+  const [, setStoryStep] = useAtom(storyStepAtom)
 
   const handleAddScene = () => {
-    setScenes((prev) => {
-      const nextIndex = prev.length + 1
-
-      return [...prev, { id: nextIndex, label: String(nextIndex).padStart(2, '0') }]
-    })
+    // 跳转到故事流程并重置当前漫画相关状态，开始新一轮
+    setActiveTab('story')
+    setStoryStep('input')
+    setComicId(null)
+    setComicDetail(null)
+    setPrevComicDetail(null)
+    setSelectedIds([])
+    setRolesMap({})
+    setPages([])
+    setScenes(INITIAL_SCENES)
+    setSelectedScene(INITIAL_SCENES[0]?.id ?? 1)
+    toast.success('已切换到故事流程，重新开始')
   }
 
   const previewHandler = () => {
     // 预览动作由后续业务接入，此处占位方便绑定
     console.info('preview scene', selectedScene)
+  }
+
+  // 从 comicDetail 或 prevComicDetail 中获取某页的分镜头
+  const getPanelShotsForPage = (page: number) => {
+    const src: any = comicDetail || prevComicDetail
+    const shots: any[] = Array.isArray(src?.panel_shots) ? src.panel_shots : []
+
+    return shots
+      .filter((s) => s?.page_number === page)
+      .sort((a, b) => (a?.panel_number ?? 0) - (b?.panel_number ?? 0))
+      .map((s) => ({ panel_number: s.panel_number, description: s.description }))
   }
 
   const toggleCharacter = (characterId: number) => {
@@ -362,27 +508,48 @@ export function ImageGeneration() {
     const characters = selectedIds.map((id, idx) => ({
       id,
       order_index: idx + 1,
-      role: idx === 0 ? 'protagonist' : 'supporting',
+      role: rolesMap[id] || (idx === 0 ? 'protagonist' : 'supporting'),
     }))
 
     try {
       const res = await createComic({
         title: title || '未命名漫画',
         story: fullStory,
-        style: 'Classic manga black and white linework.',
-        aspect_ratio: '16:9',
+        style,
+        aspect_ratio: aspectRatio,
         characters,
       })
       const id = (res as any)?.comic?.id ?? (res as any)?.comic_id ?? null
       if (id) {
         setComicId(Number(id))
-        toast.success('漫画创建成功，接下来可以生图了')
+        // 触发剧情优化任务
+        try {
+          await JobsApi.createComic({ job_type: 'story_optimization', comic_id: Number(id) })
+          toast.success('漫画创建成功，已提交剧情优化任务')
+        } catch (e: any) {
+          toast.error(e?.message || '剧情优化任务提交失败')
+        }
+
+        // 刷新漫画详情
+        try {
+          const detail = await ComicsApi.get(Number(id))
+          setComicDetail(detail)
+        } catch {}
       } else {
         toast.success('漫画创建已提交')
       }
     } catch (err: any) {
       toast.error(err?.message || '创建漫画失败')
     }
+  }
+
+  const clearPoll = () => {
+    if (pollTimerRef.current) {
+      window.clearInterval(pollTimerRef.current)
+      pollTimerRef.current = null
+    }
+
+    triesRef.current = 0
   }
 
   const handleGenerate = async () => {
@@ -393,47 +560,94 @@ export function ImageGeneration() {
     }
 
     try {
-      const pageNumber = selectedScene
+      // 先设置该页布局 → 触发该页渲染 → 轮询整本漫画 images
+      setIsRendering(true)
+      setPollTries(0)
+      clearPoll()
 
-      // 若后端需要先确定页面布局，则根据当前漫画详情为该页设置布局（若存在建议布局）
-      const detail = await (async () => {
-        // 优先使用已缓存的详情
-        const [, setDetail] = [null, setComicDetail]
+      // A) 设置布局
+      const layoutRes = await PanelsApi.setLayout(comicId, {
+        page_number: selectedScene,
+        layout_key: selectedLayout,
+      })
+      const layoutComic = (layoutRes as any)?.comic
+      if (layoutComic) {
+        setPrevComicDetail(layoutComic)
+        setComicDetail(layoutComic)
+
+        // 根据返回的分镜或 page_layouts 同步侧边栏场景
         try {
-          const d = await ComicsApi.get(comicId)
-          setDetail(d)
+          const pageNumberSet = new Set<number>()
+          const shotsTmp: any[] = Array.isArray(layoutComic?.panel_shots) ? layoutComic.panel_shots : []
+          for (const s of shotsTmp) {
+            if (s && typeof s.page_number === 'number') pageNumberSet.add(s.page_number as number)
+          }
 
-          return d
-        } catch {
-          return null as any
-        }
-      })()
+          const pageNumbers = Array.from(pageNumberSet).sort((a: number, b: number) => a - b)
 
-      try {
-        const layout = detail?.page_layouts?.find((l: any) => l.page_number === pageNumber)
-        if (layout?.layout_key) {
-          const panel_order = Array.isArray(layout.panel_assignments)
-            ? layout.panel_assignments
-              .slice()
-              .sort((a: any, b: any) => (a.position ?? 0) - (b.position ?? 0))
-              .map((x: any) => x.panel_shot_id)
-            : undefined
-
-          await PanelsApi.setLayout(comicId, {
-            page_number: pageNumber,
-            layout_key: layout.layout_key,
-            panel_order,
-          })
-        }
-      } catch (e) {
-        // 设置布局失败不阻断渲染
-        console.warn('设置布局失败，继续渲染当前页面', e)
+          if (pageNumbers.length > 0) {
+            const newScenes: Scene[] = pageNumbers.map((n) => ({ id: n, label: String(n).padStart(2, '0') }))
+            setScenes(newScenes)
+            if (!newScenes.some((s) => s.id === selectedScene)) {
+              setSelectedScene(newScenes[0].id)
+            }
+          }
+        } catch {}
       }
 
-      // 触发生图：POST /panels/{comic_id}/pages/{page_number}/render
-      const renderRes = await PanelsApi.renderPage(comicId, pageNumber)
-      const jobId = (renderRes as any)?.job_id || '—'
-      toast.success(`第 ${pageNumber} 页渲染任务已创建（Job: ${jobId}）`)
+      // B) 触发该页渲染
+      await PanelsApi.renderPage(comicId, selectedScene)
+
+      toast.success('已提交渲染，开始轮询 images…')
+
+      // C) 轮询 /api/comics/{comic_id}/images 直到有结果（任意页面拿到 image_url 即视为有数据）
+      pollTimerRef.current = window.setInterval(async () => {
+        try {
+          const imagesRes = await ComicsApi.listImages(comicId)
+          // Expected sample: { comic_id, page_count, pages: [{ page_id, page_number, image_url }] }
+          const pagesArr = (imagesRes as any)?.pages ?? []
+          const hasAnyImage = Array.isArray(pagesArr) && pagesArr.some((p: any) => !!p?.image_url)
+          triesRef.current += 1
+          setPollTries(triesRef.current)
+
+          if (hasAnyImage) {
+            // 更新本地 pages 数据 & 同步侧边栏场景
+            setPages(pagesArr)
+            if (Array.isArray(pagesArr) && pagesArr.length > 0) {
+              const newScenes: Scene[] = pagesArr
+                .sort((a: any, b: any) => a.page_number - b.page_number)
+                .map((p: any) => ({ id: p.page_number, label: String(p.page_number).padStart(2, '0'), pageId: p.page_id }))
+              setScenes(newScenes)
+              if (!newScenes.some((s) => s.id === selectedScene)) {
+                setSelectedScene(newScenes[0].id)
+              }
+            }
+
+            toast.success('生图完成')
+            clearPoll()
+            setIsRendering(false)
+
+            // 刷新详情
+            try {
+              const d = await ComicsApi.get(comicId)
+              setComicDetail(d)
+            } catch {}
+          } else if (triesRef.current >= MAX_POLL_TRIES) {
+            toast.error('生图超时（30s），请稍后重试或检查任务队列')
+            clearPoll()
+            setIsRendering(false)
+          }
+        } catch (e) {
+          console.warn('轮询生图失败', e)
+          triesRef.current += 1
+          setPollTries(triesRef.current)
+          if (triesRef.current >= MAX_POLL_TRIES) {
+            toast.error('生图轮询失败或超时')
+            clearPoll()
+            setIsRendering(false)
+          }
+        }
+      }, 2000)
 
       // 随后拉取漫画详情，存入全局 atom 以便后续使用
       try {
@@ -445,6 +659,8 @@ export function ImageGeneration() {
       }
     } catch (err: any) {
       toast.error(err?.message || '生图任务创建失败')
+      clearPoll()
+      setIsRendering(false)
     }
   }
 
@@ -453,16 +669,25 @@ export function ImageGeneration() {
       <div className="flex w-full gap-6 rounded-3xl border border-border/60 bg-card p-6 shadow-sm">
         <SceneSidebar
           scenes={scenes}
+          pages={pages}
           selectedScene={selectedScene}
           onSelectScene={setSelectedScene}
           onAddScene={() => {
             handleAddScene()
           }}
         />
-        <StoryboardCanvas onPreview={previewHandler} />
+        <StoryboardCanvas
+          onPreview={previewHandler}
+          imageUrl={toProxiedStatic(pages.find((p) => p.page_number === selectedScene)?.image_url)}
+        />
         <PropertyPanel
           selectedCharacters={selectedCharacters}
           onToggleCharacter={toggleCharacter}
+          selectedLayout={selectedLayout}
+          onLayoutChange={setSelectedLayout}
+          styleValue={style}
+          onStyleChange={setStyle}
+          panelShots={getPanelShotsForPage(selectedScene)}
           fontFamily={fontFamily}
           onFontFamilyChange={setFontFamily}
           fontSize={fontSize}
@@ -477,8 +702,8 @@ export function ImageGeneration() {
         <Button size="lg" onClick={handleCreateComic} disabled={createComicState.isMutating}>
           {createComicState.isMutating ? '创建中...' : (comicId ? '重新生成漫画' : '生成漫画')}
         </Button>
-        <Button size="lg" onClick={handleGenerate} disabled={createJobState.isMutating || !comicId}>
-          {createJobState.isMutating ? '生成中...' : '生图'}
+        <Button size="lg" onClick={handleGenerate} disabled={isRendering || !comicId}>
+          {isRendering ? `渲染中... (${pollTries}/${MAX_POLL_TRIES})` : '生图'}
         </Button>
       </div>
     </div>

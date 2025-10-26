@@ -4,10 +4,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCharactersList } from '@/hooks/use-characters'
 import { useI18n } from '@/hooks/use-i18n'
 
-import { activeTabAtom, charactersCompletedAtom, selectedCharacterIdsAtom } from '../atoms'
+import { activeTabAtom, charactersCompletedAtom, selectedCharacterIdsAtom, selectedCharacterRolesAtom } from '../atoms'
 
 function normalizeStorageUrl(url?: string | null) {
   if (!url) return undefined
@@ -41,6 +43,7 @@ function SelectionView() {
 
   // 多选：存入全局 atom（只存 id）
   const [selectedIds, setSelectedIds] = useAtom(selectedCharacterIdsAtom)
+  const [rolesMap, setRolesMap] = useAtom(selectedCharacterRolesAtom)
 
   const totalRecognized = useMemo(() => characters.length, [characters])
 
@@ -89,8 +92,41 @@ function SelectionView() {
   useEffect(() => {
     const idSet = new Set(characters.map((c) => c.id))
     setSelectedIds((prev) => prev.filter((id) => idSet.has(id)))
+    // 同步清理无效的角色配置
+    setRolesMap((prev) => {
+      const next: Record<number, string> = {}
+      for (const id of selectedIds) {
+        if (idSet.has(id) && prev[id]) next[id] = prev[id]
+      }
+
+      return next
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [characters])
+
+  const updateRole = (id: number, role: string) => {
+    setRolesMap((prev) => ({ ...prev, [id]: role }))
+  }
+
+  const moveUp = (index: number) => {
+    if (index <= 0) return
+    setSelectedIds((prev) => {
+      const next = [...prev]
+      ;[next[index - 1], next[index]] = [next[index], next[index - 1]]
+
+      return next
+    })
+  }
+
+  const moveDown = (index: number) => {
+    if (index >= selectedIds.length - 1) return
+    setSelectedIds((prev) => {
+      const next = [...prev]
+      ;[next[index + 1], next[index]] = [next[index], next[index + 1]]
+
+      return next
+    })
+  }
 
   return (
     <div className="space-y-6 mt-4">
@@ -176,12 +212,57 @@ function SelectionView() {
         <Button variant="default" onClick={handleQuickPick}>{String(t('characters.quickPick'))}</Button>
       </div>
 
+      {/* 角色职责与顺序设置 */}
+      {selectedIds.length > 0 && (
+        <Card>
+          <CardContent className="p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="font-medium">出镜人物职责与顺序</p>
+              <p className="text-sm text-muted-foreground">上移/下移改变顺序（顺序即 order_index），职责即 role</p>
+            </div>
+            <div className="space-y-3">
+              {selectedIds.map((id, index) => {
+                const char = characters.find((c) => c.id === id)
+                const currentRole = rolesMap[id] || (index === 0 ? 'protagonist' : 'supporting')
+
+                return (
+                  <div key={id} className="flex items-center gap-4 rounded-md border p-3">
+                    <div className="w-6 text-sm text-muted-foreground">{index + 1}</div>
+                    <div className="flex-1">
+                      <div className="font-medium text-sm">{char?.name || `#${id}`}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label className="text-xs text-muted-foreground">职责</Label>
+                      <Select value={currentRole} onValueChange={(v) => updateRole(id, v)}>
+                        <SelectTrigger className="w-36 h-8">
+                          <SelectValue placeholder="选择职责" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="protagonist">主角</SelectItem>
+                          <SelectItem value="supporting">配角</SelectItem>
+                          <SelectItem value="antagonist">反派</SelectItem>
+                          <SelectItem value="cameo">客串</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="outline" onClick={() => moveUp(index)}>上移</Button>
+                      <Button size="sm" variant="outline" onClick={() => moveDown(index)}>下移</Button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* 下一步 */}
       <div className="flex justify-center">
         <Button
           size="lg"
           onClick={() => {
-            setActiveTab('image-generation')
+            setActiveTab('panels')
             setCharactersCompleted(true)
           }}
           disabled={!canProceed}

@@ -17,9 +17,62 @@ export const storyCompletedAtom = atom(false)
 export const charactersCompletedAtom = atom(false)
 // 选中的人物（仅存 id 数组）
 export const selectedCharacterIdsAtom = atom<number[]>([])
-// 当前故事创建得到的漫画 ID（供生图阶段使用）
-export const currentComicIdAtom = atom<number | null>(null)
-export const currentComicDetailAtom = atom<IComic | null>(null)
+
+// ===== LocalStorage persistence helpers =====
+const isBrowser = typeof window !== 'undefined'
+
+function readLS<T>(key: string, fallback: T): T {
+  if (!isBrowser) return fallback
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (!raw) return fallback
+
+    return JSON.parse(raw) as T
+  } catch {
+    return fallback
+  }
+}
+
+function writeLS<T>(key: string, value: T) {
+  if (!isBrowser) return
+  try {
+    if (value === undefined) {
+      window.localStorage.removeItem(key)
+    } else {
+      window.localStorage.setItem(key, JSON.stringify(value))
+    }
+  } catch {}
+}
+
+// 当前故事创建得到的漫画 ID（供生图阶段使用） - 持久化
+const baseCurrentComicIdAtom = atom<number | null>(readLS<number | null>('ms_current_comic_id', null))
+export const currentComicIdAtom = atom(
+  (get) => get(baseCurrentComicIdAtom),
+  (_get, set, next: number | null) => {
+    set(baseCurrentComicIdAtom, next)
+    writeLS('ms_current_comic_id', next)
+  },
+)
+
+// 当前漫画详情 - 持久化
+const baseCurrentComicDetailAtom = atom<IComic | null>(readLS<IComic | null>('ms_current_comic_detail', null))
+export const currentComicDetailAtom = atom(
+  (get) => get(baseCurrentComicDetailAtom),
+  (_get, set, next: IComic | null) => {
+    set(baseCurrentComicDetailAtom, next)
+    writeLS('ms_current_comic_detail', next)
+  },
+)
+
+// 记忆上一次布局/分镜快照（来自 setLayout 返回的 comic 对象） - 持久化
+const basePreviousComicDetailAtom = atom<IComic | null>(readLS<IComic | null>('ms_previous_comic_detail', null))
+export const previousComicDetailAtom = atom(
+  (get) => get(basePreviousComicDetailAtom),
+  (_get, set, next: IComic | null) => {
+    set(basePreviousComicDetailAtom, next)
+    writeLS('ms_previous_comic_detail', next)
+  },
+)
 
 export interface StoryPanel { id: number; text: string }
 
@@ -80,3 +133,15 @@ export const derivedStoryPanelsAtom = atom(
 
 // 为向后兼容，导出名称保持不变
 export { derivedStoryPanelsAtom as storyPanelsAtom }
+
+// ===== Global settings =====
+// Style prompt for AI rendering / creation
+export const styleAtom = atom<string>('Classic manga black and white linework.')
+// Aspect ratio selection
+export const aspectRatioAtom = atom<string>('16:9')
+
+// Selected characters extra metadata: role by id
+export const selectedCharacterRolesAtom = atom<Record<number, string>>({})
+
+// Optional per-page layout selections (page_number -> layout_key)
+export const pageLayoutSelectionAtom = atom<Record<number, string>>({})

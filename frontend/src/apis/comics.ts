@@ -9,6 +9,23 @@ export const ComicsApi = {
       method: 'GET',
     })
   },
+
+  // Trigger images rendering or list images for a comic
+  listImages(comicId: number) {
+    return request<void, any>({
+      url: `/api/comics/${comicId}/images`,
+      method: 'GET',
+    })
+  },
+
+  startImages(comicId: number, body?: Record<string, any>) {
+    return request<Record<string, any> | undefined, any>({
+      url: `/api/comics/${comicId}/images`,
+      method: 'POST',
+      data: body ?? {},
+      timeout: 60000,
+    })
+  },
   // Get a comic detail by id
   get(comicId: number) {
     return request<void, IComic>({
