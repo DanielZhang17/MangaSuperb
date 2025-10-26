@@ -736,6 +736,46 @@ COMIC_DETAIL_DOC = {
     'security': [{'sessionCookie': []}],
 }
 
+COMIC_IMAGES_DOC = {
+    'tags': ['Comics'],
+    'summary': 'Get comic page image URLs',
+    'description': 'Returns the cover image URL and the list of rendered page image URLs for a comic.',
+    'parameters': [
+        {
+            'name': 'comic_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        }
+    ],
+    'responses': {
+        '200': {
+            'description': 'Image URLs for the comic',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'comic_id': {'type': 'integer'},
+                    'cover_image_url': {'type': ['string', 'null'], 'format': 'uri'},
+                    'page_count': {'type': 'integer'},
+                    'pages': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'page_id': {'type': 'integer'},
+                                'page_number': {'type': 'integer'},
+                                'image_url': {'type': ['string', 'null'], 'format': 'uri'},
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        '404': {'description': 'Comic not found'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
 COMIC_PUBLISH_DOC = {
     'tags': ['Comics'],
     'summary': 'Publish comic (export assets)',
@@ -1433,6 +1473,7 @@ __all__ = [
     'COMIC_CREATE_DOC',
     'COMIC_LIST_DOC',
     'COMIC_DETAIL_DOC',
+    'COMIC_IMAGES_DOC',
     'JOB_CREATE_DOC',
     'JOB_STATUS_DOC',
     'CHARACTER_DETAIL_DOC',

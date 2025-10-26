@@ -25,6 +25,7 @@ from models import Comic, ComicLike, Script
 from swagger import (
     COMIC_CREATE_DOC,
     COMIC_DETAIL_DOC,
+    COMIC_IMAGES_DOC,
     COMIC_LIST_DOC,
     COMIC_PUBLISH_DOC,
     COMIC_LIKE_DOC,
@@ -113,6 +114,36 @@ def get_comic(comic_id: int) -> Any:
     comic._user_liked = any(like.user_id == current_user.id for like in comic.likes)
     comic._like_count = len(comic.likes) if comic.likes else 0
     return jsonify(comic.to_dict())
+
+
+@bp.get("/<int:comic_id>/images")
+@login_required
+@swag_from(COMIC_IMAGES_DOC)
+def get_comic_images(comic_id: int) -> Any:
+    comic = db.session.get(Comic, comic_id)
+    if not comic or (comic.user_id != current_user.id and not comic.is_public):
+        return jsonify({"error": "Comic not found"}), 404
+
+    pages_payload = [
+        {
+            "page_id": page.id,
+            "page_number": page.page_number,
+            "image_url": page.image_url,
+        }
+        for page in comic.pages
+    ]
+
+    return (
+        jsonify(
+            {
+                "comic_id": comic.id,
+                "cover_image_url": comic.cover_image_url,
+                "pages": pages_payload,
+                "page_count": len(pages_payload),
+            }
+        ),
+        200,
+    )
 
 
 @bp.get("")

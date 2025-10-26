@@ -104,39 +104,32 @@ def create_character() -> Any:
         db.session.add(character)
         db.session.flush()
 
-        if normalized_refs:
-            from mangasuperb.services.jobs import process_character_image_generation
+        from mangasuperb.services.jobs import process_character_image_generation
 
-            queue = current_app.extensions.get("rq_queue")
-            if not queue:
-                logger.error("RQ queue not configured for character image generation")
-                raise RuntimeError("Background queue is not configured")
-            job = queue.enqueue(
-                process_character_image_generation,
-                character_id=character.id,
-                description=prompt_for_image,
-                reference_images=normalized_refs,
-                job_timeout=current_app.config["RQ_JOB_TIMEOUT"],
-                result_ttl=current_app.config["RQ_RESULT_TTL"],
-            )
+        queue = current_app.extensions.get("rq_queue")
+        if not queue:
+            logger.error("RQ queue not configured for character image generation")
+            raise RuntimeError("Background queue is not configured")
+        job = queue.enqueue(
+            process_character_image_generation,
+            character_id=character.id,
+            description=prompt_for_image,
+            reference_images=normalized_refs,
+            job_timeout=current_app.config["RQ_JOB_TIMEOUT"],
+            result_ttl=current_app.config["RQ_RESULT_TTL"],
+        )
 
-            character.image_status = "pending"
-            character.image_job_id = job.id
-            character.image_error = None
-            job_id = job.id
-            logger.info(
-                "Character image job enqueued user_id=%s character_id=%s job_id=%s references=%s",
-                current_user.id,
-                character.id,
-                job_id,
-                len(normalized_refs),
-            )
-        else:
-            logger.info(
-                "Character created without image job user_id=%s character_id=%s references=0",
-                current_user.id,
-                character.id,
-            )
+        character.image_status = "pending"
+        character.image_job_id = job.id
+        character.image_error = None
+        job_id = job.id
+        logger.info(
+            "Character image job enqueued user_id=%s character_id=%s job_id=%s references=%s",
+            current_user.id,
+            character.id,
+            job_id,
+            len(normalized_refs),
+        )
 
         db.session.commit()
 

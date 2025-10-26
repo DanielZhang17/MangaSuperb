@@ -8,6 +8,7 @@ from mangasuperb.services import jobs
 from models import (
     Comic,
     ComicOutlineSection,
+    ComicPage,
     ComicPageLayout,
     ComicPagePanel,
     ComicPanelShot,
@@ -285,3 +286,60 @@ def test_render_page_endpoint_enqueues_job(app, auth_client, user: User, dummy_q
         assert comic.workflow_stage == "render"
         assert comic.workflow_status == "in_progress"
         assert comic.status == "processing"
+
+
+def test_get_comic_images_returns_urls(app, auth_client, user: User):
+    comic_id = _create_comic(app, user)
+
+    cover_url = "https://cdn.example.com/cover.png"
+    page_url = "https://cdn.example.com/page-1.png"
+
+    with app.app_context():
+        comic = db.session.get(Comic, comic_id)
+        assert comic is not None
+        comic.cover_image_url = cover_url
+        page = ComicPage(
+            comic_id=comic_id,
+            script_id=comic.script_id,
+            page_number=1,
+            image_url=page_url,
+            panel_text='{"panels": []}',
+        )
+        db.session.add(page)
+        db.session.commit()
+        page_id = page.id
+
+    response = auth_client.get(f"/api/comics/{comic_id}/images")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["comic_id"] == comic_id
+    assert payload["cover_image_url"] == cover_url
+    assert payload["page_count"] == 1
+    assert payload["pages"] == [
+        {"page_id": page_id, "page_number": 1, "image_url": page_url},
+    ]
+
+
+def test_get_comic_images_rejects_other_user(app, auth_client, user: User):
+    with app.app_context():
+        other = User(
+            username="other-user",
+            email="other@example.com",
+            password_hash="hashed",
+        )
+        db.session.add(other)
+        db.session.flush()
+        script = Script(user_id=other.id, title="Other", content='{"panels": []}')
+        comic = Comic(
+            user_id=other.id,
+            script=script,
+            title="Other comic",
+            style_description="Noir",
+            aspect_ratio="16:9",
+        )
+        db.session.add_all([script, comic])
+        db.session.commit()
+        other_comic_id = comic.id
+
+    response = auth_client.get(f"/api/comics/{other_comic_id}/images")
+    assert response.status_code == 404

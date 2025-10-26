@@ -110,6 +110,36 @@ def test_create_character_without_name(auth_client) -> None:
     assert character["name"] == "unspecified"
     assert character["description"].startswith("A newly conceived character")
     assert character["sex"] == "non-binary"
+    assert character["image_status"] == "pending"
+
+
+def test_create_character_enqueues_image_job_without_references(
+    app: Flask,
+    auth_client,
+    user: Any,
+    dummy_queue,
+) -> None:
+    response = auth_client.post(
+        "/api/characters",
+        json={
+            "name": "Scout",
+            "description": "Keen-eyed pathfinder with sharp instincts.",
+            "sex": "female",
+        },
+    )
+    assert response.status_code == 201
+    payload = response.get_json()
+    assert payload["job_id"] == dummy_queue.jobs[-1].id
+    character_payload = payload["character"]
+    assert character_payload["image_status"] == "pending"
+    assert character_payload["image_job_id"] == payload["job_id"]
+    assert dummy_queue.jobs[-1].kwargs["reference_images"] == []
+
+    with app.app_context():
+        persisted = db.session.get(Character, character_payload["id"])
+        assert persisted is not None
+        assert persisted.image_status == "pending"
+        assert persisted.image_job_id == payload["job_id"]
 
 
 def test_rename_character_updates_only_name(app: Flask, auth_client, user: Any) -> None:
