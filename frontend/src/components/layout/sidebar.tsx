@@ -4,7 +4,7 @@ import { Link, NavLink, useLocation } from 'react-router'
 
 import { Badge } from '@/components/ui/badge'
 import { useI18n } from '@/hooks/use-i18n'
-import { cn } from '@/lib/utils'
+import { cn, proxiedStatic } from '@/lib/utils'
 import { InfoCard } from '@/pages/me/info-card'
 
 import I18nToggle from '../common/operations/i18n'
@@ -48,11 +48,18 @@ export function DashboardSidebar({ collapsed }: DashboardSidebarProps) {
         )}
       >
         <Link to="/" className="flex items-center gap-2">
-          <div className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground font-semibold">
-                        MS
-          </div>
-          {!collapsed && (
-            <span className="text-lg font-semibold">MangaSuperb</span>
+          {!collapsed &&<img
+            src={proxiedStatic('https://storage.mangasuperb.anranz.xyz/static/logo_s.png')}
+            alt="MangaSuperb"
+            className="h-10 w-40 rounded-xl object-cover invert dark:invert-0"
+          />
+          }
+          {collapsed && (
+            <img
+              src={proxiedStatic('https://storage.mangasuperb.anranz.xyz/static/logo.png')}
+              alt="MangaSuperb"
+              className="h-10 w-10 rounded-full object-cover invert dark:invert-0"
+            />
           )}
         </Link>
         <div className={cn('flex items-center gap-2', !collapsed && 'ml-auto')} />

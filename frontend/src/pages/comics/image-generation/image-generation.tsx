@@ -63,42 +63,50 @@ function SceneSidebar({
   onSelectScene: (sceneId: number) => void
   onAddScene: () => void
 }) {
+  const hasAnyPage = Array.isArray(pages) && pages.length > 0
   const canScrollUp = false
   const canScrollDown = false
 
   return (
     <aside className="flex w-32 flex-col items-center">
-      <Button variant="ghost" size="icon" disabled={!canScrollUp}>
-        <ChevronUp className="h-5 w-5 text-muted-foreground" />
-      </Button>
+      {hasAnyPage && (
+        <Button variant="ghost" size="icon" disabled={!canScrollUp}>
+          <ChevronUp className="h-5 w-5 text-muted-foreground" />
+        </Button>
+      )}
       <div className="mt-4 flex flex-1 flex-col items-center gap-4">
-        {scenes.map((scene) => {
-          const p = pages.find((x) => x.page_number === scene.id)
+        {hasAnyPage &&
+          scenes.map((scene) => {
+            const p = pages.find((x) => x.page_number === scene.id)
 
-          return (
-            <SceneThumbnail
-              key={scene.id}
-              label={scene.label}
-              isActive={scene.id === selectedScene}
-              onClick={() => onSelectScene(scene.id)}
-              imageUrl={toProxiedStatic(p?.image_url)}
-            />
-          )
-        })}
+            return (
+              <SceneThumbnail
+                key={scene.id}
+                label={scene.label}
+                isActive={scene.id === selectedScene}
+                onClick={() => onSelectScene(scene.id)}
+                imageUrl={toProxiedStatic(p?.image_url)}
+              />
+            )
+          })}
         <button
           type="button"
           onClick={onAddScene}
           className="group relative flex h-20 w-28 items-center justify-center rounded-xl border border-dashed border-muted-foreground/30 bg-muted/60 text-muted-foreground transition-colors hover:border-muted-foreground/50"
         >
-          <span className="absolute -left-6 text-xs font-medium text-muted-foreground">
-            {String(scenes.length + 1).padStart(2, '0')}
-          </span>
+          {hasAnyPage && (
+            <span className="absolute -left-6 text-xs font-medium text-muted-foreground">
+              {String(scenes.length + 1).padStart(2, '0')}
+            </span>
+          )}
           <Plus className="h-6 w-6" />
         </button>
       </div>
-      <Button variant="ghost" size="icon" disabled={!canScrollDown} className="mt-4">
-        <ChevronDown className="h-5 w-5 text-muted-foreground" />
-      </Button>
+      {hasAnyPage && (
+        <Button variant="ghost" size="icon" disabled={!canScrollDown} className="mt-4">
+          <ChevronDown className="h-5 w-5 text-muted-foreground" />
+        </Button>
+      )}
     </aside>
   )
 }
@@ -358,6 +366,10 @@ export function ImageGeneration() {
   const MAX_POLL_TRIES = 15 // 15 * 2s = 30s
   const pollTimerRef = useRef<number | null>(null)
   const triesRef = useRef<number>(0)
+  // PDF 导出轮询
+  const MAX_PDF_POLL_TRIES = 30 // 30 * 2s = 60s
+  const pdfPollTimerRef = useRef<number | null>(null)
+  const pdfTriesRef = useRef<number>(0)
   const [comicId] = useAtom(currentComicIdAtom)
   const [, setComicDetail] = useAtom(currentComicDetailAtom)
   const [style, setStyle] = useAtom(styleAtom)
@@ -410,6 +422,14 @@ export function ImageGeneration() {
 
   // 重新生成漫画逻辑已移除
 
+  // 组件卸载时清理所有轮询
+  useEffect(() => {
+    return () => {
+      clearPoll()
+      clearPdfPoll()
+    }
+  }, [])
+
   const clearPoll = () => {
     if (pollTimerRef.current) {
       window.clearInterval(pollTimerRef.current)
@@ -417,6 +437,15 @@ export function ImageGeneration() {
     }
 
     triesRef.current = 0
+  }
+
+  const clearPdfPoll = () => {
+    if (pdfPollTimerRef.current) {
+      window.clearInterval(pdfPollTimerRef.current)
+      pdfPollTimerRef.current = null
+    }
+
+    pdfTriesRef.current = 0
   }
 
   const handleGenerate = async () => {
@@ -577,13 +606,49 @@ export function ImageGeneration() {
                   setIsPublishing(true)
                   const resp = await ComicsApi.publish(comicId, { make_public: makePublic })
                   // 暂存输出，等待你提供 PDF 字段名
-                   
                   console.info('publish response:', resp)
-                  toast.success('发布完成，等待确认 PDF 地址字段')
+                  toast.success('发布成功，开始生成 PDF…')
                   setPublishOpen(false)
+
+                  // 开始轮询 comic 详情，直到出现 pdf_url 或超时
+                  clearPdfPoll()
+                  pdfPollTimerRef.current = window.setInterval(async () => {
+                    try {
+                      const d = await ComicsApi.get(comicId)
+                      const pdfUrl = (d as any)?.pdf_url as string | null | undefined
+                      pdfTriesRef.current += 1
+
+                      if (pdfUrl) {
+                        clearPdfPoll()
+                        setIsPublishing(false)
+                        // 下载 PDF（开发态使用代理，避免防盗链）
+                        const href = toProxiedStatic(pdfUrl) || pdfUrl
+                        const a = document.createElement('a')
+                        a.href = href
+                        a.download = `comic_${comicId}.pdf`
+                        document.body.appendChild(a)
+                        a.click()
+                        a.remove()
+                        toast.success('PDF 已就绪，开始下载')
+                        // 更新详情
+                        try { setComicDetail(d) } catch {}
+                      } else if (pdfTriesRef.current >= MAX_PDF_POLL_TRIES) {
+                        clearPdfPoll()
+                        setIsPublishing(false)
+                        toast.error('等待 PDF 超时（60s），请稍后在“我的创意”重试下载')
+                      }
+                    } catch (e) {
+                      console.warn('轮询 PDF 失败', e)
+                      pdfTriesRef.current += 1
+                      if (pdfTriesRef.current >= MAX_PDF_POLL_TRIES) {
+                        clearPdfPoll()
+                        setIsPublishing(false)
+                        toast.error('PDF 生成轮询失败或超时')
+                      }
+                    }
+                  }, 2000)
                 } catch (e: any) {
                   toast.error(e?.message || '发布失败')
-                } finally {
                   setIsPublishing(false)
                 }
               }}

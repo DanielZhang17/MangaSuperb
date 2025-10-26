@@ -160,6 +160,8 @@ export interface IComic {
   cover_image_url?: string | null
   pdf_url?: string | null
   zip_url?: string | null
+  like_count?: number
+  published_at?: string | null
   workflow_stage?: string | null
   workflow_status?: string | null
   // Backend may include panels/pages and other metadata

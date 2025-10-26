@@ -18,51 +18,9 @@ export const charactersCompletedAtom = atom(false)
 // 选中的人物（仅存 id 数组）
 export const selectedCharacterIdsAtom = atom<number[]>([])
 
-// ===== LocalStorage persistence helpers =====
-const isBrowser = typeof window !== 'undefined'
+export const currentComicIdAtom = atom<number | null>(null)
 
-function readLS<T>(key: string, fallback: T): T {
-  if (!isBrowser) return fallback
-  try {
-    const raw = window.localStorage.getItem(key)
-    if (!raw) return fallback
-
-    return JSON.parse(raw) as T
-  } catch {
-    return fallback
-  }
-}
-
-function writeLS<T>(key: string, value: T) {
-  if (!isBrowser) return
-  try {
-    if (value === undefined) {
-      window.localStorage.removeItem(key)
-    } else {
-      window.localStorage.setItem(key, JSON.stringify(value))
-    }
-  } catch {}
-}
-
-// 当前故事创建得到的漫画 ID（供生图阶段使用） - 持久化
-const baseCurrentComicIdAtom = atom<number | null>(readLS<number | null>('ms_current_comic_id', null))
-export const currentComicIdAtom = atom(
-  (get) => get(baseCurrentComicIdAtom),
-  (_get, set, next: number | null) => {
-    set(baseCurrentComicIdAtom, next)
-    writeLS('ms_current_comic_id', next)
-  },
-)
-
-// 当前漫画详情 - 持久化
-const baseCurrentComicDetailAtom = atom<IComic | null>(readLS<IComic | null>('ms_current_comic_detail', null))
-export const currentComicDetailAtom = atom(
-  (get) => get(baseCurrentComicDetailAtom),
-  (_get, set, next: IComic | null) => {
-    set(baseCurrentComicDetailAtom, next)
-    writeLS('ms_current_comic_detail', next)
-  },
-)
+export const currentComicDetailAtom = atom<IComic | null>(null)
 
 export interface StoryPanel { id: number; text: string }
 
@@ -94,10 +52,6 @@ const initialStoryPanels: StoryPanel[] = [
   { id: 9, text: '三殿主疑惑道：“那他怎么滚下去了？”' },
 ]
 
-// 旧的直存 panels 被下方的派生 atom 替代
-
-// ===== Story content/panels sync =====
-// 1) 完整故事（编辑器文本域）作为单一数据源
 export const fullStoryAtom = atom(
   initialStoryPanels.map((p) => p.text).join('\n\n'),
 )
@@ -110,7 +64,6 @@ function splitPanelsFromStory(story: string): StoryPanel[] {
     .map((text, idx) => ({ id: idx + 1, text }))
 }
 
-// 2) Panels 派生自完整故事；写入时回写 fullStoryAtom
 export const derivedStoryPanelsAtom = atom(
   (get) => splitPanelsFromStory(get(fullStoryAtom)),
   (get, set, update: StoryPanel[] | ((prev: StoryPanel[]) => StoryPanel[])) => {
@@ -121,19 +74,11 @@ export const derivedStoryPanelsAtom = atom(
   },
 )
 
-// 为向后兼容，导出名称保持不变
 export { derivedStoryPanelsAtom as storyPanelsAtom }
 
-// ===== Global settings =====
-// Style prompt for AI rendering / creation
 export const styleAtom = atom<string>('Classic manga black and white linework.')
-// Aspect ratio selection
 export const aspectRatioAtom = atom<string>('16:9')
 
-// Selected characters extra metadata: role by id
 export const selectedCharacterRolesAtom = atom<Record<number, string>>({})
 
-// Optional per-page layout selections (page_number -> layout_key)
 export const pageLayoutSelectionAtom = atom<Record<number, string>>({})
-
-// 已移除旧/新故事快照与本地持久化逻辑

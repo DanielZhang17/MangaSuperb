@@ -1,4 +1,4 @@
-import { Plus, User } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 
@@ -134,14 +134,12 @@ export default function CharacterCreatorPage() {
         <div>
           <Button variant="secondary">{String(t('createCharacter:random'))}</Button>
         </div>
-        <div className="p-4 rounded-lg bg-card text-card-foreground shadow-sm">
-          <Textarea
-            value={characterDescription}
-            onChange={(e) => setCharacterDescription(e.target.value)}
-            className="min-h-[150px] resize-y"
-            placeholder={String(t('createCharacter:description.placeholder'))}
-          />
-        </div>
+        <Textarea
+          value={characterDescription}
+          onChange={(e) => setCharacterDescription(e.target.value)}
+          className="min-h-[150px] resize-y"
+          placeholder={String(t('createCharacter:description.placeholder'))}
+        />
         <div className="space-y-3">
           <div className="flex items-baseline justify-between">
             <h2 className="text-lg font-medium">{String(t('createCharacter:reference.title'))}</h2>
@@ -181,9 +179,7 @@ export default function CharacterCreatorPage() {
         </div>
 
       </div>
-      <div className="flex-1 flex items-center justify-center bg-card rounded-lg">
-        <User className="w-40 h-40 text-muted-foreground" />
-      </div>
+
       <LoadingModal
         open={loadingOpen}
         onOpenChange={setLoadingOpen}

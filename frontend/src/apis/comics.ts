@@ -10,6 +10,14 @@ export const ComicsApi = {
     })
   },
 
+  // List public comics for homepage/feed
+  listPublic() {
+    return request<void, ListComicsResponse>({
+      url: '/api/comics/public',
+      method: 'GET',
+    })
+  },
+
   // Trigger images rendering or list images for a comic
   listImages(comicId: number) {
     return request<void, any>({
@@ -40,6 +48,14 @@ export const ComicsApi = {
       url: `/api/comics/${comicId}/publish`,
       method: 'POST',
       data: body,
+    })
+  },
+
+  // Like a comic
+  like(comicId: number) {
+    return request<void, { message?: string; comic?: IComic } | IComic>({
+      url: `/api/comics/${comicId}/like`,
+      method: 'POST',
     })
   },
 

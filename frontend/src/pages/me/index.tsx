@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/toggle-group'
 import { useAuth } from '@/hooks/use-auth'
 import { useI18n } from '@/hooks/use-i18n'
-import { getAvatarUrl } from '@/lib/utils'
+import { getAvatarUrl, proxiedStatic } from '@/lib/utils'
 
 const toggleItemClasses = `
   bg-card
@@ -61,6 +61,13 @@ export default function CharacterSettingsPage() {
   const username = user?.username ?? String(t('me:username.guest'))
   const avatarUrl = getAvatarUrl(user?.avatar_index ?? null)
 
+  // 人物偏好示例图（走存储代理）
+  const base = 'https://storage.mangasuperb.anranz.xyz/static/'
+  const personaImages = [1, 2, 3, 4].map((i) => ({
+    imageUrl: proxiedStatic(base + encodeURIComponent(`形象${i}.png`)),
+    label: `形象${i}`,
+  }))
+
   return (
     <div className="min-h-screen bg-background p-8 text-foreground lg:p-12">
       <header className="mb-10 flex items-center gap-4">
@@ -97,10 +104,10 @@ export default function CharacterSettingsPage() {
                 {String(t('home:category.us'))}
               </ToggleGroupItem>
               <ToggleGroupItem value="cn" className={toggleItemClasses}>
-                CN
+                国漫风
               </ToggleGroupItem>
               <ToggleGroupItem value="kr" className={toggleItemClasses}>
-                KR
+                韩漫风
               </ToggleGroupItem>
             </ToggleGroup>
           </PreferenceGroup>
@@ -135,23 +142,9 @@ export default function CharacterSettingsPage() {
         <aside className="lg:col-span-1">
           <h2 className="mb-4 text-lg font-medium text-foreground">{String(t('me:aside.title'))}</h2>
           <div className="grid grid-cols-2 gap-4">
-            
-            <CharacterCard 
-              imageUrl="https://placehold.co/150x200/404040/9ca3af?text=男" 
-              label="男, 年轻" 
-            />
-            <CharacterCard 
-              imageUrl="https://placehold.co/150x200/404040/9ca3af?text=女" 
-              label="女, 年轻" 
-            />
-            <CharacterCard 
-              imageUrl="https://placehold.co/150x200/404040/9ca3af?text=男2" 
-              label="男, 少年" 
-            />
-            <CharacterCard 
-              imageUrl="https://placehold.co/150x200/404040/9ca3af?text=男3" 
-              label="男, 大叔" 
-            />
+            {personaImages.map((p) => (
+              <CharacterCard key={p.label} imageUrl={p.imageUrl} label={p.label} />
+            ))}
 
           </div>
         </aside>

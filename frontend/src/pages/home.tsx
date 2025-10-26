@@ -5,72 +5,66 @@ import { ComicsApi } from '@/apis/comics'
 import { ShareCard } from '@/components/common/share-card'
 import { Card } from '@/components/ui/card'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { useI18n } from '@/hooks/use-i18n'
-import { cn } from '@/lib/utils'
+import { proxiedStatic } from '@/lib/utils'
 import type { IComic } from '@/service/types'
-const comicCategoryKeys = ['home.category.jp', 'home.category.us', 'home.category.miyazaki'] as const
-
-// Heuristic: map comic.style_description to one of our UI categories
-function inferCategory(comic: IComic): string {
-  const style = (comic.style_description || '').toLowerCase()
-  if (/宫崎骏|miyazaki/.test(style)) return 'home.category.miyazaki'
-  if (/美漫|noir|ink|comic/.test(style)) return 'home.category.us'
-
-  return 'home.category.jp'
-}
-
-const categoryCoverStyles: Record<string, string> = {
-  'home.category.jp': 'bg-gradient-to-br from-pink-200/60 via-pink-100 to-white',
-  'home.category.us': 'bg-gradient-to-br from-sky-200/60 via-sky-100 to-white',
-  'home.category.miyazaki': 'bg-gradient-to-br from-amber-200/60 via-amber-100 to-white',
-}
-
-const creatorShares = [
-  {
-    id: 'share-one',
-    message: '我们到了, 现在在市场前面，Maxi：是吗？我们也在市场前面。',
-    name: 'Kimi',
-  },
-  {
-    id: 'share-two',
-    message: '我们到了, 现在在市场前面，Maxi：是吗？我们也在市场前面。',
-    name: 'Kimi',
-  },
-  {
-    id: 'share-three',
-    message: '我们到了, 现在在市场前面，Maxi：是吗？我们也在市场前面。',
-    name: 'Kimi',
-  },
-  {
-    id: 'share-four',
-    message: '我们到了, 现在在市场前面，Maxi：是吗？我们也在市场前面。',
-    name: 'Kimi',
-  },
-]
 
 export default function HomePage() {
-  const { t } = useI18n(['home', 'common'])
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([...comicCategoryKeys])
+  // 公共漫画列表 → 用 ShareCard 渲染
+  const { data, isLoading, error } = useSWR('comics:public', () => ComicsApi.listPublic())
 
-  // SWR: fetch current user's comics
-  const { data, isLoading, error } = useSWR('comics:list', () => ComicsApi.list())
+  // 分类 Toggle（多选）：日漫、美漫、国漫、韩漫
+  const categories = [
+    { key: 'jp', label: '日漫' },
+    { key: 'us', label: '美漫' },
+    { key: 'cn', label: '国漫' },
+    { key: 'kr', label: '韩漫' },
+  ] as const
 
-  const uiItems = useMemo(() => {
+  const [selectedCategories, setSelectedCategories] = useState<string[]>(categories.map((c) => c.key))
+
+  const shareItems = useMemo(() => {
     const list: IComic[] = data?.comics ?? []
 
-    return list.map((c) => ({
-      id: String(c.id),
-      category: inferCategory(c),
-      cover: c.cover_image_url || null,
-      title: c.title || String(t('home.title.fallback', { id: c.id })),
+    return list.map((c) => {
+      const rawImage: string | null = (c as any).cover_image_url || (c as any).image_url || null
+      const img = proxiedStatic(rawImage || undefined)
+
+      const username: string = (c as any)?.user?.username
+        || (c as any)?.author?.username
+        || (c as any)?.owner?.username
+        || '匿名'
+
+      return {
+        id: String(c.id),
+        message: c.title || `漫画 #${c.id}`,
+        name: username,
+        imageUrl: img || undefined,
+        likeCount: typeof c.like_count === 'number' ? c.like_count : 0,
+      }
+    })
+  }, [data])
+
+  // 精选漫画：只渲染几张固定图片（走存储代理），并标注分类用于过滤
+  const featuredImages = useMemo(() => {
+    const base = 'https://storage.mangasuperb.anranz.xyz/static/'
+    const entries = [
+      { name: '首页展示日漫画1.png', category: 'jp' },
+      { name: '首页展示日漫画2.png', category: 'us' },
+      { name: '首页展示日漫画3.png', category: 'cn' },
+      { name: '首页展示日漫画4.png', category: 'kr' },
+    ]
+
+    return entries.map((e) => ({
+      src: proxiedStatic(base + encodeURIComponent(e.name)),
+      category: e.category,
     }))
-  }, [data, t])
+  }, [])
 
   return (
     <div className="space-y-10">
       <section className="space-y-6">
         <div className="space-y-4">
-          <h2 className="text-xl font-semibold">{String(t('home.section.featured'))}</h2>
+          <h2 className="text-xl font-semibold">精选漫画</h2>
           <ToggleGroup
             type="multiple"
             value={selectedCategories}
@@ -79,44 +73,33 @@ export default function HomePage() {
             onValueChange={setSelectedCategories}
             className="flex w-fit gap-2"
           >
-            {comicCategoryKeys.map((key) => (
+            {categories.map((c) => (
               <ToggleGroupItem
-                key={key}
-                value={key}
+                key={c.key}
+                value={c.key}
                 className="rounded-full px-5 py-2 text-sm data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
               >
-                {String(t(key))}
+                {c.label}
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
         </div>
-
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {isLoading && Array.from({ length: 6 }).map((_, i) => (
-            <Card key={`skeleton-${i}`} className="overflow-hidden border-none bg-transparent p-0 shadow-none">
-              <div className="aspect-4/3 w-full animate-pulse rounded-2xl bg-muted" />
-            </Card>
-          ))}
-
-          {error && (
-            <div className="col-span-full text-sm text-destructive">{String(t('home.error.loadComics'))}</div>
-          )}
-
-          {!isLoading && !error && uiItems
-            .filter((item) => selectedCategories.includes(item.category))
-            .map((item) => (
-              <Card key={item.id} className="overflow-hidden border-none bg-transparent p-0 shadow-none">
+          {featuredImages
+            .filter((f) => selectedCategories.includes(f.category))
+            .map((f, idx) => (
+              <Card
+                key={`featured-${idx}`}
+                className="overflow-hidden border-none bg-transparent p-0 shadow-none"
+              >
                 <div
-                  className={cn(
-                    'aspect-4/3 w-full rounded-2xl bg-muted',
-                    categoryCoverStyles[item.category] ?? 'bg-muted',
-                  )}
-                  style={item.cover ? {
-                    backgroundImage: `url(${item.cover})`,
+                  className="aspect-4/3 w-full rounded-2xl bg-muted"
+                  style={{
+                    backgroundImage: `url(${f.src})`,
                     backgroundSize: 'cover',
                     backgroundPosition: 'center',
-                  } : undefined}
-                  aria-label={item.title}
+                  }}
+                  aria-label={`featured-${idx + 1}`}
                 />
               </Card>
             ))}
@@ -124,12 +107,24 @@ export default function HomePage() {
       </section>
 
       <section className="space-y-6">
-        <h2 className="text-xl font-semibold">{String(t('home.section.shares'))}</h2>
+        <h2 className="text-xl font-semibold">创作分享</h2>
         <div className="grid gap-4 justify-items-start md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
-          {creatorShares.map((share) => (
+          {isLoading && Array.from({ length: 6 }).map((_, i) => (
+            <Card key={`skeleton-${i}`} className="overflow-hidden border-none bg-transparent p-0 shadow-none">
+              <div className="aspect-square w-full animate-pulse rounded-2xl bg-muted" />
+            </Card>
+          ))}
+
+          {error && (
+            <div className="col-span-full text-sm text-destructive">加载漫画失败，请稍后重试。</div>
+          )}
+
+          {!isLoading && !error && shareItems.map((s) => (
             <ShareCard
-              share={share}
-              key={share.id}
+              key={s.id}
+              share={{ id: s.id, message: s.message, name: s.name }}
+              imageUrl={s.imageUrl}
+              likeCount={s.likeCount}
             />
           ))}
         </div>

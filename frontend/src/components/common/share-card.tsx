@@ -2,12 +2,7 @@
 import { Star } from 'lucide-react'
 
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-} from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardFooter } from '@/components/ui/card'
 
 interface ShareCardProps {
   share: {
@@ -15,13 +10,22 @@ interface ShareCardProps {
     message: string
     name: string
   }
+  imageUrl?: string | null
+  likeCount?: number
   className?: string
 }
 
-export function ShareCard({ share, className }: ShareCardProps) {
+export function ShareCard({ share, imageUrl, likeCount, className }: ShareCardProps) {
   return (
     <Card key={share.id} className={`flex h-full flex-col gap-4 p-4 ${className}`}>
-      <div className="aspect-square w-full rounded-xl bg-muted" />
+      <div
+        className="aspect-square w-full rounded-xl bg-muted"
+        style={imageUrl ? {
+          backgroundImage: `url(${imageUrl})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+        } : undefined}
+      />
       <CardContent className="flex items-start gap-3 p-0">
         <CardDescription className="text-sm leading-relaxed">
           {share.message}
@@ -36,7 +40,7 @@ export function ShareCard({ share, className }: ShareCardProps) {
         </span>
         <div className="flex items-center gap-3">
           <Star className="size-4" />
-          <span>0</span>
+          <span>{typeof likeCount === 'number' ? likeCount : 0}</span>
         </div>
       </CardFooter>
     </Card>
