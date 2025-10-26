@@ -1,6 +1,6 @@
-# MangaSuperb 系统设计（中文版本）
+# MangaSuperb 后端系统设计
 
-本文总结当前后端的整体结构、模块责任、关键数据表以及主要 API 流程，便于新成员快速理解项目架构。英文旧版已迁移至 `docs/system_design_EN.md`，后续如有改动请同步两份文档。
+本文总结当前后端的整体结构、模块责任、关键数据表以及主要 API 流程，便于新成员快速理解项目架构。英文见 `docs/system_design_EN.md`
 
 ---
 
@@ -157,4 +157,4 @@ graph TD
 
 - 前端如需同步展示队列进度，可直接使用 `/api/jobs/<id>` 的 `worker_snapshot` 和 `comic.workflow_stages`。
 - 添加新类型的任务时，记得更新 `swagger.py` 中 `JOB_CREATE_DOC` 和 `JOB_STATUS_DOC`。
-- 如需扩展导出格式，可在 `process_export_stage` 中增加新的文件生成逻辑，并写入数据库字段。
+
