@@ -1,0 +1,197 @@
+"""Character route behaviour tests."""
+from __future__ import annotations
+
+from typing import Any
+
+from flask import Flask
+
+from mangasuperb.extensions import db
+from models import Character, User
+
+
+def _create_user(username: str, email: str) -> User:
+    user = User(username=username, email=email, password_hash="hashed")
+    db.session.add(user)
+    db.session.flush()
+    return user
+
+
+def _make_character(
+    *,
+    user_id: int,
+    name: str,
+    description: str = "A mysterious wanderer.",
+    sex: str = "unspecified",
+    is_public: bool = False,
+    style_prompt: str | None = None,
+    optimized_description: str | None = None,
+) -> Character:
+    character = Character(
+        user_id=user_id,
+        name=name,
+        description=description,
+        sex=sex,
+        is_public=is_public,
+        style_prompt=style_prompt,
+        optimized_description=optimized_description,
+    )
+    db.session.add(character)
+    return character
+
+
+def test_list_characters_includes_user_and_public(app: Flask, auth_client, user: Any) -> None:
+    with app.app_context():
+        owner = db.session.get(User, user.id)
+        assert owner is not None
+
+        _make_character(user_id=owner.id, name="Private Hero", sex="female", is_public=False)
+        _make_character(user_id=owner.id, name="Public Hero", sex="non-binary", is_public=True)
+
+        public_owner = _create_user("public", "public@example.com")
+        _make_character(
+            user_id=public_owner.id,
+            name="Guardian Nova",
+            sex="male",
+            is_public=True,
+            style_prompt="Galactic armor with dramatic cape.",
+        )
+        _make_character(
+            user_id=public_owner.id,
+            name="Hidden Shade",
+            sex="other",
+            is_public=False,
+        )
+        db.session.commit()
+
+    response = auth_client.get("/api/characters")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert isinstance(payload, dict)
+    characters = payload.get("characters")
+    assert isinstance(characters, list)
+
+    names = {item["name"] for item in characters}
+    assert "Private Hero" in names, "Expected user-owned character in response"
+    assert "Guardian Nova" in names, "Expected public character in response"
+    assert "Hidden Shade" not in names, "Private characters from other users must stay hidden"
+    public_hero_entries = [item for item in characters if item["name"] == "Public Hero"]
+    assert len(public_hero_entries) == 1, "User-owned public characters should not be duplicated"
+
+    for item in characters:
+        assert "sex" in item
+        assert "is_public" in item
+
+
+def test_create_character_rejects_invalid_sex(auth_client) -> None:
+    response = auth_client.post(
+        "/api/characters",
+        json={
+            "name": "Rogue Agent",
+            "description": "Stealth specialist with adaptive goggles.",
+            "sex": "alien",
+        },
+    )
+    assert response.status_code == 400
+    data = response.get_json()
+    assert data["error"].startswith("Sex must be one of")
+
+
+def test_create_character_without_name(auth_client) -> None:
+    response = auth_client.post(
+        "/api/characters",
+        json={
+            "description": "A newly conceived character awaiting a proper name.",
+            "sex": "non-binary",
+        },
+    )
+    assert response.status_code == 201
+    payload = response.get_json()
+    character = payload["character"]
+    assert character["name"] == "unspecified"
+    assert character["description"].startswith("A newly conceived character")
+    assert character["sex"] == "non-binary"
+    assert character["image_status"] == "pending"
+
+
+def test_create_character_enqueues_image_job_without_references(
+    app: Flask,
+    auth_client,
+    user: Any,
+    dummy_queue,
+) -> None:
+    response = auth_client.post(
+        "/api/characters",
+        json={
+            "name": "Scout",
+            "description": "Keen-eyed pathfinder with sharp instincts.",
+            "sex": "female",
+        },
+    )
+    assert response.status_code == 201
+    payload = response.get_json()
+    assert payload["job_id"] == dummy_queue.jobs[-1].id
+    character_payload = payload["character"]
+    assert character_payload["image_status"] == "pending"
+    assert character_payload["image_job_id"] == payload["job_id"]
+    assert dummy_queue.jobs[-1].kwargs["reference_images"] == []
+
+    with app.app_context():
+        persisted = db.session.get(Character, character_payload["id"])
+        assert persisted is not None
+        assert persisted.image_status == "pending"
+        assert persisted.image_job_id == payload["job_id"]
+
+
+def test_rename_character_updates_only_name(app: Flask, auth_client, user: Any) -> None:
+    with app.app_context():
+        owner = db.session.get(User, user.id)
+        assert owner is not None
+        character = _make_character(user_id=owner.id, name="Old Alias")
+        db.session.commit()
+        character_id = character.id
+
+    response = auth_client.patch(
+        f"/api/characters/{character_id}/name",
+        json={"name": "New Alias"},
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["character"]["name"] == "New Alias"
+
+    with app.app_context():
+        persisted = db.session.get(Character, character_id)
+        assert persisted is not None
+        assert persisted.name == "New Alias"
+
+
+def test_rename_character_rejects_blank_name(app: Flask, auth_client, user: Any) -> None:
+    with app.app_context():
+        owner = db.session.get(User, user.id)
+        assert owner is not None
+        character = _make_character(user_id=owner.id, name="Nomad")
+        db.session.commit()
+        character_id = character.id
+
+    response = auth_client.patch(
+        f"/api/characters/{character_id}/name",
+        json={"name": "   "},
+    )
+    assert response.status_code == 400
+    data = response.get_json()
+    assert data["error"] == "Name is required"
+
+
+def test_rename_character_requires_owner(app: Flask, auth_client, user: Any) -> None:
+    with app.app_context():
+        other = _create_user("other", "other@example.com")
+        character = _make_character(user_id=other.id, name="Shadow")
+        db.session.commit()
+        character_id = character.id
+
+    response = auth_client.patch(
+        f"/api/characters/{character_id}/name",
+        json={"name": "Sunrise"},
+    )
+    assert response.status_code == 404
+    data = response.get_json()
+    assert data["error"] == "Character not found"

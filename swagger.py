@@ -1,0 +1,1491 @@
+"""
+Swagger configuration and endpoint documentation definitions.
+"""
+from flasgger import Swagger
+
+# Base template describing the API
+SWAGGER_TEMPLATE = {
+    'swagger': '2.0',
+    'info': {
+        'title': 'MangaSuperb API',
+        'description': (
+            'Backend endpoints for manga generation, job management, and authentication.'
+        ),
+        'version': '1.0.0',
+    },
+    'schemes': ['https', 'http'],
+    'basePath': '/',
+    'consumes': ['application/json'],
+    'produces': ['application/json'],
+    'tags': [
+        {'name': 'Auth', 'description': 'Session and credential management endpoints.'},
+        {'name': 'Characters', 'description': 'Character creation and asset generation.'},
+        {'name': 'Scripts', 'description': 'Author and manage story content.'},
+        {'name': 'Stories', 'description': 'Outline management and optimisation for comics.'},
+        {'name': 'Panels', 'description': 'Panel-level editing, layouts, and page rendering.'},
+        {'name': 'Comics', 'description': 'Comic metadata, style, export and publishing.'},
+        {'name': 'Jobs', 'description': 'Asynchronous generation workflows.'},
+    ],
+    'securityDefinitions': {
+        'sessionCookie': {
+            'type': 'apiKey',
+            'name': 'session',
+            'in': 'cookie',
+            'description': 'Flask session cookie established after successful login.',
+        }
+    },
+}
+
+
+def _rule_filter(_rule):
+    """Expose all routes in the generated spec."""
+    return True
+
+
+def _model_filter(_tag):
+    """Expose all models in the generated spec."""
+    return True
+
+
+# Flasgger configuration options
+SWAGGER_CONFIG = {
+    'headers': [],
+    'specs': [
+        {
+            'endpoint': 'apispec_1',
+            'route': '/api/docs.json',
+            'rule_filter': _rule_filter,
+            'model_filter': _model_filter,
+        }
+    ],
+    'static_url_path': '/flasgger_static',
+    'swagger_ui': True,
+    'specs_route': '/api/docs/',
+}
+
+
+AUTH_REGISTER_DOC = {
+    'tags': ['Auth'],
+    'summary': 'Register a new user',
+    'description': 'Creates a user account and starts a logged-in session.',
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['username', 'email', 'password'],
+                'properties': {
+                    'username': {
+                        'type': 'string',
+                        'minLength': 3,
+                        'maxLength': 80,
+                        'example': 'artist123',
+                    },
+                    'email': {
+                        'type': 'string',
+                        'format': 'email',
+                        'maxLength': 255,
+                        'example': 'artist123@example.com',
+                    },
+                    'password': {
+                        'type': 'string',
+                        'minLength': 8,
+                        'example': 'super-secure-pass',
+                    },
+                },
+            },
+        }
+    ],
+    'responses': {
+        '201': {
+            'description': 'User created',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'user': {
+                        'type': 'object',
+                        'properties': {
+                            'id': {'type': 'integer'},
+                            'username': {'type': 'string'},
+                            'email': {'type': 'string', 'format': 'email'},
+                            'avatar_index': {'type': 'integer', 'minimum': 1, 'maximum': 4},
+                            'created_at': {'type': 'string', 'format': 'date-time'},
+                        },
+                    }
+                },
+            },
+        },
+        '400': {
+            'description': 'Validation error',
+            'examples': {'application/json': {'error': 'Username is required'}},
+        },
+        '409': {
+            'description': 'Username or email already exists',
+            'examples': {'application/json': {'error': 'Username or email already exists'}},
+        },
+    },
+}
+
+
+AUTH_LOGIN_DOC = {
+    'tags': ['Auth'],
+    'summary': 'Log in an existing user',
+    'description': 'Authenticates credentials and returns session information.',
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['password'],
+                'anyOf': [
+                    {'required': ['email']},
+                    {'required': ['username']},
+                ],
+                'properties': {
+                    'email': {
+                        'type': 'string',
+                        'format': 'email',
+                        'example': 'artist123@example.com',
+                    },
+                    'username': {
+                        'type': 'string',
+                        'example': 'artist123',
+                    },
+                    'password': {
+                        'type': 'string',
+                        'minLength': 8,
+                        'example': 'super-secure-pass',
+                    },
+                },
+            },
+        }
+    ],
+    'responses': {
+        '200': AUTH_REGISTER_DOC['responses']['201'],
+        '400': {
+            'description': 'Validation error',
+            'examples': {'application/json': {'error': 'Email or username and password are required'}},
+        },
+        '401': {
+            'description': 'Invalid credentials',
+            'examples': {'application/json': {'error': 'Invalid credentials'}},
+        },
+    },
+}
+
+AUTH_UPDATE_USERNAME_DOC = {
+    'tags': ['Auth'],
+    'summary': 'Update username',
+    'description': 'Updates the username for the authenticated user.',
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['username'],
+                'properties': {
+                    'username': {
+                        'type': 'string',
+                        'minLength': 3,
+                        'maxLength': 80,
+                        'example': 'new-artist-handle',
+                    },
+                },
+            },
+        }
+    ],
+    'responses': {
+        '200': AUTH_REGISTER_DOC['responses']['201'],
+        '400': {
+            'description': 'Validation error',
+            'examples': {'application/json': {'error': 'New username must be different'}},
+        },
+        '401': {
+            'description': 'Unauthenticated',
+            'examples': {'application/json': {'error': 'Authentication required'}},
+        },
+        '409': {
+            'description': 'Username already exists',
+            'examples': {'application/json': {'error': 'Username already exists'}},
+        },
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+
+AUTH_UPDATE_EMAIL_DOC = {
+    'tags': ['Auth'],
+    'summary': 'Update email address',
+    'description': 'Updates the email address for the authenticated user.',
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['email'],
+                'properties': {
+                    'email': {
+                        'type': 'string',
+                        'format': 'email',
+                        'maxLength': 255,
+                        'example': 'creator@example.com',
+                    },
+                },
+            },
+        }
+    ],
+    'responses': {
+        '200': AUTH_REGISTER_DOC['responses']['201'],
+        '400': {
+            'description': 'Validation error',
+            'examples': {'application/json': {'error': 'New email must be different'}},
+        },
+        '401': {
+            'description': 'Unauthenticated',
+            'examples': {'application/json': {'error': 'Authentication required'}},
+        },
+        '409': {
+            'description': 'Email already exists',
+            'examples': {'application/json': {'error': 'Email already exists'}},
+        },
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+
+AUTH_UPDATE_PASSWORD_DOC = {
+    'tags': ['Auth'],
+    'summary': 'Update password',
+    'description': 'Changes the password for the authenticated user.',
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['current_password', 'new_password'],
+                'properties': {
+                    'current_password': {
+                        'type': 'string',
+                        'example': 'old-pass-123',
+                    },
+                    'new_password': {
+                        'type': 'string',
+                        'minLength': 8,
+                        'example': 'new-super-secure-pass',
+                    },
+                },
+            },
+        }
+    ],
+    'responses': {
+        '200': {
+            'description': 'Password updated',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'message': {'type': 'string', 'example': 'Password updated'},
+                },
+            },
+        },
+        '400': {
+            'description': 'Validation error',
+            'examples': {'application/json': {'error': 'Current password is incorrect'}},
+        },
+        '401': {
+            'description': 'Unauthenticated',
+            'examples': {'application/json': {'error': 'Authentication required'}},
+        },
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+
+AUTH_ME_DOC = {
+    'tags': ['Auth'],
+    'summary': 'Fetch the current session',
+    'description': 'Returns the authenticated user, or null when not logged in.',
+    'responses': {
+        '200': {
+            'description': 'User session info',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'user': {
+                        'anyOf': [
+                            AUTH_REGISTER_DOC['responses']['201']['schema']['properties']['user'],
+                            {'type': 'null'},
+                        ]
+                    }
+                },
+            },
+        }
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+
+AUTH_LOGOUT_DOC = {
+    'tags': ['Auth'],
+    'summary': 'Log out the current user',
+    'description': 'Clears the active session.',
+    'responses': {
+        '200': {
+            'description': 'Logout succeeded',
+            'examples': {'application/json': {'message': 'Logged out'}},
+        },
+        '401': {
+            'description': 'No active session',
+            'examples': {'application/json': {'error': 'Authentication required'}},
+        },
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+
+def register_swagger(app):
+    """Attach Swagger UI and JSON spec endpoints to the Flask app."""
+    return Swagger(app, template=SWAGGER_TEMPLATE, config=SWAGGER_CONFIG)
+
+
+CHARACTER_CREATE_DOC = {
+    'tags': ['Characters'],
+    'summary': 'Create a character',
+    'description': (
+        'Creates a character profile. When reference images are provided, the request enqueues a background job '
+        'to generate concept art using the optimized description and references. Optimisation uses the backend '
+        'Gemini configuration; clients do not supply API keys.'
+    ),
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['description'],
+                'properties': {
+                    'name': {
+                        'type': 'string',
+                        'example': 'Aiko the Mechanist',
+                        'default': 'unspecified',
+                        'description': 'Optional. If omitted the backend stores `unspecified` until the user renames it.',
+                    },
+                    'description': {
+                        'type': 'string',
+                        'example': 'A brilliant teen engineer with mechanized arms and neon tattoos.'
+                    },
+                    'sex': {
+                        'type': 'string',
+                        'enum': ['male', 'female', 'non-binary', 'other', 'unspecified'],
+                        'default': 'unspecified',
+                    },
+                    'is_public': {
+                        'type': 'boolean',
+                        'default': False,
+                        'description': 'When true the character is visible to other users.'
+                    },
+                    'optimize': {'type': 'boolean', 'default': False},
+                    'style_prompt': {'type': 'string', 'example': 'Cyberpunk manga aesthetic with bold line work.'},
+                    'reference_images': {
+                        'type': 'array',
+                        'items': {'type': 'string', 'example': 'data:image/png;base64,...'},
+                        'description': 'Base64-encoded reference images to guide the generator.'
+                    },
+                },
+            },
+        }
+    ],
+    'responses': {
+        '201': {
+            'description': 'Character created',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'character': {
+                        'type': 'object',
+                        'properties': {
+                            'id': {'type': 'integer'},
+                            'user_id': {'type': 'integer'},
+                            'name': {'type': 'string'},
+                            'description': {'type': 'string'},
+                            'sex': {'type': 'string'},
+                            'is_public': {'type': 'boolean'},
+                            'style_prompt': {'type': ['string', 'null']},
+                            'optimized_description': {'type': ['string', 'null']},
+                            'image_status': {'type': 'string'},
+                            'image_url': {'type': ['string', 'null']},
+                            'image_job_id': {'type': ['string', 'null']},
+                            'image_error': {'type': ['string', 'null']},
+                            'created_at': {'type': ['string', 'null'], 'format': 'date-time'},
+                            'updated_at': {'type': ['string', 'null'], 'format': 'date-time'},
+                        },
+                    },
+                    'job_id': {'type': ['string', 'null']}
+                },
+            },
+        },
+        '400': {
+            'description': 'Validation error',
+            'examples': {'application/json': {'error': 'Name is required'}},
+        },
+        '502': {
+            'description': 'Optimization failed',
+            'examples': {'application/json': {'error': 'Failed to optimize character description'}},
+        },
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+CHARACTER_LIST_DOC = {
+    'tags': ['Characters'],
+    'summary': 'List characters',
+    'description': 'Returns characters owned by the authenticated user plus any that are marked public.',
+    'responses': {
+        '200': {
+            'description': 'List of characters',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'characters': {
+                        'type': 'array',
+                        'items': CHARACTER_CREATE_DOC['responses']['201']['schema']['properties']['character'],
+                    }
+                },
+            },
+        },
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+CHARACTER_DETAIL_DOC = {
+    'tags': ['Characters'],
+    'summary': 'Get character details',
+    'description': 'Returns a single character created by the authenticated user.',
+    'parameters': [
+        {
+            'name': 'character_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        }
+    ],
+    'responses': {
+        '200': {
+            'description': 'Character payload',
+            'schema': CHARACTER_CREATE_DOC['responses']['201']['schema']['properties']['character'],
+        },
+        '404': {'description': 'Character not found'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+CHARACTER_RENAME_DOC = {
+    'tags': ['Characters'],
+    'summary': 'Rename a character',
+    'description': 'Updates only the name of a character owned by the authenticated user.',
+    'parameters': [
+        {
+            'name': 'character_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        },
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['name'],
+                'properties': {
+                    'name': {
+                        'type': 'string',
+                        'maxLength': 100,
+                        'example': 'Aiko the Mechanist',
+                        'description': 'New character name (1-100 characters).',
+                    }
+                },
+            },
+        },
+    ],
+    'responses': {
+        '200': {
+            'description': 'Updated character payload',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'character': CHARACTER_CREATE_DOC['responses']['201']['schema']['properties']['character'],
+                },
+            },
+        },
+        '400': {
+            'description': 'Validation error',
+            'examples': {
+                'application/json': {'error': 'Name is required'},
+            },
+        },
+        '404': {'description': 'Character not found'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+SCRIPT_CREATE_DOC = {
+    'tags': ['Scripts'],
+    'summary': 'Create a script',
+    'description': 'Stores story content for later editing or comic generation.',
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['title', 'content'],
+                'properties': {
+                    'title': {'type': 'string', 'example': 'Episode 1: Awakening'},
+                    'content': {'type': 'string', 'example': 'Narrative text or JSON structure of the story.'},
+                },
+            },
+        }
+    ],
+    'responses': {
+        '201': {
+            'description': 'Script created',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'script': {
+                        'type': 'object',
+                        'properties': {
+                            'id': {'type': 'integer'},
+                            'user_id': {'type': 'integer'},
+                            'title': {'type': 'string'},
+                            'content': {'type': 'string'},
+                            'created_at': {'type': ['string', 'null'], 'format': 'date-time'},
+                            'updated_at': {'type': ['string', 'null'], 'format': 'date-time'},
+                        },
+                    }
+                },
+            },
+        },
+        '400': {'description': 'Validation error'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+SCRIPT_LIST_DOC = {
+    'tags': ['Scripts'],
+    'summary': 'List scripts',
+    'description': 'Returns recent scripts authored by the authenticated user.',
+    'parameters': [
+        {
+            'name': 'limit',
+            'in': 'query',
+            'type': 'integer',
+            'default': 50,
+            'description': 'Maximum number of scripts to return (1-100).'
+        }
+    ],
+    'responses': {
+        '200': {
+            'description': 'List of scripts',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'count': {'type': 'integer'},
+                    'scripts': {
+                        'type': 'array',
+                        'items': SCRIPT_CREATE_DOC['responses']['201']['schema']['properties']['script'],
+                    },
+                },
+            },
+        }
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+SCRIPT_DETAIL_DOC = {
+    'tags': ['Scripts'],
+    'summary': 'Get script details',
+    'description': 'Fetches a script by id for the authenticated user.',
+    'parameters': [
+        {
+            'name': 'script_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        }
+    ],
+    'responses': {
+        '200': {
+            'description': 'Script payload',
+            'schema': SCRIPT_CREATE_DOC['responses']['201']['schema']['properties']['script'],
+        },
+        '404': {'description': 'Script not found'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+COMIC_CREATE_DOC = {
+    'tags': ['Comics'],
+    'summary': 'Create a comic with script',
+    'description': 'Creates a comic record and a paired script using the provided story, style, and aspect ratio.',
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['title', 'story', 'style', 'aspect_ratio'],
+                'properties': {
+                    'title': {'type': 'string', 'example': 'Neon Knights Issue #1'},
+                    'story': {'type': 'string', 'example': 'Full story narrative or JSON payload.'},
+                    'style': {'type': 'string', 'example': 'Synthwave neon with bold black line art.'},
+                    'aspect_ratio': {
+                        'type': 'string',
+                        'enum': ['16:9', '9:16', '1:1'],
+                        'example': '16:9'
+                    },
+                },
+            },
+        }
+    ],
+    'responses': {
+        '201': {
+            'description': 'Comic created',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'comic': {
+                        'type': 'object',
+                        'properties': {
+                            'id': {'type': 'integer'},
+                            'title': {'type': 'string'},
+                            'status': {'type': 'string'},
+                            'style_description': {'type': 'string'},
+                            'aspect_ratio': {'type': 'string'},
+                            'script_id': {'type': 'integer'},
+                            'created_at': {'type': ['string', 'null'], 'format': 'date-time'},
+                            'like_count': {'type': 'integer', 'example': 0},
+                            'user_liked': {'type': 'boolean', 'example': False},
+                        },
+                    },
+                    'script': SCRIPT_CREATE_DOC['responses']['201']['schema']['properties']['script'],
+                },
+            },
+        },
+        '400': {'description': 'Validation error'},
+        '500': {'description': 'Creation failed'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+COMIC_LIST_DOC = {
+    'tags': ['Comics'],
+    'summary': 'List comics',
+    'description': 'Returns recent comics owned by the authenticated user.',
+    'responses': {
+        '200': {
+            'description': 'List of comics',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'count': {'type': 'integer'},
+                    'comics': {
+                        'type': 'array',
+                        'items': COMIC_CREATE_DOC['responses']['201']['schema']['properties']['comic'],
+                    },
+                },
+            },
+        },
+        '403': {'description': 'Forbidden when requesting another user'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+COMIC_DETAIL_DOC = {
+    'tags': ['Comics'],
+    'summary': 'Get comic details',
+    'description': 'Returns a specific comic including generated pages when available.',
+    'parameters': [
+        {
+            'name': 'comic_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        }
+    ],
+    'responses': {
+        '200': {
+            'description': 'Comic details',
+            'schema': COMIC_CREATE_DOC['responses']['201']['schema']['properties']['comic'],
+        },
+        '404': {'description': 'Comic not found'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+COMIC_IMAGES_DOC = {
+    'tags': ['Comics'],
+    'summary': 'Get comic page image URLs',
+    'description': 'Returns the cover image URL and the list of rendered page image URLs for a comic.',
+    'parameters': [
+        {
+            'name': 'comic_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        }
+    ],
+    'responses': {
+        '200': {
+            'description': 'Image URLs for the comic',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'comic_id': {'type': 'integer'},
+                    'cover_image_url': {'type': ['string', 'null'], 'format': 'uri'},
+                    'page_count': {'type': 'integer'},
+                    'pages': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'page_id': {'type': 'integer'},
+                                'page_number': {'type': 'integer'},
+                                'image_url': {'type': ['string', 'null'], 'format': 'uri'},
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        '404': {'description': 'Comic not found'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+COMIC_PUBLISH_DOC = {
+    'tags': ['Comics'],
+    'summary': 'Publish comic (export assets)',
+    'description': (
+        'Generates cover art (if absent), exports PDF/ZIP bundles, and optionally marks the comic as public.'
+    ),
+    'parameters': [
+        {
+            'name': 'comic_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        },
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': False,
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'make_public': {
+                        'type': 'boolean',
+                        'default': True,
+                        'description': 'Publish to the public listing after export completes.',
+                    },
+                },
+            },
+        },
+    ],
+    'responses': {
+        '202': {
+            'description': 'Export workflow accepted',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'comic': COMIC_CREATE_DOC['responses']['201']['schema']['properties']['comic'],
+                    'stage_jobs': {
+                        'type': 'object',
+                        'properties': {
+                            'cover_job_id': {'type': 'string'},
+                            'export_job_id': {'type': 'string'},
+                            'publish_job_id': {'type': 'string'},
+                        },
+                    },
+                },
+            },
+        },
+        '404': {'description': 'Comic not found'},
+        '409': {'description': 'Render stage not completed'},
+        '503': {'description': 'Background queue not configured'},
+        '500': {'description': 'Failed to enqueue publish workflow'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+
+COMIC_LIKE_DOC = {
+    'tags': ['Comics'],
+    'summary': 'Like a comic',
+    'description': 'Adds a like from the authenticated user. Idempotent.',
+    'parameters': [
+        {
+            'name': 'comic_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        }
+    ],
+    'responses': {
+        '200': {
+            'description': 'Like recorded',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'like_count': {'type': 'integer'},
+                    'comic': COMIC_CREATE_DOC['responses']['201']['schema']['properties']['comic'],
+                },
+            },
+        },
+        '404': {'description': 'Comic not found'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+
+COMIC_UNLIKE_DOC = {
+    'tags': ['Comics'],
+    'summary': 'Remove like from comic',
+    'description': 'Removes the authenticated user\'s like if it exists.',
+    'parameters': [
+        {
+            'name': 'comic_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        }
+    ],
+    'responses': {
+        '200': {
+            'description': 'Like removed',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'like_count': {'type': 'integer'},
+                    'comic': COMIC_CREATE_DOC['responses']['201']['schema']['properties']['comic'],
+                },
+            },
+        },
+        '404': {'description': 'Comic not found'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+
+COMIC_PUBLIC_LIST_DOC = {
+    'tags': ['Comics'],
+    'summary': 'List public comics',
+    'description': 'Returns recently published comics sorted by like count and publication time.',
+    'responses': {
+        '200': {
+            'description': 'Public comics listing',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'count': {'type': 'integer'},
+                    'comics': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'object',
+                            'properties': {
+                                'id': {'type': 'integer'},
+                                'title': {'type': 'string'},
+                                'cover_image_url': {'type': ['string', 'null']},
+                                'pdf_url': {'type': ['string', 'null']},
+                                'zip_url': {'type': ['string', 'null']},
+                            'published_at': {'type': ['string', 'null'], 'format': 'date-time'},
+                                'style_description': {'type': 'string'},
+                                'aspect_ratio': {'type': 'string'},
+                                'like_count': {'type': 'integer', 'example': 12},
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+}
+
+
+COMIC_PUBLIC_DETAIL_DOC = {
+    'tags': ['Comics'],
+    'summary': 'Get public comic detail',
+    'description': 'Returns limited detail for a public comic.',
+    'parameters': [
+        {
+            'name': 'comic_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        }
+    ],
+    'responses': {
+        '200': {
+            'description': 'Public comic detail',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'id': {'type': 'integer'},
+                    'title': {'type': 'string'},
+                    'cover_image_url': {'type': ['string', 'null']},
+                    'pdf_url': {'type': ['string', 'null']},
+                    'zip_url': {'type': ['string', 'null']},
+                    'published_at': {'type': ['string', 'null'], 'format': 'date-time'},
+                    'style_description': {'type': 'string'},
+                    'aspect_ratio': {'type': 'string'},
+                    'like_count': {'type': 'integer', 'example': 12},
+                },
+            },
+        },
+        '404': {'description': 'Comic not found or not public'},
+    },
+}
+
+
+PANEL_UPDATE_DOC = {
+    'tags': ['Panels'],
+    'summary': 'Update panel metadata',
+    'description': 'Modify panel description, dialogue, style notes, or page/panel numbering.',
+    'parameters': [
+        {
+            'name': 'panel_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        },
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'description': {'type': 'string'},
+                    'dialogue': {'type': 'string'},
+                    'camera_notes': {'type': 'string'},
+                    'style_notes': {'type': 'string'},
+                    'status': {'type': 'string', 'example': 'draft'},
+                    'page_number': {'type': ['integer', 'null']},
+                    'panel_number': {'type': ['integer', 'null']},
+                },
+            },
+        },
+    ],
+    'responses': {
+        '200': {
+            'description': 'Panel updated',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'panel': {
+                        'type': 'object',
+                        'properties': {
+                            'id': {'type': 'integer'},
+                            'comic_id': {'type': 'integer'},
+                            'outline_section_id': {'type': ['integer', 'null']},
+                            'sequence_index': {'type': 'integer'},
+                            'page_number': {'type': ['integer', 'null']},
+                            'panel_number': {'type': ['integer', 'null']},
+                            'description': {'type': 'string'},
+                            'dialogue': {'type': ['string', 'null']},
+                            'camera_notes': {'type': ['string', 'null']},
+                            'style_notes': {'type': ['string', 'null']},
+                            'status': {'type': 'string'},
+                        },
+                    },
+                    'comic': COMIC_CREATE_DOC['responses']['201']['schema']['properties']['comic'],
+                },
+            },
+        },
+        '400': {'description': 'Validation error'},
+        '404': {'description': 'Panel not found'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+
+PANEL_LAYOUT_DOC = {
+    'tags': ['Panels'],
+    'summary': 'Select or update page layout',
+    'description': 'Assign panel order and layout details for a specific comic page.',
+    'parameters': [
+        {
+            'name': 'comic_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        },
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['page_number'],
+                'properties': {
+                    'page_number': {'type': 'integer', 'minimum': 1},
+                    'layout_key': {'type': 'string', 'example': 'grid-2x2'},
+                    'notes': {'type': ['string', 'null']},
+                    'panel_order': {
+                        'type': 'array',
+                        'items': {'type': 'integer'},
+                        'description': 'Optional explicit ordering of panel IDs for the page.',
+                    },
+                },
+            },
+        },
+    ],
+    'responses': {
+        '200': {
+            'description': 'Layout saved',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'layout': {
+                        'type': 'object',
+                        'properties': {
+                            'id': {'type': 'integer'},
+                            'comic_id': {'type': 'integer'},
+                            'page_number': {'type': 'integer'},
+                            'layout_key': {'type': 'string'},
+                            'notes': {'type': ['string', 'null']},
+                            'status': {'type': 'string'},
+                            'selected_at': {'type': ['string', 'null'], 'format': 'date-time'},
+                            'panel_assignments': {
+                                'type': 'array',
+                                'items': {
+                                    'type': 'object',
+                                    'properties': {
+                                        'id': {'type': 'integer'},
+                                        'panel_shot_id': {'type': 'integer'},
+                                        'position': {'type': 'integer'},
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    'comic': COMIC_CREATE_DOC['responses']['201']['schema']['properties']['comic'],
+                },
+            },
+        },
+        '400': {'description': 'Validation error or missing panels'},
+        '404': {'description': 'Comic not found'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+
+PANEL_RENDER_DOC = {
+    'tags': ['Panels'],
+    'summary': 'Render a specific comic page',
+    'description': 'Queues an image generation job for the specified comic page.',
+    'parameters': [
+        {
+            'name': 'comic_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        },
+        {
+            'name': 'page_number',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        },
+    ],
+    'responses': {
+        '202': {
+            'description': 'Render job accepted',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'job_id': {'type': 'string'},
+                    'comic': COMIC_CREATE_DOC['responses']['201']['schema']['properties']['comic'],
+                },
+            },
+        },
+        '400': {'description': 'Validation error'},
+        '404': {'description': 'Comic not found'},
+        '503': {'description': 'Background queue not configured'},
+        '500': {'description': 'Failed to enqueue render job'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+
+STORY_GET_DOC = {
+    'tags': ['Stories'],
+    'summary': 'Get story outline',
+    'description': 'Returns the comic payload including outline sections, panel shots, and layouts.',
+    'parameters': [
+        {
+            'name': 'comic_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        }
+    ],
+    'responses': {
+        '200': {
+            'description': 'Comic payload',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'comic': COMIC_CREATE_DOC['responses']['201']['schema']['properties']['comic'],
+                },
+            },
+        },
+        '404': {'description': 'Comic not found'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+
+STORY_UPSERT_DOC = {
+    'tags': ['Stories'],
+    'summary': 'Replace story outline',
+    'description': (
+        'Replaces outline sections for the specified comic. Optionally rebinds character assignments.'
+    ),
+    'parameters': [
+        {
+            'name': 'comic_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        },
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['sections'],
+                'properties': {
+                    'sections': {
+                        'type': 'array',
+                        'minItems': 1,
+                        'items': {
+                            'type': 'object',
+                            'required': ['summary'],
+                            'properties': {
+                                'title': {'type': ['string', 'null']},
+                                'summary': {'type': 'string'},
+                            },
+                        },
+                    },
+                    'characters': {
+                        'type': 'array',
+                        'items': {'type': 'object'},
+                        'description': 'Optional character assignment payloads matching POST /api/characters.',
+                    },
+                    'character_ids': {
+                        'type': 'array',
+                        'items': {'type': 'integer'},
+                        'description': 'Alternate shorthand to assign characters by id.',
+                    },
+                },
+            },
+        },
+    ],
+    'responses': {
+        '200': {
+            'description': 'Story outline replaced',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'comic': COMIC_CREATE_DOC['responses']['201']['schema']['properties']['comic'],
+                },
+            },
+        },
+        '400': {'description': 'Validation error'},
+        '404': {'description': 'Comic not found'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+
+STORY_OPTIMIZE_DOC = {
+    'tags': ['Stories'],
+    'summary': 'Optimise story outline',
+    'description': 'Queues outline/shots optimisation jobs for the specified comic.',
+    'parameters': [
+        {
+            'name': 'comic_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        }
+    ],
+    'responses': {
+        '202': {
+            'description': 'Optimisation jobs enqueued',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'stage_jobs': {
+                        'type': 'object',
+                        'properties': {
+                            'outline_job_id': {'type': 'string'},
+                            'shot_job_id': {'type': 'string'},
+                        },
+                    },
+                    'comic': COMIC_CREATE_DOC['responses']['201']['schema']['properties']['comic'],
+                },
+            },
+        },
+        '404': {'description': 'Comic not found'},
+        '503': {'description': 'Background queue not configured'},
+        '500': {'description': 'Failed to enqueue optimisation'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+JOB_CREATE_DOC = {
+    'tags': ['Jobs'],
+    'summary': 'Create background job',
+    'description': (
+        'Dispatches asynchronous work such as comic generation, story optimisation, character optimisation, or page '
+        'rendering. Gemini credentials live in server configuration; clients supply only task parameters.\n\n'
+        'Available job types:\n'
+        '- `comic_generation` (default): requires `prompt`; optional `style`, `aspect_ratio`, and `characters`.\n'
+        '- `story_optimization`: requires `comic_id`; re-runs Gemini script polish for an existing comic.\n'
+        '- `character_optimization`: requires `character_id`; optional `description` override.\n'
+        '- `page_render`: requires `comic_id` and `page_number`; re-renders a single comic page.'
+    ),
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'job_type': {
+                        'type': 'string',
+                        'enum': [
+                            'comic_generation',
+                            'story_optimization',
+                            'character_optimization',
+                            'page_render',
+                        ],
+                        'default': 'comic_generation',
+                        'description': 'Selects the queue workflow to run. See description for required fields per type.',
+                    },
+                    'prompt': {
+                        'type': 'string',
+                        'example': 'Two siblings discover a hidden mech in the forest.',
+                        'description': 'Required when `job_type` is `comic_generation`; ignored for other job types.',
+                    },
+                    'style': {
+                        'type': 'string',
+                        'example': 'High-contrast ink with splashy gradients.',
+                        'description': 'Optional style direction for `comic_generation`. Falls back to script defaults.',
+                    },
+                    'aspect_ratio': {
+                        'type': 'string',
+                        'enum': ['16:9', '9:16', '1:1'],
+                        'example': '16:9',
+                        'description': 'Optional for `comic_generation`; validated against supported canvas sizes.',
+                    },
+                    'characters': {
+                        'type': 'array',
+                        'items': {'type': 'object'},
+                        'description': (
+                            'Optional for `comic_generation`. Supply character assignments matching POST /api/characters '
+                            'payloads to blend roster context into the generated script.'
+                        ),
+                    },
+                    'comic_id': {
+                        'type': 'integer',
+                        'example': 42,
+                        'description': 'Required for `story_optimization` and `page_render`; must reference an owned comic.',
+                    },
+                    'page_number': {
+                        'type': 'integer',
+                        'example': 1,
+                        'description': 'Required for `page_render`; 1-indexed page number to regenerate.',
+                    },
+                    'character_id': {
+                        'type': 'integer',
+                        'example': 7,
+                        'description': 'Required for `character_optimization`; must reference an owned character.',
+                    },
+                    'description': {
+                        'type': 'string',
+                        'description': (
+                            'Optional override copy when optimising a character. When omitted, the stored description is used.'
+                        ),
+                    },
+                },
+                'oneOf': [
+                    {
+                        'description': 'Comic generation (default)',
+                        'required': ['prompt'],
+                        'properties': {'job_type': {'enum': ['comic_generation']}},
+                    },
+                    {
+                        'description': 'Story optimisation',
+                        'required': ['comic_id'],
+                        'properties': {'job_type': {'enum': ['story_optimization']}},
+                    },
+                    {
+                        'description': 'Character optimisation',
+                        'required': ['character_id'],
+                        'properties': {'job_type': {'enum': ['character_optimization']}},
+                    },
+                    {
+                        'description': 'Page render',
+                        'required': ['comic_id', 'page_number'],
+                        'properties': {'job_type': {'enum': ['page_render']}},
+                    },
+                ],
+            },
+        }
+    ],
+    'responses': {
+        '201': {
+            'description': 'Job created',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'job_id': {'type': 'string'},
+                    'comic_id': {'type': 'integer'},
+                    'script_id': {'type': 'integer'},
+                    'status': {'type': 'string'},
+                    'script': SCRIPT_CREATE_DOC['responses']['201']['schema']['properties']['script'],
+                },
+            },
+        },
+        '202': {
+            'description': 'Job accepted for processing',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'job_id': {'type': 'string'},
+                    'character_id': {'type': 'integer'},
+                    'comic': COMIC_CREATE_DOC['responses']['201']['schema']['properties']['comic'],
+                    'stage_jobs': {
+                        'type': 'object',
+                        'properties': {
+                            'outline_job_id': {'type': 'string'},
+                            'shot_job_id': {'type': 'string'},
+                        },
+                    },
+                },
+            },
+        },
+        '400': {'description': 'Validation error'},
+        '404': {'description': 'Target resource not found'},
+        '503': {'description': 'Background queue not available'},
+        '500': {'description': 'Unexpected failure'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+JOB_STATUS_DOC = {
+    'tags': ['Jobs'],
+    'summary': 'Get job status',
+    'description': 'Fetches current job status and associated comic or character payload.',
+    'parameters': [
+        {
+            'name': 'job_id',
+            'in': 'path',
+            'required': True,
+            'type': 'string',
+        }
+    ],
+    'responses': {
+        '200': {
+            'description': 'Job status payload',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'job_id': {'type': 'string'},
+                    'rq_status': {'type': 'string'},
+                    'comic': COMIC_CREATE_DOC['responses']['201']['schema']['properties']['comic'],
+                    'character': {
+                        'anyOf': [
+                            CHARACTER_CREATE_DOC['responses']['201']['schema']['properties']['character'],
+                            {'type': 'null'}
+                        ]
+                    },
+                    'worker_snapshot': {
+                        'type': 'object',
+                        'properties': {
+                            'status': {'type': 'string', 'example': 'idle'},
+                            'active': {'type': 'integer', 'example': 0},
+                            'workers': {
+                                'type': 'array',
+                                'items': {'type': 'string'},
+                                'example': ['manga-worker-1234'],
+                            },
+                            'queued': {'type': 'integer', 'example': 3},
+                            'deferred': {'type': 'integer', 'example': 2},
+                            'scheduled': {'type': 'integer', 'example': 0},
+                            'failed': {'type': 'integer', 'example': 0},
+                        },
+                    },
+                    'warning': {
+                        'type': 'string',
+                        'example': 'No active RQ workers detected; job will remain queued.',
+                    },
+                },
+            },
+        },
+        '404': {'description': 'Job not found'},
+    },
+}
+
+
+__all__ = [
+    'register_swagger',
+    'AUTH_REGISTER_DOC',
+    'AUTH_LOGIN_DOC',
+    'AUTH_LOGOUT_DOC',
+    'AUTH_ME_DOC',
+    'AUTH_UPDATE_USERNAME_DOC',
+    'AUTH_UPDATE_EMAIL_DOC',
+    'AUTH_UPDATE_PASSWORD_DOC',
+    'CHARACTER_CREATE_DOC',
+    'CHARACTER_LIST_DOC',
+    'CHARACTER_RENAME_DOC',
+    'SCRIPT_CREATE_DOC',
+    'SCRIPT_LIST_DOC',
+    'SCRIPT_DETAIL_DOC',
+    'COMIC_CREATE_DOC',
+    'COMIC_LIST_DOC',
+    'COMIC_DETAIL_DOC',
+    'COMIC_IMAGES_DOC',
+    'JOB_CREATE_DOC',
+    'JOB_STATUS_DOC',
+    'CHARACTER_DETAIL_DOC',
+    'COMIC_PUBLISH_DOC',
+    'COMIC_LIKE_DOC',
+    'COMIC_UNLIKE_DOC',
+    'PANEL_UPDATE_DOC',
+    'PANEL_LAYOUT_DOC',
+    'PANEL_RENDER_DOC',
+    'STORY_GET_DOC',
+    'STORY_UPSERT_DOC',
+    'STORY_OPTIMIZE_DOC',
+    'COMIC_PUBLIC_LIST_DOC',
+    'COMIC_PUBLIC_DETAIL_DOC',
+]
