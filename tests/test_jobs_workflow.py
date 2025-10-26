@@ -437,3 +437,36 @@ def test_render_prompt_includes_character_roster(
         assert "Character roster:" in prompts[0]
         assert "Aya" in prompts[0]
         assert "Protagonist" in prompts[0]
+
+
+def test_shot_stage_recovers_dialogue_from_summary(app, comic: Comic):
+    with app.app_context():
+        comic_row = db.session.get(Comic, comic.id)
+        jobs.bootstrap_comic_workflow(comic_row)
+        db.session.commit()
+
+        script = db.session.get(Script, comic.script_id)
+        script.content = json.dumps({})
+
+        ComicOutlineSection.query.filter_by(comic_id=comic.id).delete()
+        db.session.flush()
+
+        section = ComicOutlineSection(
+            comic_id=comic.id,
+            order_index=1,
+            title="Confrontation",
+            summary="秦飞扬滚落台阶。“姓马的，我诅咒你不得好死！”他怒吼。",
+        )
+        db.session.add(section)
+        db.session.commit()
+
+        result = jobs.process_shot_stage(comic.id)
+        assert result["status"] == "completed"
+
+        panels = (
+            ComicPanelShot.query.filter_by(comic_id=comic.id)
+            .order_by(ComicPanelShot.sequence_index)
+            .all()
+        )
+        assert len(panels) == 1
+        assert panels[0].dialogue == "姓马的，我诅咒你不得好死！"

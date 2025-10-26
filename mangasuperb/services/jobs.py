@@ -63,6 +63,34 @@ def _current_job_id() -> str:
     return job.id if job else "inline"
 
 
+def _extract_dialogue(summary: str | None) -> str | None:
+    if not summary:
+        return None
+
+    for line in summary.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.lower().startswith("dialogue:"):
+            candidate = stripped.split(":", 1)[1].strip()
+            if candidate:
+                return candidate
+
+    quote_pairs = [("“", "”"), ('"', '"'), ("'", "'")]
+    for opener, closer in quote_pairs:
+        start = summary.find(opener)
+        while start != -1:
+            end = summary.find(closer, start + len(opener))
+            if end == -1:
+                break
+            candidate = summary[start + len(opener) : end].strip()
+            if candidate:
+                return candidate
+            start = summary.find(opener, end + len(closer))
+
+    return None
+
+
 def _config_value(key: str, default: str) -> str:
     try:
         return current_app.config.get(key, default)  # type: ignore[attr-defined]
@@ -188,6 +216,8 @@ def build_page_render_prompt(
         "Requirements:\n"
         "- Maintain stylistic continuity with earlier pages\n"
         "- Leave space for lettering and speech balloons\n"
+        "- Use English for any text in the speech balloons\n"
+        "- Translate all dialogue to English before rendering any text\n"
         "- Use high-contrast black and white manga illustration"
     )
 
@@ -688,7 +718,10 @@ def process_shot_stage(comic_id: int) -> dict[str, Any]:
                     or panel_info.get("summary")
                     or section.summary
                 )
-                dialogue = panel_info.get("dialogue") if isinstance(panel_info, dict) else None
+                dialogue_raw = panel_info.get("dialogue") if isinstance(panel_info, dict) else None
+                if isinstance(dialogue_raw, str):
+                    dialogue_raw = dialogue_raw.strip() or None
+                dialogue_text = dialogue_raw or _extract_dialogue(section.summary)
                 camera_notes = panel_info.get("camera") or panel_info.get("camera_notes")
                 style_notes = (
                     panel_info.get("visual_notes")
@@ -701,7 +734,7 @@ def process_shot_stage(comic_id: int) -> dict[str, Any]:
                     outline_section_id=section.id,
                     sequence_index=idx,
                     description=(description or section.summary or "").strip(),
-                    dialogue=(dialogue.strip() if isinstance(dialogue, str) else dialogue),
+                    dialogue=dialogue_text,
                     camera_notes=(
                         camera_notes.strip() if isinstance(camera_notes, str) else camera_notes
                     ),
