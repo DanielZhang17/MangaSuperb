@@ -1,34 +1,21 @@
-/* eslint-disable simple-import-sort/imports */
+ 
 import { useAtom } from 'jotai'
 import { ChevronDown, ChevronUp, Image as ImageIcon, Plus } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 
 import ComicsApi from '@/apis/comics'
-import JobsApi from '@/apis/jobs'
 import PanelsApi from '@/apis/panels'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { useCreateComic } from '@/hooks/use-comics'
+import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 
-import {
-  aspectRatioAtom,
-  activeTabAtom,
-  currentComicDetailAtom,
-  currentComicIdAtom,
-  previousComicDetailAtom,
-  fullStoryAtom,
-  mangaTitleAtom,
-  selectedCharacterIdsAtom,
-  selectedCharacterRolesAtom,
-  storyStepAtom,
-  styleAtom,
-} from '../atoms'
-/* eslint-enable simple-import-sort/imports */
+import { activeTabAtom, currentComicDetailAtom, currentComicIdAtom, storyStepAtom, styleAtom } from '../atoms'
 
 interface Scene {
   // Use page_number as id for selection consistency
@@ -37,20 +24,9 @@ interface Scene {
   pageId?: number
 }
 
-interface Character {
-  id: number
-  name: string
-}
-
 const INITIAL_SCENES: Scene[] = [
   { id: 1, label: '01' },
   { id: 2, label: '02' },
-]
-
-const CHARACTERS: Character[] = [
-  { id: 1, name: '秦飞扬' },
-  { id: 2, name: '马红梅' },
-  { id: 3, name: '三殿主' },
 ]
 
 const FONT_OPTIONS = [
@@ -65,12 +41,6 @@ const FONT_SIZE_OPTIONS = ['18', '20', '22', '24', '28']
 const BUBBLE_SHAPES = [
   { value: 'rect', label: '矩形' },
   { value: 'round', label: '圆角' },
-]
-const LAYOUT_OPTIONS = [
-  { value: 'auto-grid', label: '自动布局 (auto-grid)' },
-  { value: 'grid-2x2', label: '四宫格 (grid-2x2)' },
-  { value: 'vertical', label: '竖版长条 (vertical)' },
-  { value: 'cinematic', label: '宽银幕 (cinematic)' },
 ]
 
 const STYLE_PRESETS = [
@@ -218,13 +188,8 @@ function toProxiedStatic(url?: string | null): string | undefined {
 }
 
 function PropertyPanel({
-  selectedCharacters,
-  onToggleCharacter,
-  selectedLayout,
-  onLayoutChange,
   styleValue,
   onStyleChange,
-  panelShots,
   fontFamily,
   onFontFamilyChange,
   fontSize,
@@ -233,14 +198,13 @@ function PropertyPanel({
   onBubbleShapeChange,
   hasTail,
   onToggleTail,
+  onOpenPublish,
+  onExportImage,
+  canExport,
+  isPublishing,
 }: {
-  selectedCharacters: number[]
-  onToggleCharacter: (characterId: number) => void
-  selectedLayout: string
-  onLayoutChange: (value: string) => void
   styleValue: string
   onStyleChange: (value: string) => void
-  panelShots?: { panel_number: number; description: string }[]
   fontFamily: string
   onFontFamilyChange: (value: string) => void
   fontSize: string
@@ -249,40 +213,13 @@ function PropertyPanel({
   onBubbleShapeChange: (shape: string) => void
   hasTail: boolean
   onToggleTail: () => void
+  onOpenPublish: () => void
+  onExportImage: () => void
+  canExport: boolean
+  isPublishing: boolean
 }) {
   return (
     <aside className="flex w-72 flex-col gap-4">
-      <PanelCard title="布局">
-        <LabelRow label="页面布局">
-          <Select value={selectedLayout} onValueChange={onLayoutChange}>
-            <SelectTrigger className="w-40">
-              <SelectValue placeholder="选择布局" />
-            </SelectTrigger>
-            <SelectContent>
-              {LAYOUT_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </LabelRow>
-      </PanelCard>
-      {!!(panelShots && panelShots.length) && (
-        <PanelCard title="分镜头（当前页）">
-          <div className="flex flex-col gap-2 max-h-60 overflow-auto pr-1">
-            {panelShots!.map((ps) => (
-              <div key={ps.panel_number} className="rounded-md border p-2 text-xs leading-snug text-foreground/80">
-                <span className="mr-2 inline-block w-5 text-center rounded bg-muted text-muted-foreground">
-                  {ps.panel_number}
-                </span>
-                <span className="align-middle">{ps.description}</span>
-              </div>
-            ))}
-          </div>
-        </PanelCard>
-      )}
-
       <PanelCard title="风格">
         <LabelRow label="渲染风格">
           <Select value={styleValue} onValueChange={onStyleChange}>
@@ -298,9 +235,6 @@ function PropertyPanel({
             </SelectContent>
           </Select>
         </LabelRow>
-      </PanelCard>
-      <PanelCard title="出镜人物">
-        <CharacterPicker selected={selectedCharacters} onToggle={onToggleCharacter} />
       </PanelCard>
 
       <PanelCard title="文本">
@@ -358,24 +292,26 @@ function PropertyPanel({
         </div>
       </PanelCard>
 
-      <Card className="rounded-3xl border border-border/60 bg-muted/60 p-4">
-        <div className="flex flex-col gap-3">
+      <PanelCard title="导出">
+        <div className="flex items-center justify-between gap-3">
           <Button
             variant="outline"
-            className="h-11 justify-center"
-            onClick={() => toast.success('PDF 导出成功', { position: 'top-center' })}
+            onClick={onOpenPublish}
+            disabled={!canExport || isPublishing}
           >
-            PDF 导出
+            导出 PDF
           </Button>
           <Button
             variant="outline"
-            className="h-11 justify-center"
-            onClick={() => toast.success('图片 导出成功', { position: 'top-center' })}
+            onClick={onExportImage}
+            disabled={!canExport}
           >
-            图片 导出
+            导出图片
           </Button>
         </div>
-      </Card>
+      </PanelCard>
+
+      {null}
     </aside>
   )
 }
@@ -391,33 +327,7 @@ function PanelCard({ title, children }: { title: string; children: React.ReactNo
   )
 }
 
-function CharacterPicker({ selected, onToggle }: { selected: number[]; onToggle: (id: number) => void }) {
-  return (
-    <div className="flex flex-wrap gap-3">
-      {CHARACTERS.map((character, index) => {
-        const isActive = selected.includes(character.id)
-
-        return (
-          <button
-            key={character.id}
-            type="button"
-            onClick={() => onToggle(character.id)}
-            className={cn(
-              'flex w-20 flex-col items-center gap-2 rounded-xl border border-input bg-card p-3 transition-colors hover:border-primary',
-              isActive && 'border-primary shadow-[0_0_0_3px] shadow-primary/10',
-            )}
-          >
-            <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-muted" aria-hidden />
-            <span className="text-xs font-medium text-foreground/80">
-              {String.fromCharCode(0x30 + index + 1).padStart(2, '0')}
-              {character.name}
-            </span>
-          </button>
-        )
-      })}
-    </div>
-  )
-}
+// 角色选择卡片已移除
 
 function LabelRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -436,43 +346,29 @@ export function ImageGeneration() {
   const [selectedScene, setSelectedScene] = useState(INITIAL_SCENES[0]?.id ?? 1)
   // Pages data from images API
   const [pages, setPages] = useState<{ page_id: number; page_number: number; image_url: string | null }[]>([])
-  const [selectedCharacters, setSelectedCharacters] = useState<number[]>([1, 2])
   const [fontFamily, setFontFamily] = useState(FONT_OPTIONS[0].value)
   const [fontSize, setFontSize] = useState(FONT_SIZE_OPTIONS[1])
   const [bubbleShape, setBubbleShape] = useState(BUBBLE_SHAPES[0].value)
   const [hasTail, setHasTail] = useState(true)
   const [isRendering, setIsRendering] = useState(false)
+  const [isPublishing, setIsPublishing] = useState(false)
+  const [publishOpen, setPublishOpen] = useState(false)
+  const [makePublic, setMakePublic] = useState(true)
   const [pollTries, setPollTries] = useState(0)
   const MAX_POLL_TRIES = 15 // 15 * 2s = 30s
   const pollTimerRef = useRef<number | null>(null)
   const triesRef = useRef<number>(0)
-  const [selectedLayout, setSelectedLayout] = useState<string>(LAYOUT_OPTIONS[0].value)
-  const { create: createComic, state: createComicState } = useCreateComic()
-  const [selectedIds, setSelectedIds] = useAtom(selectedCharacterIdsAtom)
-  const [comicId, setComicId] = useAtom(currentComicIdAtom)
-  const [prevComicDetail, setPrevComicDetail] = useAtom(previousComicDetailAtom)
-  const [comicDetail, setComicDetail] = useAtom(currentComicDetailAtom)
-  const [title] = useAtom(mangaTitleAtom)
-  const [fullStory] = useAtom(fullStoryAtom)
+  const [comicId] = useAtom(currentComicIdAtom)
+  const [, setComicDetail] = useAtom(currentComicDetailAtom)
   const [style, setStyle] = useAtom(styleAtom)
-  const [aspectRatio] = useAtom(aspectRatioAtom)
-  const [rolesMap, setRolesMap] = useAtom(selectedCharacterRolesAtom)
   const [, setActiveTab] = useAtom(activeTabAtom)
   const [, setStoryStep] = useAtom(storyStepAtom)
 
   const handleAddScene = () => {
-    // 跳转到故事流程并重置当前漫画相关状态，开始新一轮
+    // 回到故事流程继续编辑；保持当前 comicId 不变
     setActiveTab('story')
     setStoryStep('input')
-    setComicId(null)
-    setComicDetail(null)
-    setPrevComicDetail(null)
-    setSelectedIds([])
-    setRolesMap({})
-    setPages([])
-    setScenes(INITIAL_SCENES)
-    setSelectedScene(INITIAL_SCENES[0]?.id ?? 1)
-    toast.success('已切换到故事流程，重新开始')
+    toast.success('已切换到故事流程，继续编辑当前漫画')
   }
 
   const previewHandler = () => {
@@ -480,68 +376,39 @@ export function ImageGeneration() {
     console.info('preview scene', selectedScene)
   }
 
-  // 从 comicDetail 或 prevComicDetail 中获取某页的分镜头
-  const getPanelShotsForPage = (page: number) => {
-    const src: any = comicDetail || prevComicDetail
-    const shots: any[] = Array.isArray(src?.panel_shots) ? src.panel_shots : []
-
-    return shots
-      .filter((s) => s?.page_number === page)
-      .sort((a, b) => (a?.panel_number ?? 0) - (b?.panel_number ?? 0))
-      .map((s) => ({ panel_number: s.panel_number, description: s.description }))
-  }
-
-  const toggleCharacter = (characterId: number) => {
-    setSelectedCharacters((prev) =>
-      prev.includes(characterId) ? prev.filter((id) => id !== characterId) : [...prev, characterId],
-    )
-  }
-
-  const handleCreateComic = async () => {
-    if (!selectedIds || selectedIds.length === 0) {
-      toast.error('请先在“人物”页选择出镜人物')
-
-      return
-    }
-
-    // 角色编排：第一个为 protagonist，其余为 supporting
-    const characters = selectedIds.map((id, idx) => ({
-      id,
-      order_index: idx + 1,
-      role: rolesMap[id] || (idx === 0 ? 'protagonist' : 'supporting'),
-    }))
-
-    try {
-      const res = await createComic({
-        title: title || '未命名漫画',
-        story: fullStory,
-        style,
-        aspect_ratio: aspectRatio,
-        characters,
-      })
-      const id = (res as any)?.comic?.id ?? (res as any)?.comic_id ?? null
-      if (id) {
-        setComicId(Number(id))
-        // 触发剧情优化任务
-        try {
-          await JobsApi.createComic({ job_type: 'story_optimization', comic_id: Number(id) })
-          toast.success('漫画创建成功，已提交剧情优化任务')
-        } catch (e: any) {
-          toast.error(e?.message || '剧情优化任务提交失败')
+  // 进入生图页时，如已有 comicId，则预载该漫画的已生成页面，供左侧缩略图展示
+  // 这样即使重新走流程，左侧依然能看到上一流程的漫画内容
+  useEffect(() => {
+    if (!comicId) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const imagesRes = await ComicsApi.listImages(comicId)
+        const pagesArr = (imagesRes as any)?.pages ?? []
+        if (cancelled) return
+        if (Array.isArray(pagesArr) && pagesArr.length > 0) {
+          setPages(pagesArr)
+          const newScenes: Scene[] = pagesArr
+            .sort((a: any, b: any) => a.page_number - b.page_number)
+            .map((p: any) => ({ id: p.page_number, label: String(p.page_number).padStart(2, '0'), pageId: p.page_id }))
+          setScenes(newScenes)
+          if (!newScenes.some((s) => s.id === selectedScene)) {
+            setSelectedScene(newScenes[0].id)
+          }
         }
-
-        // 刷新漫画详情
-        try {
-          const detail = await ComicsApi.get(Number(id))
-          setComicDetail(detail)
-        } catch {}
-      } else {
-        toast.success('漫画创建已提交')
+      } catch {
+        // 忽略加载失败，不阻断页面
       }
-    } catch (err: any) {
-      toast.error(err?.message || '创建漫画失败')
+    })()
+
+    return () => {
+      cancelled = true
     }
-  }
+  }, [comicId, selectedScene])
+
+  // 分镜头列表卡片已移除
+
+  // 重新生成漫画逻辑已移除
 
   const clearPoll = () => {
     if (pollTimerRef.current) {
@@ -554,53 +421,21 @@ export function ImageGeneration() {
 
   const handleGenerate = async () => {
     if (!comicId) {
-      toast.error('请先创建漫画（点击“生成漫画”）')
+      toast.error('请先完成“分镜”步骤后再来生图')
 
       return
     }
 
     try {
-      // 先设置该页布局 → 触发该页渲染 → 轮询整本漫画 images
+      // 触发该页渲染 → 轮询整本漫画 images
       setIsRendering(true)
       setPollTries(0)
       clearPoll()
 
-      // A) 设置布局
-      const layoutRes = await PanelsApi.setLayout(comicId, {
-        page_number: selectedScene,
-        layout_key: selectedLayout,
-      })
-      const layoutComic = (layoutRes as any)?.comic
-      if (layoutComic) {
-        setPrevComicDetail(layoutComic)
-        setComicDetail(layoutComic)
-
-        // 根据返回的分镜或 page_layouts 同步侧边栏场景
-        try {
-          const pageNumberSet = new Set<number>()
-          const shotsTmp: any[] = Array.isArray(layoutComic?.panel_shots) ? layoutComic.panel_shots : []
-          for (const s of shotsTmp) {
-            if (s && typeof s.page_number === 'number') pageNumberSet.add(s.page_number as number)
-          }
-
-          const pageNumbers = Array.from(pageNumberSet).sort((a: number, b: number) => a - b)
-
-          if (pageNumbers.length > 0) {
-            const newScenes: Scene[] = pageNumbers.map((n) => ({ id: n, label: String(n).padStart(2, '0') }))
-            setScenes(newScenes)
-            if (!newScenes.some((s) => s.id === selectedScene)) {
-              setSelectedScene(newScenes[0].id)
-            }
-          }
-        } catch {}
-      }
-
-      // B) 触发该页渲染
+      // A) 触发该页渲染（布局已在“分镜”步骤完成）
       await PanelsApi.renderPage(comicId, selectedScene)
 
-      toast.success('已提交渲染，开始轮询 images…')
-
-      // C) 轮询 /api/comics/{comic_id}/images 直到有结果（任意页面拿到 image_url 即视为有数据）
+      // B) 轮询 /api/comics/{comic_id}/images 直到有结果（任意页面拿到 image_url 即视为有数据）
       pollTimerRef.current = window.setInterval(async () => {
         try {
           const imagesRes = await ComicsApi.listImages(comicId)
@@ -681,13 +516,8 @@ export function ImageGeneration() {
           imageUrl={toProxiedStatic(pages.find((p) => p.page_number === selectedScene)?.image_url)}
         />
         <PropertyPanel
-          selectedCharacters={selectedCharacters}
-          onToggleCharacter={toggleCharacter}
-          selectedLayout={selectedLayout}
-          onLayoutChange={setSelectedLayout}
           styleValue={style}
           onStyleChange={setStyle}
-          panelShots={getPanelShotsForPage(selectedScene)}
           fontFamily={fontFamily}
           onFontFamilyChange={setFontFamily}
           fontSize={fontSize}
@@ -696,16 +526,74 @@ export function ImageGeneration() {
           onBubbleShapeChange={setBubbleShape}
           hasTail={hasTail}
           onToggleTail={() => setHasTail((prev) => !prev)}
+          onOpenPublish={() => setPublishOpen(true)}
+          onExportImage={() => {
+            const p = pages.find((x) => x.page_number === selectedScene)
+            const url = toProxiedStatic(p?.image_url)
+            if (!url) {
+              toast.error('当前页暂无图片可导出')
+
+              return
+            }
+
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `comic_${comicId}_page_${selectedScene}`
+            document.body.appendChild(a)
+            a.click()
+            a.remove()
+          }}
+          canExport={Boolean(comicId)}
+          isPublishing={isPublishing}
         />
       </div>
       <div className="flex w-full justify-center gap-4">
-        <Button size="lg" onClick={handleCreateComic} disabled={createComicState.isMutating}>
-          {createComicState.isMutating ? '创建中...' : (comicId ? '重新生成漫画' : '生成漫画')}
-        </Button>
         <Button size="lg" onClick={handleGenerate} disabled={isRendering || !comicId}>
           {isRendering ? `渲染中... (${pollTries}/${MAX_POLL_TRIES})` : '生图'}
         </Button>
       </div>
+
+      {/* 发布/导出 PDF 对话框 */}
+      <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>导出 PDF</DialogTitle>
+          </DialogHeader>
+          <div className="flex items-center justify-between gap-4 py-2">
+            <div>
+              <p className="text-sm font-medium">是否将漫画设为公开</p>
+              <p className="text-xs text-muted-foreground">公开后他人可访问你的漫画</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Label htmlFor="make-public" className="text-sm">公开</Label>
+              <Switch id="make-public" checked={makePublic} onCheckedChange={(v) => setMakePublic(Boolean(v))} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={async () => {
+                if (!comicId) return
+                try {
+                  setIsPublishing(true)
+                  const resp = await ComicsApi.publish(comicId, { make_public: makePublic })
+                  // 暂存输出，等待你提供 PDF 字段名
+                   
+                  console.info('publish response:', resp)
+                  toast.success('发布完成，等待确认 PDF 地址字段')
+                  setPublishOpen(false)
+                } catch (e: any) {
+                  toast.error(e?.message || '发布失败')
+                } finally {
+                  setIsPublishing(false)
+                }
+              }}
+              disabled={isPublishing}
+            >
+              {isPublishing ? '发布中…' : '确定'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

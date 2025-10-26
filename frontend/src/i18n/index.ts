@@ -53,7 +53,7 @@ const resources = {
       'title.panels': '生成{{count}}个分镜头',
       'characters.more': '更多人物',
       'characters.selectPrompt': '请为你的人物选择形象',
-      'characters.recognized': '已根据故事为你识别到 {{count}} 个角色',
+      'characters.recognized': '已识别到 {{count}} 个角色',
       'characters.quickPick': '一键选择人物',
       'common.next': '下一步',
       'common.back': '返回编辑',

@@ -5,7 +5,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useI18n } from '@/hooks/use-i18n'
 
 import { activeTabAtom, charactersCompletedAtom, currentComicDetailAtom, storyCompletedAtom } from './atoms'
-import { previousComicDetailAtom } from './atoms'
 import { CharactersTab } from './character/characters-tab'
 import { ImageGenerationTab } from './image-generation/image-generation-tab'
 import { PanelsTab } from './panels/panels-tab'
@@ -17,9 +16,7 @@ export default function ComicsPage() {
   const [storyCompleted] = useAtom(storyCompletedAtom)
   const [charactersCompleted] = useAtom(charactersCompletedAtom)
   const [comicDetail] = useAtom(currentComicDetailAtom)
-  const [prevComic] = useAtom(previousComicDetailAtom)
-
-  const shotsCount = ((comicDetail || prevComic)?.panel_shots?.length as number | undefined) || 0
+  const shotsCount = (comicDetail?.panel_shots?.length as number | undefined) || 0
   const panelsCompleted = shotsCount > 0
 
   const pageTitle = activeTab === 'story'

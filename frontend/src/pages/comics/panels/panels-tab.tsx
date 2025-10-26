@@ -21,7 +21,6 @@ import {
   currentComicIdAtom,
   fullStoryAtom,
   mangaTitleAtom,
-  previousComicDetailAtom,
   selectedCharacterIdsAtom,
   selectedCharacterRolesAtom,
   styleAtom,
@@ -60,7 +59,7 @@ export function PanelsTab() {
   const { t } = useI18n('comics')
   const [comicId, setComicId] = useAtom(currentComicIdAtom)
   const [selectedLayout, setSelectedLayout] = useState<string>(LAYOUT_OPTIONS[0].value)
-  const [prevComic, setPrevComic] = useAtom(previousComicDetailAtom)
+  // 直接使用当前详情
   const [comicDetail, setComicDetail] = useAtom(currentComicDetailAtom)
   const [, setActiveTab] = useAtom(activeTabAtom)
   const [title] = useAtom(mangaTitleAtom)
@@ -77,7 +76,7 @@ export function PanelsTab() {
   const [editingDialogue, setEditingDialogue] = useState<string>('')
   const [savingId, setSavingId] = useState<number | null>(null)
 
-  const shots = useMemo<any[]>(() => (comicDetail || prevComic)?.panel_shots ?? [], [comicDetail, prevComic])
+  const shots = useMemo<any[]>(() => (comicDetail)?.panel_shots ?? [], [comicDetail])
   const pageNumbers = useMemo<number[]>(() => {
     const set = new Set<number>()
     for (const s of shots) {
@@ -134,30 +133,27 @@ export function PanelsTab() {
         cid = created.id
         setComicId(cid)
         setComicDetail(created)
-        setPrevComic(created)
         toast.success('漫画已创建')
       }
 
-      // 2) 若当前暂无分镜，则触发 optimize 任务以生成分镜
-      const hasShotsNow = ((comicDetail || prevComic)?.panel_shots ?? []).some((s: any) => s?.page_number === selectedScene)
+      // 2) 不再区分 old/new story，若当前页暂无分镜，则触发通用优化任务
+      const hasShotsNow = (comicDetail?.panel_shots ?? []).some((s: any) => s?.page_number === selectedScene)
       if (!hasShotsNow) {
         try {
           await JobsApi.createComic({ job_type: 'story_optimization', comic_id: cid as number })
           toast.success('已提交分镜生成任务')
         } catch {}
 
-        // 3) 轮询 Comic 详情，直到出现分镜数据（当前页有 panel_shots）或超时
         await pollComicUntilShots(cid as number)
       }
+      // 3) 设置当前页布局（会返回包含 page_layouts 的 comic）
 
-      // 4) 设置当前页布局（会返回包含 page_layouts 的 comic）
       const res = await PanelsApi.setLayout(cid as number, {
         page_number: selectedScene,
         layout_key: selectedLayout,
       })
       const layoutComic = (res as any)?.comic
       if (layoutComic) {
-        setPrevComic(layoutComic)
         setComicDetail(layoutComic)
       }
     } catch (e: any) {
@@ -188,7 +184,6 @@ export function PanelsTab() {
           const latest = await ComicsApi.get(cid)
           const comic = latest as any
           setComicDetail(comic)
-          setPrevComic(comic)
           const shotsArr: any[] = comic?.panel_shots ?? []
           const hasShotsForPage = shotsArr.some((s) => s?.page_number === selectedScene)
           if (hasShotsForPage) {
@@ -289,7 +284,7 @@ export function PanelsTab() {
                                   if (comicId) {
                                     const latest = await ComicsApi.get(comicId)
                                     setComicDetail(latest as any)
-                                    setPrevComic(latest as any)
+                                    // 不再维护上次快照
                                   }
                                   
                                   setEditingPanelId(null)

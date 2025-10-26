@@ -64,16 +64,6 @@ export const currentComicDetailAtom = atom(
   },
 )
 
-// 记忆上一次布局/分镜快照（来自 setLayout 返回的 comic 对象） - 持久化
-const basePreviousComicDetailAtom = atom<IComic | null>(readLS<IComic | null>('ms_previous_comic_detail', null))
-export const previousComicDetailAtom = atom(
-  (get) => get(basePreviousComicDetailAtom),
-  (_get, set, next: IComic | null) => {
-    set(basePreviousComicDetailAtom, next)
-    writeLS('ms_previous_comic_detail', next)
-  },
-)
-
 export interface StoryPanel { id: number; text: string }
 
 const initialStoryPanels: StoryPanel[] = [
@@ -145,3 +135,5 @@ export const selectedCharacterRolesAtom = atom<Record<number, string>>({})
 
 // Optional per-page layout selections (page_number -> layout_key)
 export const pageLayoutSelectionAtom = atom<Record<number, string>>({})
+
+// 已移除旧/新故事快照与本地持久化逻辑

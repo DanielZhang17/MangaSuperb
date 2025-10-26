@@ -212,49 +212,47 @@ function SelectionView() {
         <Button variant="default" onClick={handleQuickPick}>{String(t('characters.quickPick'))}</Button>
       </div>
 
-      {/* 角色职责与顺序设置 */}
+      {/* 角色职责与顺序设置（使用普通列表布局，不使用 Card） */}
       {selectedIds.length > 0 && (
-        <Card>
-          <CardContent className="p-4 space-y-4">
-            <div className="flex items-center justify-between">
-              <p className="font-medium">出镜人物职责与顺序</p>
-              <p className="text-sm text-muted-foreground">上移/下移改变顺序（顺序即 order_index），职责即 role</p>
-            </div>
-            <div className="space-y-3">
-              {selectedIds.map((id, index) => {
-                const char = characters.find((c) => c.id === id)
-                const currentRole = rolesMap[id] || (index === 0 ? 'protagonist' : 'supporting')
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="font-medium">出镜人物职责与顺序</p>
+            <p className="text-sm text-muted-foreground">上移/下移改变顺序（顺序即 order_index），职责即 role</p>
+          </div>
+          <div className="space-y-3">
+            {selectedIds.map((id, index) => {
+              const char = characters.find((c) => c.id === id)
+              const currentRole = rolesMap[id] || (index === 0 ? 'protagonist' : 'supporting')
 
-                return (
-                  <div key={id} className="flex items-center gap-4 rounded-md border p-3">
-                    <div className="w-6 text-sm text-muted-foreground">{index + 1}</div>
-                    <div className="flex-1">
-                      <div className="font-medium text-sm">{char?.name || `#${id}`}</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Label className="text-xs text-muted-foreground">职责</Label>
-                      <Select value={currentRole} onValueChange={(v) => updateRole(id, v)}>
-                        <SelectTrigger className="w-36 h-8">
-                          <SelectValue placeholder="选择职责" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="protagonist">主角</SelectItem>
-                          <SelectItem value="supporting">配角</SelectItem>
-                          <SelectItem value="antagonist">反派</SelectItem>
-                          <SelectItem value="cameo">客串</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button size="sm" variant="outline" onClick={() => moveUp(index)}>上移</Button>
-                      <Button size="sm" variant="outline" onClick={() => moveDown(index)}>下移</Button>
-                    </div>
+              return (
+                <div key={id} className="flex items-center gap-4 rounded-md border p-3">
+                  <div className="w-6 text-sm text-muted-foreground">{index + 1}</div>
+                  <div className="flex-1">
+                    <div className="font-medium text-sm">{char?.name || `#${id}`}</div>
                   </div>
-                )
-              })}
-            </div>
-          </CardContent>
-        </Card>
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs text-muted-foreground">职责</Label>
+                    <Select value={currentRole} onValueChange={(v) => updateRole(id, v)}>
+                      <SelectTrigger className="w-36 h-8">
+                        <SelectValue placeholder="选择职责" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="protagonist">主角</SelectItem>
+                        <SelectItem value="supporting">配角</SelectItem>
+                        <SelectItem value="antagonist">反派</SelectItem>
+                        <SelectItem value="cameo">客串</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" onClick={() => moveUp(index)}>上移</Button>
+                    <Button size="sm" variant="outline" onClick={() => moveDown(index)}>下移</Button>
+                  </div>
+                </div>
+              )},
+            )}
+          </div>
+        </div>
       )}
 
       {/* 下一步 */}
