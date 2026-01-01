@@ -40,6 +40,7 @@ CREATE TABLE users (
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(128) NOT NULL,
     avatar_index SMALLINT NOT NULL DEFAULT 1,
+    preferences TEXT NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -105,7 +106,7 @@ CREATE TABLE comics (
     workflow_stage VARCHAR(20) NOT NULL DEFAULT 'outline',
     workflow_status VARCHAR(20) NOT NULL DEFAULT 'pending',
     style_description TEXT NOT NULL DEFAULT 'Classic manga black and white linework',
-    aspect_ratio VARCHAR(5) NOT NULL DEFAULT '16:9' CHECK (aspect_ratio IN ('16:9', '9:16', '1:1')),
+    aspect_ratio VARCHAR(5) NOT NULL DEFAULT '2:3' CHECK (aspect_ratio IN ('1:1','2:3','3:2','3:4','4:3','4:5','5:4','9:16','16:9','21:9')),
     pdf_url VARCHAR(255),
     zip_url VARCHAR(255),
     cover_image_url VARCHAR(255),

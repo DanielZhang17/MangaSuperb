@@ -4,14 +4,18 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import mimetypes
+import re
 import zipfile
+from collections import defaultdict
 from collections.abc import Iterable
 from contextlib import contextmanager
 from datetime import datetime
 from io import BytesIO
 from typing import Any, Sequence
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from flask import current_app
 from sqlalchemy import func
 
@@ -20,7 +24,12 @@ from rq import get_current_job
 
 from config import Config
 from mangasuperb.extensions import db
-from mangasuperb.services.generation import optimize_character_description
+from mangasuperb.services.generation import (
+    DEFAULT_ASPECT_RATIO,
+    log_gemini_contents,
+    optimize_character_description,
+    validate_aspect_ratio,
+)
 from models import (
     Character,
     Comic,
@@ -31,6 +40,7 @@ from models import (
     ComicPanelShot,
     ComicWorkflowStage,
     Script,
+    DEFAULT_COLOR_MODES,
 )
 
 logger = logging.getLogger(__name__)
@@ -103,6 +113,121 @@ def _gemini_api_key() -> str:
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not configured")
     return api_key
+
+
+def _genai_client() -> genai.Client:
+    return genai.Client(api_key=_gemini_api_key())
+
+
+def _build_image_generation_config(aspect_ratio: str | None):
+    """Construct an image config for Gemini generation."""
+    if not aspect_ratio:
+        return None
+    try:
+        return types.GenerateContentConfig(
+            image_config=types.ImageConfig(aspect_ratio=aspect_ratio)
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning("Failed to build image config for aspect_ratio=%s: %s", aspect_ratio, exc)
+        return None
+
+
+def _extract_image_bytes(response: Any) -> bytes | None:
+    """Pull the first inline image bytes from a Gemini response."""
+    if getattr(response, "parts", None):
+        for part in response.parts:
+            inline = getattr(part, "inline_data", None)
+            if inline and inline.data:
+                data = inline.data
+                return base64.b64decode(data) if isinstance(data, str) else data
+            if hasattr(part, "as_image"):
+                try:
+                    image_obj = part.as_image()
+                    buf = BytesIO()
+                    image_obj.save(buf, format="PNG")
+                    return buf.getvalue()
+                except Exception:  # pragma: no cover - defensive
+                    continue
+
+    candidates = getattr(response, "candidates", None) or []
+    for candidate in candidates:
+        content = getattr(candidate, "content", None)
+        parts = getattr(content, "parts", None) or []
+        for part in parts:
+            inline = getattr(part, "inline_data", None)
+            if inline and inline.data:
+                data = inline.data
+                return base64.b64decode(data) if isinstance(data, str) else data
+            if hasattr(part, "as_image"):
+                try:
+                    image_obj = part.as_image()
+                    buf = BytesIO()
+                    image_obj.save(buf, format="PNG")
+                    return buf.getvalue()
+                except Exception:  # pragma: no cover
+                    continue
+    return None
+
+
+def _collect_character_image_references(comic: Comic, *, max_images: int = 8) -> tuple[list[str], list[dict[str, Any]]]:
+    """Load inline image parts for characters and return descriptive labels."""
+    if not comic.character_links:
+        return [], []
+
+    try:
+        storage = _get_storage()
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning("Skipping character image references; storage unavailable: %s", exc)
+        return [], []
+
+    sorted_links = sorted(
+        (link for link in comic.character_links if link.character and link.character.image_url),
+        key=lambda link: (
+            link.order_index if link.order_index is not None else 0,
+            link.id or 0,
+        ),
+    )
+
+    ref_lines: list[str] = []
+    ref_parts: list[dict[str, Any]] = []
+
+    for link in sorted_links:
+        character = link.character
+        if not character or not character.image_url:
+            continue
+
+        try:
+            image_bytes = storage.download_file(character.image_url)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Failed to download character image %s: %s", character.id, exc)
+            continue
+
+        if not image_bytes:
+            logger.warning("Character %s has no downloadable image; skipping reference", character.id)
+            continue
+
+        mime_type, _ = mimetypes.guess_type(character.image_url)
+        mime_type = mime_type or "image/png"
+
+        ref_index = len(ref_parts) + 1
+        label = character.name or f"Character {character.id}"
+        role = (link.role or "").strip()
+        desc = (character.optimized_description or character.description or "").strip()
+
+        detail_bits = [f"Ref {ref_index}: {label}"]
+        if role:
+            detail_bits[-1] += f" ({role})"
+        detail_bits.append("Next inline image corresponds to this character; keep appearance consistent.")
+        if desc:
+            detail_bits.append(f"Traits: {desc}")
+
+        ref_lines.append(" ".join(detail_bits))
+        ref_parts.append({"inline_data": {"mime_type": mime_type, "data": image_bytes}})
+
+        if len(ref_parts) >= max_images:
+            break
+
+    return ref_lines, ref_parts
 
 
 WORKFLOW_STAGES = ("outline", "shots", "render", "export")
@@ -187,7 +312,13 @@ def build_page_render_prompt(
     page_number: int,
     layout_instruction: str,
     panel_lines: list[str],
-    context_block: str,
+    color_mode: str | None = None,
+    font_family: str | None = None,
+    font_size: str | None = None,
+    bubble_shape: str | None = None,
+    bubble_tail: bool | None = None,
+    aspect_ratio: str | None = None,
+    reference_notes: Sequence[str] | None = None,
 ) -> str:
     """Compose the full prompt for image generation, including character context."""
 
@@ -204,22 +335,55 @@ def build_page_render_prompt(
         f"Render page {page_number} of the manga \"{title}\" with the following layout:\n\n"
         f"{layout_instruction}\n\n"
         f"Overall Style: {style_notes}\n"
-        f"Preferred Aspect Ratio: {comic.aspect_ratio}\n\n"
         f"Panel Details:\n{chr(10).join(panel_lines)}"
     )
     sections.append(base_prompt)
 
-    if context_block:
-        sections.append(context_block)
+    # Build requirements list with customization options
+    requirements = [
+        "- Maintain visual style aligned with the comic's direction",
+        "- Focus only on the panels described for this page",
+        "- Leave space for lettering and speech balloons",
+        "- Use high quality manga illustration",
+    ]
 
-    sections.append(
-        "Requirements:\n"
-        "- Maintain stylistic continuity with earlier pages\n"
-        "- Leave space for lettering and speech balloons\n"
-        "- Use English for any text in the speech balloons\n"
-        "- Translate all dialogue to English before rendering any text\n"
-        "- Use high-contrast black and white manga illustration"
-    )
+    if aspect_ratio:
+        requirements.append(f"- Target aspect ratio: {aspect_ratio}")
+
+    if color_mode:
+        normalized_color = color_mode.replace("_", "-").strip().lower()
+        if normalized_color == "color":
+            requirements.append(
+                "- Render in vibrant full color with rich lighting, gradients, and dynamic highlights"
+            )
+        elif normalized_color == "black-white":
+            requirements.append(
+                "- Keep the art in high-contrast black-and-white ink with clean screentone shading"
+            )
+
+    # Add bubble shape instruction
+    if bubble_shape:
+        shape_desc = "rectangular" if bubble_shape == "rect" else "rounded corner"
+        requirements.append(f"- Use {shape_desc} speech bubbles for dialogue")
+
+    # Add bubble tail instruction
+    if bubble_tail is not None:
+        tail_desc = "with" if bubble_tail else "without"
+        requirements.append(f"- Draw speech bubble tails {tail_desc} pointers to speakers")
+
+    # Add font instructions
+    if font_family:
+        requirements.append(f"- Use {font_family} font family for text")
+    if font_size:
+        requirements.append(f"- Use {font_size} font size for text")
+
+    sections.append("Requirements:\n" + "\n".join(requirements))
+
+    if reference_notes:
+        sections.append(
+            "Character image references (order matches the inline images provided):\n"
+            + "\n".join(reference_notes)
+        )
 
     return "\n\n".join(section for section in sections if section)
 
@@ -391,6 +555,15 @@ def _build_outline_sections(script_data: dict[str, Any]) -> list[dict[str, str]]
             paragraphs = [chunk.strip() for chunk in story_text.split("\n") if chunk.strip()]
             if not paragraphs:
                 paragraphs = [story_text]
+
+            if len(paragraphs) == 1:
+                sentences = [
+                    match.strip()
+                    for match in re.findall(r"[^。！？!?；;]+[。！？!?；;]?", story_text)
+                    if match.strip()
+                ]
+                if len(sentences) > 1:
+                    paragraphs = sentences
             for idx, paragraph in enumerate(paragraphs, start=1):
                 sections.append({"title": f"Section {idx}", "summary": paragraph})
         else:
@@ -413,6 +586,49 @@ def _panel_payload_json(panels: list[ComicPanelShot]) -> str:
             }
         )
     return json.dumps(payload, ensure_ascii=False)
+
+
+def _resolve_panel_fields(
+    idx: int,
+    section: ComicOutlineSection,
+    panel_payload: Any,
+    script_data: dict[str, Any],
+    comic: Comic,
+) -> tuple[str, str | None, str | None, str | None]:
+    entry: dict[str, Any] = {}
+    if isinstance(panel_payload, list) and 0 <= idx - 1 < len(panel_payload):
+        candidate = panel_payload[idx - 1]
+        if isinstance(candidate, dict):
+            entry = candidate
+
+    description = (
+        entry.get("scene")
+        or entry.get("summary")
+        or section.summary
+        or ""
+    )
+
+    dialogue_raw = entry.get("dialogue")
+    dialogue_text = dialogue_raw.strip() if isinstance(dialogue_raw, str) else None
+    if not dialogue_text:
+        dialogue_text = _extract_dialogue(section.summary)
+
+    camera_notes = entry.get("camera") or entry.get("camera_notes")
+    if isinstance(camera_notes, str):
+        camera_notes = camera_notes.strip() or None
+
+    style_notes = entry.get("visual_notes") if entry else None
+    if isinstance(style_notes, str):
+        style_notes = style_notes.strip() or None
+    if not style_notes:
+        style_notes = script_data.get("style_notes") or comic.style_description
+
+    return (
+        description.strip(),
+        dialogue_text,
+        camera_notes,
+        style_notes,
+    )
 
 
 def enqueue_comic_workflow(
@@ -454,6 +670,7 @@ def enqueue_comic_workflow(
         page_number=1,
         image_model=image_model,
         chain_remaining=True,
+        aspect_ratio=comic.aspect_ratio,
         depends_on=shots_job,
         job_timeout=timeout,
         result_ttl=result_ttl,
@@ -478,6 +695,12 @@ def enqueue_page_render(
     *,
     image_model: str | None = None,
     chain_remaining: bool = False,
+    font_family: str | None = None,
+    font_size: str | None = None,
+    bubble_shape: str | None = None,
+    bubble_tail: bool | None = None,
+    color_mode: str | None = None,
+    aspect_ratio: str | None = None,
 ):
     """Schedule a render job for a specific comic page."""
 
@@ -493,6 +716,12 @@ def enqueue_page_render(
         page_number=page_number,
         image_model=image_model,
         chain_remaining=chain_remaining,
+        font_family=font_family,
+        font_size=font_size,
+        bubble_shape=bubble_shape,
+        bubble_tail=bubble_tail,
+        color_mode=color_mode,
+        aspect_ratio=aspect_ratio or comic.aspect_ratio,
         job_timeout=timeout,
         result_ttl=result_ttl,
         description=f"Render page {page_number} for comic {comic.id}",
@@ -555,6 +784,14 @@ def enqueue_publish_workflow(
 
     bootstrap_comic_workflow(comic)
     db.session.flush()
+
+    # Reset export stage status so the UI reflects a fresh run.
+    _set_stage_status(comic, "export", "pending")
+    comic.workflow_stage = "export"
+    comic.workflow_status = "pending"
+    comic.status = "processing"
+    comic.completed_at = None
+    comic.error_message = None
 
     timeout = current_app.config["RQ_JOB_TIMEOUT"]
     result_ttl = current_app.config["RQ_RESULT_TTL"]
@@ -681,78 +918,151 @@ def process_shot_stage(comic_id: int) -> dict[str, Any]:
             db.session.commit()
 
             script_data = _load_script_payload(script)
+            sections_data = _build_outline_sections(script_data)
+            if not sections_data:
+                raise ValueError("Story outline is empty; add more content before generating panels.")
+
             outline_sections = (
                 ComicOutlineSection.query.filter_by(comic_id=comic_id)
                 .order_by(ComicOutlineSection.order_index)
                 .all()
             )
 
-            if not outline_sections:
-                sections_data = _build_outline_sections(script_data)
-                for idx, section in enumerate(sections_data, start=1):
+            for idx, section_payload in enumerate(sections_data, start=1):
+                if idx <= len(outline_sections):
+                    outline = outline_sections[idx - 1]
+                else:
                     outline = ComicOutlineSection(
                         comic_id=comic_id,
                         order_index=idx,
-                        title=section.get("title"),
-                        summary=section.get("summary") or "",
+                        title=section_payload.get("title"),
+                        summary=section_payload.get("summary") or "",
                         status="draft",
                     )
                     db.session.add(outline)
                     outline_sections.append(outline)
-                db.session.flush()
 
-            ComicPageLayout.query.filter_by(comic_id=comic_id).delete(synchronize_session=False)
-            ComicPanelShot.query.filter_by(comic_id=comic_id).delete(synchronize_session=False)
+                outline.order_index = idx
+                outline.title = section_payload.get("title")
+                outline.summary = section_payload.get("summary") or ""
+                if not outline.status:
+                    outline.status = "draft"
+
+            if len(outline_sections) > len(sections_data):
+                extras = outline_sections[len(sections_data):]
+                extra_ids = [section.id for section in extras if section.id is not None]
+                if extra_ids:
+                    ComicPanelShot.query.filter(
+                        ComicPanelShot.outline_section_id.in_(extra_ids)
+                    ).update({"outline_section_id": None}, synchronize_session=False)
+                for section in extras:
+                    db.session.delete(section)
+                outline_sections = outline_sections[: len(sections_data)]
+
             db.session.flush()
+            outline_sections = (
+                ComicOutlineSection.query.filter_by(comic_id=comic_id)
+                .order_by(ComicOutlineSection.order_index)
+                .all()
+            )
 
             panel_payload = script_data.get("panels") if isinstance(script_data, dict) else None
+
+            existing_panels = (
+                ComicPanelShot.query.filter_by(comic_id=comic_id)
+                .order_by(ComicPanelShot.sequence_index)
+                .all()
+            )
+
+            orphaned_ids = [panel.id for panel in existing_panels if panel.page_number is None]
+            if orphaned_ids:
+                ComicPagePanel.query.filter(
+                    ComicPagePanel.panel_shot_id.in_(orphaned_ids)
+                ).delete(synchronize_session=False)
+                ComicPanelShot.query.filter(ComicPanelShot.id.in_(orphaned_ids)).delete(
+                    synchronize_session=False
+                )
+                db.session.flush()
+                existing_panels = (
+                    ComicPanelShot.query.filter_by(comic_id=comic_id)
+                    .order_by(ComicPanelShot.sequence_index)
+                    .all()
+                )
+
+            total_sections = len(sections_data)
+            excess_ids = [
+                panel.id for panel in existing_panels if panel.sequence_index > total_sections
+            ]
+            if excess_ids:
+                ComicPagePanel.query.filter(
+                    ComicPagePanel.panel_shot_id.in_(excess_ids)
+                ).delete(synchronize_session=False)
+                ComicPanelShot.query.filter(ComicPanelShot.id.in_(excess_ids)).delete(
+                    synchronize_session=False
+                )
+                db.session.flush()
+                existing_panels = (
+                    ComicPanelShot.query.filter_by(comic_id=comic_id)
+                    .order_by(ComicPanelShot.sequence_index)
+                    .all()
+                )
+
+            panel_map = {panel.sequence_index: panel for panel in existing_panels}
+            layout_by_page: dict[int, ComicPageLayout] = {
+                layout.page_number: layout
+                for layout in ComicPageLayout.query.filter_by(comic_id=comic_id)
+                .order_by(ComicPageLayout.page_number)
+                .all()
+            }
+
             created_panels: list[ComicPanelShot] = []
-            for idx, section in enumerate(outline_sections, start=1):
-                panel_info = (
-                    panel_payload[idx - 1]
-                    if isinstance(panel_payload, list) and idx - 1 < len(panel_payload)
-                    else {}
-                )
-                description = (
-                    panel_info.get("scene")
-                    or panel_info.get("summary")
-                    or section.summary
-                )
-                dialogue_raw = panel_info.get("dialogue") if isinstance(panel_info, dict) else None
-                if isinstance(dialogue_raw, str):
-                    dialogue_raw = dialogue_raw.strip() or None
-                dialogue_text = dialogue_raw or _extract_dialogue(section.summary)
-                camera_notes = panel_info.get("camera") or panel_info.get("camera_notes")
-                style_notes = (
-                    panel_info.get("visual_notes")
-                    if isinstance(panel_info, dict)
-                    else None
-                ) or script_data.get("style_notes") or comic.style_description
+            updated_panels: list[ComicPanelShot] = []
+            layouts_created: list[ComicPageLayout] = []
+            layouts_updated: list[ComicPageLayout] = []
+            page_panel_map: defaultdict[int, list[ComicPanelShot]] = defaultdict(list)
 
-                panel = ComicPanelShot(
-                    comic_id=comic_id,
-                    outline_section_id=section.id,
-                    sequence_index=idx,
-                    description=(description or section.summary or "").strip(),
-                    dialogue=dialogue_text,
-                    camera_notes=(
-                        camera_notes.strip() if isinstance(camera_notes, str) else camera_notes
-                    ),
-                    style_notes=style_notes,
-                    status="draft",
+            for idx in range(1, total_sections + 1):
+                section = outline_sections[idx - 1]
+                description, dialogue_text, camera_notes, style_notes = _resolve_panel_fields(
+                    idx,
+                    section,
+                    panel_payload,
+                    script_data,
+                    comic,
                 )
-                db.session.add(panel)
-                created_panels.append(panel)
+                page_number = (idx - 1) // PANELS_PER_PAGE + 1
+                panel_number = ((idx - 1) % PANELS_PER_PAGE) + 1
 
-            db.session.flush()
+                panel = panel_map.get(idx)
+                if panel:
+                    panel.description = description or section.summary or ""
+                    panel.dialogue = dialogue_text
+                    panel.camera_notes = camera_notes
+                    panel.style_notes = style_notes
+                    panel.page_number = page_number
+                    panel.panel_number = panel_number
+                    panel.outline_section_id = section.id
+                    if panel.status != "draft":
+                        panel.status = "draft"
+                    updated_panels.append(panel)
+                else:
+                    panel = ComicPanelShot(
+                        comic_id=comic_id,
+                        outline_section_id=section.id,
+                        sequence_index=idx,
+                        description=description or section.summary or "",
+                        dialogue=dialogue_text,
+                        camera_notes=camera_notes,
+                        style_notes=style_notes,
+                        status="draft",
+                    )
+                    panel.page_number = page_number
+                    panel.panel_number = panel_number
+                    db.session.add(panel)
+                    created_panels.append(panel)
+                    panel_map[idx] = panel
 
-            layouts: list[ComicPageLayout] = []
-            layout_by_page: dict[int, ComicPageLayout] = {}
-            for panel in created_panels:
-                page_number = (panel.sequence_index - 1) // PANELS_PER_PAGE + 1
-                panel_number = ((panel.sequence_index - 1) % PANELS_PER_PAGE) + 1
-                panel.page_number = page_number
-                panel.panel_number = panel_number
+                page_panel_map[page_number].append(panel)
 
                 layout = layout_by_page.get(page_number)
                 if not layout:
@@ -765,25 +1075,55 @@ def process_shot_stage(comic_id: int) -> dict[str, Any]:
                     db.session.add(layout)
                     db.session.flush()
                     layout_by_page[page_number] = layout
-                    layouts.append(layout)
+                    layouts_created.append(layout)
+                else:
+                    if layout not in layouts_updated:
+                        layouts_updated.append(layout)
 
-                assignment = ComicPagePanel(
-                    page_layout_id=layout.id,
-                    panel_shot_id=panel.id,
-                    position=panel_number,
+            db.session.flush()
+
+            touched_pages = set(page_panel_map.keys())
+            for page_number, layout in list(layout_by_page.items()):
+                if page_number not in touched_pages:
+                    ComicPagePanel.query.filter_by(page_layout_id=layout.id).delete(
+                        synchronize_session=False
+                    )
+                    db.session.delete(layout)
+                    layout_by_page.pop(page_number)
+
+            for page_number, panels_for_page in page_panel_map.items():
+                layout = layout_by_page[page_number]
+                ComicPagePanel.query.filter_by(page_layout_id=layout.id).delete(
+                    synchronize_session=False
                 )
-                db.session.add(assignment)
+                panels_for_page.sort(key=lambda item: item.panel_number or item.sequence_index)
+                for panel in panels_for_page:
+                    assignment = ComicPagePanel(
+                        page_layout_id=layout.id,
+                        panel_shot_id=panel.id,
+                        position=panel.panel_number,
+                    )
+                    db.session.add(assignment)
 
             db.session.flush()
             _set_stage_status(comic, "shots", "completed")
             db.session.commit()
+
+            all_panels = (
+                ComicPanelShot.query.filter_by(comic_id=comic_id)
+                .order_by(ComicPanelShot.sequence_index)
+                .all()
+            )
 
             logger.info("=== Shot refinement completed for comic_id=%s job_id=%s ===", comic_id, job_id)
             return {
                 "status": "completed",
                 "comic_id": comic_id,
                 "panel_shots": [panel.to_dict() for panel in created_panels],
-                "page_layouts": [layout.to_dict() for layout in layouts],
+                "updated_panel_shots": [panel.to_dict() for panel in updated_panels],
+                "all_panel_shots": [panel.to_dict() for panel in all_panels],
+                "page_layouts": [layout.to_dict() for layout in layouts_created],
+                "updated_page_layouts": [layout.to_dict() for layout in layouts_updated],
             }
         except Exception as exc:
             logger.exception("Shot refinement failed for comic_id=%s job_id=%s", comic_id, job_id)
@@ -803,6 +1143,12 @@ def process_page_render_stage(
     *,
     image_model: str | None = None,
     chain_remaining: bool = False,
+    font_family: str | None = None,
+    font_size: str | None = None,
+    bubble_shape: str | None = None,
+    bubble_tail: bool | None = None,
+    color_mode: str | None = None,
+    aspect_ratio: str | None = None,
 ) -> dict[str, Any]:
     """Render a comic page using existing panel shots and layout assignments."""
 
@@ -858,29 +1204,21 @@ def process_page_render_stage(
                     line_parts.append(f"Style: {panel.style_notes}")
                 panel_lines.append(" ".join(line_parts))
 
-            previous_panels = (
-                ComicPanelShot.query.filter(
-                    ComicPanelShot.comic_id == comic_id,
-                    ComicPanelShot.page_number.isnot(None),
-                    ComicPanelShot.page_number < page_number,
-                )
-                .order_by(ComicPanelShot.sequence_index)
-                .all()
-            )
+            script_color = script_data.get("color_mode")
+            effective_color = color_mode if color_mode is not None else script_color
+            normalized_color = DEFAULT_COLOR_MODES[0]
+            if isinstance(effective_color, str) and effective_color.strip():
+                candidate = effective_color.replace("_", "-").strip().lower()
+                if candidate in DEFAULT_COLOR_MODES:
+                    normalized_color = candidate
 
-            context_lines: list[str] = []
-            for prev in previous_panels:
-                snippet = prev.dialogue or prev.description
-                if snippet:
-                    panel_idx = prev.panel_number or prev.sequence_index
-                    context_lines.append(
-                        f"Page {prev.page_number} Panel {panel_idx}: {snippet}"
-                    )
-            context_block = (
-                "Previous pages context:\n" + "\n".join(context_lines)
-                if context_lines
-                else ""
-            )
+            script_ratio = script_data.get("aspect_ratio")
+            try:
+                normalized_aspect_ratio = validate_aspect_ratio(
+                    aspect_ratio or script_ratio or comic.aspect_ratio or DEFAULT_ASPECT_RATIO
+                )
+            except ValueError:
+                normalized_aspect_ratio = DEFAULT_ASPECT_RATIO
 
             layout_instruction = LAYOUT_INSTRUCTIONS.get(
                 layout.layout_key,
@@ -890,36 +1228,41 @@ def process_page_render_stage(
                 layout_instruction += f" Notes: {layout.notes}"
 
             api_key = _gemini_api_key()
-            genai.configure(api_key=api_key)
             model_name = image_model or _config_value("GEMINI_IMAGE_MODEL", Config.GEMINI_IMAGE_MODEL)
-            image_model_client = genai.GenerativeModel(model_name)
+            image_model_client = _genai_client()
 
+            ref_lines, ref_parts = _collect_character_image_references(comic)
             prompt = build_page_render_prompt(
                 comic,
                 script_data,
                 page_number,
                 layout_instruction,
                 panel_lines,
-                context_block,
+                color_mode=normalized_color,
+                font_family=font_family,
+                font_size=font_size,
+                bubble_shape=bubble_shape,
+                bubble_tail=bubble_tail,
+                aspect_ratio=normalized_aspect_ratio,
+                reference_notes=ref_lines,
             )
 
-            result = image_model_client.generate_content(prompt)
+            contents: list[Any] = [prompt]
+            contents.extend(ref_parts)
 
-            img_data: bytes | None = None
-            if result.candidates:
-                candidate = result.candidates[0]
-                content = getattr(candidate, "content", None)
-                if content and content.parts:
-                    for part in content.parts:
-                        inline = getattr(part, "inline_data", None)
-                        if inline and inline.data:
-                            image_data = inline.data
-                            if isinstance(image_data, str):
-                                img_data = base64.b64decode(image_data)
-                            else:
-                                img_data = image_data
-                            break
+            gen_config = _build_image_generation_config(normalized_aspect_ratio)
+            log_gemini_contents(
+                contents,
+                model_name,
+                context=f"page_render comic={comic_id} page={page_number} aspect={normalized_aspect_ratio}",
+            )
+            result = image_model_client.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=gen_config,
+            )
 
+            img_data = _extract_image_bytes(result)
             if not img_data:
                 raise ValueError("No image data returned from Gemini")
 
@@ -990,6 +1333,8 @@ def process_page_render_stage(
                                 page_number=next_panel.page_number,
                                 image_model=image_model,
                                 chain_remaining=True,
+                                color_mode=normalized_color,
+                                aspect_ratio=normalized_aspect_ratio,
                                 job_timeout=timeout,
                                 result_ttl=result_ttl,
                                 description=f"Render page {next_panel.page_number} for comic {comic_id}",
@@ -1202,11 +1547,9 @@ def process_cover_generation(
             raise ValueError("Cannot generate cover without panel context")
 
         try:
-            api_key = _gemini_api_key()
-            genai.configure(api_key=api_key)
+            client = _genai_client()
 
             text_model_name = _config_value("GEMINI_SCRIPT_MODEL", Config.GEMINI_SCRIPT_MODEL)
-            text_model = genai.GenerativeModel(text_model_name)
 
             summary_prompt = (
                 "You are a manga editor distilling a finished comic into a single evocative cover brief.\n"
@@ -1218,7 +1561,10 @@ def process_cover_generation(
                 + "\n".join(_panel_summary_lines(panels))
             )
 
-            summary_response = text_model.generate_content(summary_prompt)
+            summary_response = client.models.generate_content(
+                model=text_model_name,
+                contents=summary_prompt,
+            )
             summary_text = _extract_text_from_response(summary_response)
             if not summary_text:
                 raise ValueError("Gemini summary was empty")
@@ -1226,7 +1572,11 @@ def process_cover_generation(
             image_model_name = image_model or _config_value(
                 "GEMINI_IMAGE_MODEL", Config.GEMINI_IMAGE_MODEL
             )
-            image_model_client = genai.GenerativeModel(image_model_name)
+            try:
+                cover_aspect_ratio = validate_aspect_ratio(comic.aspect_ratio or DEFAULT_ASPECT_RATIO)
+            except ValueError:
+                cover_aspect_ratio = DEFAULT_ASPECT_RATIO
+            gen_config = _build_image_generation_config(cover_aspect_ratio)
 
             cover_prompt = (
                 f"Design a finished manga cover for '{comic.title}'.\n"
@@ -1235,23 +1585,13 @@ def process_cover_generation(
                 "Focus on the lead characters in a dramatic composition with space for title typography at the top."
             )
 
-            result = image_model_client.generate_content(cover_prompt)
+            result = client.models.generate_content(
+                model=image_model_name,
+                contents=cover_prompt,
+                config=gen_config,
+            )
 
-            img_data: bytes | None = None
-            if result.candidates:
-                candidate = result.candidates[0]
-                content = getattr(candidate, "content", None)
-                if content and content.parts:
-                    for part in content.parts:
-                        inline = getattr(part, "inline_data", None)
-                        if inline and inline.data:
-                            image_data = inline.data
-                            if isinstance(image_data, str):
-                                img_data = base64.b64decode(image_data)
-                            else:
-                                img_data = image_data
-                            break
-
+            img_data = _extract_image_bytes(result)
             if not img_data:
                 raise ValueError("No cover image data returned from Gemini")
 
@@ -1434,10 +1774,8 @@ def process_character_image_generation(
             character.image_error = None
             db.session.commit()
 
-            api_key = _gemini_api_key()
-            genai.configure(api_key=api_key)
             model_name = _config_value("GEMINI_IMAGE_MODEL", Config.GEMINI_IMAGE_MODEL)
-            image_model = genai.GenerativeModel(model_name)
+            client = _genai_client()
 
             prompt = (
                 "Create a polished character concept illustration based on the description below. "
@@ -1467,23 +1805,20 @@ def process_character_image_generation(
                 len(parts),
             )
 
-            response = image_model.generate_content(parts + [{"text": prompt}])
+            contents = parts + [{"text": prompt}]
+            gen_config = _build_image_generation_config(DEFAULT_ASPECT_RATIO)
+            log_gemini_contents(
+                contents,
+                model_name,
+                context=f"character_image character={character_id} aspect={DEFAULT_ASPECT_RATIO}",
+            )
+            response = client.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=gen_config,
+            )
 
-            img_data: bytes | None = None
-            if response.candidates:
-                candidate = response.candidates[0]
-                content = getattr(candidate, "content", None)
-                if content and content.parts:
-                    for part in content.parts:
-                        inline = getattr(part, "inline_data", None)
-                        if inline and inline.data:
-                            image_data = inline.data
-                            if isinstance(image_data, str):
-                                img_data = base64.b64decode(image_data)
-                            else:
-                                img_data = image_data
-                            break
-
+            img_data = _extract_image_bytes(response)
             if not img_data:
                 raise ValueError("Gemini image generation did not return image data")
 

@@ -1,0 +1,103 @@
+// @ts-check
+
+import eslint from '@eslint/js'
+import markdown from '@eslint/markdown'
+import eslintPluginJsonc from 'eslint-plugin-jsonc'
+import reactPlugin from 'eslint-plugin-react'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
+import simpleImportSort from 'eslint-plugin-simple-import-sort'
+import eslintPluginYml from 'eslint-plugin-yml'
+import tseslint from 'typescript-eslint'
+
+export default tseslint.config(
+  {
+    ignores: ['dist', 'node_modules', '**/*.d.ts', 'build'],
+  },
+  eslint.configs.recommended,
+  markdown.configs.processor,
+  ...tseslint.configs.recommended,
+  ...tseslint.configs.stylistic,
+  reactPlugin.configs.flat.recommended,
+  reactPlugin.configs.flat['jsx-runtime'],
+  ...eslintPluginJsonc.configs['flat/recommended-with-jsonc'],
+  ...eslintPluginYml.configs['flat/recommended'],
+  {
+    files: ['**/*.{js,mjs,cjs,jsx,ts,tsx}'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      parser: tseslint.parser,
+      parserOptions: {
+        ecmaFeatures: {
+          jsx: true,
+        },
+      },
+    },
+    plugins: {
+      'react-hooks': reactHooks,
+      'react-refresh': reactRefresh,
+      'simple-import-sort': simpleImportSort,
+    },
+    settings: {
+      react: {
+        version: 'detect',
+      },
+    },
+    rules: {
+      /* TypeScript rules */
+      '@typescript-eslint/no-explicit-any': 'off',
+
+      /* plugin rules */
+      'simple-import-sort/imports': 'error',
+      'simple-import-sort/exports': 'error',
+      
+      /* React hooks rules */
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
+      
+      /* React refresh rules */
+      'react-refresh/only-export-components': [
+        'warn',
+        { allowConstantExport: true },
+      ],
+
+      /* React rules */
+      'react/react-in-jsx-scope': 'off',
+      'react/jsx-uses-react': 'off',
+
+      /* stylistic rules */
+      quotes: ['error', 'single', { avoidEscape: true }],
+      indent: ['error', 2, { SwitchCase: 1 }],
+      'key-spacing': ['error', { beforeColon: false, afterColon: true }],
+      'object-curly-spacing': ['error', 'always'],
+      'array-bracket-spacing': ['error', 'never'],
+      'computed-property-spacing': ['error', 'never'],
+      'array-element-newline': ['error', 'consistent'],
+      'comma-spacing': ['error', { before: false, after: true }],
+      'arrow-parens': ['error', 'always'],
+      'comma-dangle': ['error', 'always-multiline'],
+      'space-before-function-paren': [
+        'error',
+        {
+          anonymous: 'always',
+          named: 'never',
+          asyncArrow: 'always',
+        },
+      ],
+      'padding-line-between-statements': [
+        'error',
+        { blankLine: 'always', prev: 'multiline-block-like', next: '*' },
+        { blankLine: 'always', prev: '*', next: 'return' },
+        { blankLine: 'always', prev: 'const', next: 'function' },
+        { blankLine: 'always', prev: 'let', next: 'function' },
+        { blankLine: 'any', prev: 'const', next: 'const' },
+        { blankLine: 'any', prev: 'let', next: 'let' },
+      ],
+      'no-multi-spaces': 'error',
+      'no-multiple-empty-lines': ['error', { max: 1, maxEOF: 0 }],
+      'dot-location': ['error', 'property'],
+      'no-empty': ['error', { allowEmptyCatch: true }],
+    },
+  },
+)

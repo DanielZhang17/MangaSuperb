@@ -4,11 +4,13 @@ from __future__ import annotations
 import logging
 from typing import Any, Type
 
-from flask import Flask, jsonify
+from flask import Flask, current_app, jsonify, request
 from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import Config
 from mangasuperb.extensions import db, init_extensions, login_manager
+from mangasuperb.db_utils import ensure_aspect_ratio_constraint
 from mangasuperb.routes import register_blueprints
 from storage import R2Storage
 from swagger import register_swagger
@@ -18,11 +20,22 @@ def create_app(config_object: Type[Config] | str | None = None) -> Flask:
     """Create and configure a Flask application instance."""
     config_object = config_object or Config
 
-    app = Flask(__name__, static_folder="static")
+    app = Flask(__name__, static_folder="static", static_url_path="/")
     app.config.from_object(config_object)
+
+    if app.config.get("PROXY_FIX_ENABLED", False):
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app,
+            x_for=app.config.get("PROXY_FIX_FOR", 1),
+            x_proto=app.config.get("PROXY_FIX_PROTO", 1),
+            x_host=app.config.get("PROXY_FIX_HOST", 1),
+            x_port=app.config.get("PROXY_FIX_PORT", 1),
+            x_prefix=app.config.get("PROXY_FIX_PREFIX", 0),
+        )
 
     _configure_logging(app)
     init_extensions(app)
+    ensure_aspect_ratio_constraint(app)
     _register_login_handlers()
     register_blueprints(app)
     register_swagger(app)
@@ -68,10 +81,27 @@ def _register_error_handlers(app: Flask) -> None:
 
     @app.errorhandler(HTTPException)
     def handle_http_exception(exc: HTTPException):
+        if (
+            exc.code == 404
+            and request.method == "GET"
+            and request.accept_mimetypes.accept_html
+        ):
+            path = request.path or ""
+            # Allow API and asset 404s to fall through to the client
+            if not (
+                path.startswith("/api")
+                or path.startswith("/swagger")
+                or "." in path.rsplit("/", 1)[-1]
+            ):
+                try:
+                    return current_app.send_static_file("index.html"), 200
+                except (FileNotFoundError, RuntimeError):
+                    app.logger.warning("SPA fallback failed to locate index.html", exc_info=True)
+
         response = jsonify({"error": exc.description})
         return response, exc.code
 
     @app.errorhandler(Exception)
     def handle_exception(exc: Exception):
-        app.logger.exception("Unhandled exception: %%s", exc)
+        app.logger.exception("Unhandled exception: %s", exc)
         return jsonify({"error": "Internal server error"}), 500

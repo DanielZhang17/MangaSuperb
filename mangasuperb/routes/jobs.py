@@ -270,9 +270,16 @@ def _handle_page_render(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     if not comic or comic.user_id != current_user.id:
         return {"error": "Comic not found"}, 404
 
+    aspect_ratio = None
+    if data.get("aspect_ratio") is not None:
+        try:
+            aspect_ratio = validate_aspect_ratio(data.get("aspect_ratio"))
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
+
     try:
         queue = _require_queue()
-        job = enqueue_page_render(queue, comic, page_number)
+        job = enqueue_page_render(queue, comic, page_number, aspect_ratio=aspect_ratio)
         db.session.refresh(comic)
         _log_queue_snapshot(queue, "page_render_enqueued")
         return {"job_id": job.id, "comic": comic.to_dict()}, 202

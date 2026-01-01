@@ -5,7 +5,7 @@ flask-login==0.6.3
 flask-bcrypt==1.0.1
 flask-migrate==4.0.5
 psycopg2-binary==2.9.9
-google-generativeai==0.3.2
+google-genai
 Pillow==10.1.0
 redis==5.0.1
 rq==1.15.1

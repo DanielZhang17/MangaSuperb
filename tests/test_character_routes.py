@@ -195,3 +195,33 @@ def test_rename_character_requires_owner(app: Flask, auth_client, user: Any) -> 
     assert response.status_code == 404
     data = response.get_json()
     assert data["error"] == "Character not found"
+
+
+def test_delete_character_removes_owned_character(app: Flask, auth_client, user: Any) -> None:
+    with app.app_context():
+        owner = db.session.get(User, user.id)
+        assert owner is not None
+        character = _make_character(user_id=owner.id, name="Disposable Hero")
+        db.session.commit()
+        character_id = character.id
+
+    response = auth_client.delete(f"/api/characters/{character_id}")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["message"] == "Character deleted"
+
+    with app.app_context():
+        assert db.session.get(Character, character_id) is None
+
+
+def test_delete_character_requires_ownership(app: Flask, auth_client, user: Any) -> None:
+    with app.app_context():
+        other = _create_user("other", "other-delete@example.com")
+        character = _make_character(user_id=other.id, name="Protected")
+        db.session.commit()
+        character_id = character.id
+
+    response = auth_client.delete(f"/api/characters/{character_id}")
+    assert response.status_code == 404
+    payload = response.get_json()
+    assert payload["error"] == "Character not found"
