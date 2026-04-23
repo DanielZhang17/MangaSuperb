@@ -8,7 +8,7 @@ from flask import Flask
 
 from mangasuperb.extensions import db
 from mangasuperb.services import jobs as job_services
-from models import Character, Comic, Script, User
+from models import Character, Comic, ComicWorkflowStage, Script, User
 
 
 def _create_comic(app: Flask, user_id: int) -> Comic:
@@ -72,8 +72,6 @@ def test_create_character_optimization_job(app: Flask, auth_client, user: Simple
 
 from datetime import datetime
 
-from models import ComicWorkflowStage, Script
-
 
 def _create_comic_simple(user_id: int, *, title: str = "Test Comic") -> Comic:
     script = Script(user_id=user_id, title=title, content=json.dumps({"title": title, "panels": []}))
@@ -107,6 +105,7 @@ def test_active_jobs_returns_only_in_flight_for_current_user(app, auth_client, u
     with app.app_context():
         owned = _create_comic_simple(user.id, title="Mine")
         _create_stage(owned.id, "render", "in_progress", "job-mine-1")
+        _create_stage(owned.id, "shots", "pending", "job-mine-2")
         _create_stage(owned.id, "outline", "completed", "job-mine-old")
         owned_id = owned.id
 
@@ -121,7 +120,7 @@ def test_active_jobs_returns_only_in_flight_for_current_user(app, auth_client, u
     body = res.get_json()
     assert "active" in body
     job_ids = sorted(entry["job_id"] for entry in body["active"])
-    assert job_ids == ["job-mine-1"]
+    assert job_ids == ["job-mine-1", "job-mine-2"]
     entry = body["active"][0]
     assert entry["comic_id"] == owned_id
     assert entry["stage"] == "render"
