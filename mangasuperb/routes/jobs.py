@@ -29,7 +29,7 @@ from mangasuperb.services.jobs import (
     enqueue_story_optimization,
     process_character_optimization,
 )
-from models import Character, Comic, Script
+from models import Character, Comic, ComicWorkflowStage, Script
 from swagger import JOB_CREATE_DOC, JOB_STATUS_DOC
 
 logger = logging.getLogger(__name__)
@@ -270,9 +270,16 @@ def _handle_page_render(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     if not comic or comic.user_id != current_user.id:
         return {"error": "Comic not found"}, 404
 
+    aspect_ratio = None
+    if data.get("aspect_ratio") is not None:
+        try:
+            aspect_ratio = validate_aspect_ratio(data.get("aspect_ratio"))
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
+
     try:
         queue = _require_queue()
-        job = enqueue_page_render(queue, comic, page_number)
+        job = enqueue_page_render(queue, comic, page_number, aspect_ratio=aspect_ratio)
         db.session.refresh(comic)
         _log_queue_snapshot(queue, "page_render_enqueued")
         return {"job_id": job.id, "comic": comic.to_dict()}, 202
@@ -341,3 +348,31 @@ def get_job_status(job_id: str) -> Any:
     except Exception as exc:  # pragma: no cover - unexpected failure
         logger.error("Error getting job status: %s", exc)
         return jsonify({"error": str(exc)}), 500
+
+
+@bp.get("/active")
+@login_required
+def list_active_jobs() -> Any:
+    """Return in-flight workflow stages owned by the current user."""
+    rows = (
+        db.session.query(ComicWorkflowStage, Comic)
+        .join(Comic, ComicWorkflowStage.comic_id == Comic.id)
+        .filter(Comic.user_id == current_user.id)
+        .filter(ComicWorkflowStage.status.in_(("pending", "in_progress")))
+        .filter(ComicWorkflowStage.job_id.isnot(None))
+        .order_by(ComicWorkflowStage.started_at.asc())
+        .all()
+    )
+
+    active = [
+        {
+            "job_id": stage.job_id,
+            "comic_id": comic.id,
+            "stage": stage.stage,
+            "status": stage.status,
+            "title": comic.title,
+            "started_at": stage.started_at.isoformat() if stage.started_at else None,
+        }
+        for stage, comic in rows
+    ]
+    return jsonify({"active": active}), 200
