@@ -8,10 +8,8 @@ import logging
 import os
 from typing import Any, Dict, Iterable, List, Optional
 
-from google import genai
-from flask import current_app
-
 from config import Config
+from mangasuperb.services.ai_provider import get_text_provider
 
 logger = logging.getLogger(__name__)
 
@@ -86,21 +84,6 @@ def _strip_code_fences(payload: str) -> str:
     return payload.strip()
 
 
-def _extract_text_from_response(response: Any) -> str:
-    text = getattr(response, "text", "") or ""
-    if text:
-        return text
-
-    candidates = getattr(response, "candidates", None) or []
-    for candidate in candidates:
-        parts = getattr(getattr(candidate, "content", None), "parts", []) or []
-        for part in parts:
-            part_text = getattr(part, "text", None)
-            if part_text:
-                text += part_text
-    return text
-
-
 _PROMPT_LOG_LIMIT = 200
 
 
@@ -163,32 +146,6 @@ def build_script_prompt(idea: str) -> str:
     return SCRIPT_PROMPT_TEMPLATE.format(idea=idea)
 
 
-def _config_value(key: str, fallback: str) -> str:
-    try:
-        return current_app.config.get(key, fallback)  # type: ignore[attr-defined]
-    except RuntimeError:
-        return fallback
-
-
-def _resolve_api_key(explicit: Optional[str] = None) -> str:
-    if explicit:
-        return explicit
-    return _config_value("GEMINI_API_KEY", Config.GEMINI_API_KEY)
-
-
-def _genai_client(explicit_key: Optional[str] = None) -> genai.Client:
-    api_key_value = _resolve_api_key(explicit_key)
-    if not api_key_value:
-        raise ValueError("Gemini API key is not configured")
-    return genai.Client(api_key=api_key_value)
-
-
-def _resolve_model(config_key: str, default_value: str, override: Optional[str] = None) -> str:
-    if override:
-        return override
-    return _config_value(config_key, default_value)
-
-
 def generate_script_from_prompt(
     prompt: str,
     model_name: str | None = None,
@@ -199,14 +156,8 @@ def generate_script_from_prompt(
     if not prompt:
         raise ValueError("Prompt is required")
 
-    resolved_model = _resolve_model("GEMINI_SCRIPT_MODEL", Config.GEMINI_SCRIPT_MODEL, model_name)
-    logger.info("Generating manga script with model: %s", resolved_model)
-    client = _genai_client(api_key)
     prompt_text = build_script_prompt(prompt)
-    log_gemini_contents([prompt_text], resolved_model, context="script")
-    response = client.models.generate_content(model=resolved_model, contents=prompt_text)
-
-    raw_text = _extract_text_from_response(response)
+    raw_text = get_text_provider().generate_text(prompt_text)
     cleaned = _strip_code_fences(raw_text)
 
     try:
@@ -232,12 +183,8 @@ def optimize_character_description(
     if not description:
         raise ValueError("Description is required")
 
-    resolved_model = _resolve_model("GEMINI_SCRIPT_MODEL", Config.GEMINI_SCRIPT_MODEL, model_name)
-    client = _genai_client(api_key)
     prompt_text = CHARACTER_OPTIMIZE_PROMPT.format(description=description)
-    log_gemini_contents([prompt_text], resolved_model, context="character_optimize")
-    response = client.models.generate_content(model=resolved_model, contents=prompt_text)
-    optimized = _extract_text_from_response(response).strip()
+    optimized = get_text_provider().generate_text(prompt_text).strip()
     if not optimized:
         raise ValueError("Optimization returned empty text")
     return optimized
@@ -296,13 +243,9 @@ def enhance_story_text(
     if not story:
         raise ValueError("Story text is required")
 
-    resolved_model = _resolve_model("GEMINI_SCRIPT_MODEL", Config.GEMINI_SCRIPT_MODEL, model_name)
-    client = _genai_client(api_key)
-    response = client.models.generate_content(
-        model=resolved_model,
-        contents=STORY_ENHANCE_PROMPT.format(story=story),
-    )
-    enhanced = _extract_text_from_response(response).strip()
+    enhanced = get_text_provider().generate_text(
+        STORY_ENHANCE_PROMPT.format(story=story)
+    ).strip()
     if not enhanced:
         raise ValueError("Enhancement returned empty text")
     return enhanced

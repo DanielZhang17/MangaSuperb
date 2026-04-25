@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import logging
 from io import BytesIO
 from typing import Any
@@ -50,12 +51,10 @@ class GeminiImageProvider(ImageProvider):
 
         gen_config = None
         if aspect_ratio:
-            try:
+            with contextlib.suppress(Exception):
                 gen_config = types.GenerateContentConfig(
                     image_config=types.ImageConfig(aspect_ratio=aspect_ratio)
                 )
-            except Exception:
-                pass
 
         response = client.models.generate_content(
             model=model_name, contents=contents, config=gen_config
