@@ -57,6 +57,16 @@ class Config:
     GEMINI_SCRIPT_MODEL = os.getenv('GEMINI_SCRIPT_MODEL', 'gemini-2.5-pro')
     GEMINI_IMAGE_MODEL = os.getenv('GEMINI_IMAGE_MODEL', 'gemini-2.5-flash-image')
 
+    # AI provider selection ("gemini" or "third_party")
+    IMAGE_PROVIDER = os.getenv('IMAGE_PROVIDER', 'gemini')
+    TEXT_PROVIDER = os.getenv('TEXT_PROVIDER', 'gemini')
+
+    # Third-party OpenAI-compatible API
+    THIRD_PARTY_API_URL = os.getenv('THIRD_PARTY_API_URL', '')
+    THIRD_PARTY_API_KEY = os.getenv('THIRD_PARTY_API_KEY', '')
+    THIRD_PARTY_IMAGE_MODEL = os.getenv('THIRD_PARTY_IMAGE_MODEL', '')
+    THIRD_PARTY_TEXT_MODEL = os.getenv('THIRD_PARTY_TEXT_MODEL', '')
+
     # Cloudflare R2
     R2_ACCOUNT_ID = os.getenv('R2_ACCOUNT_ID', '')
     R2_ACCESS_KEY_ID = os.getenv('R2_ACCESS_KEY_ID', '')
