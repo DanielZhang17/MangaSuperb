@@ -1,32 +1,145 @@
 import { useAtom } from 'jotai'
-import { Loader2, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { Loader2, Trash2, Upload } from 'lucide-react'
+import { useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 
 import InlineInput from '@/components/common/inline-input'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { useI18n } from '@/hooks/use-i18n'
 
 import ComicsApi from '@/apis/comics'
 import StoriesApi from '@/apis/stories'
-import { currentComicIdAtom, fullStoryAtom, mangaTitleAtom, storyPanelsAtom, storyStepAtom } from '../atoms'
+import {
+  currentComicIdAtom,
+  fullStoryAtom,
+  mangaTitleAtom,
+  storyPanelsAtom,
+  storyStepAtom,
+} from '../atoms'
 
-export function StoryEditor(){
+function useFileImport() {
+  const { t } = useI18n('comics')
+  const [content, setContent] = useAtom(fullStoryAtom)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const pendingTextRef = useRef<string>('')
+  const [confirmPending, setConfirmPending] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+
+  const handleFile = (file: File) => {
+    if (!file.name.endsWith('.txt') && file.type !== 'text/plain') {
+      toast.error(String(t('editor.import.wrongType')))
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const text = ((e.target?.result as string) ?? '').trim()
+      if (!text) {
+        toast.error(String(t('editor.import.emptyFile')))
+        return
+      }
+      if (content.trim()) {
+        pendingTextRef.current = text
+        setConfirmPending(true)
+      } else {
+        setContent(text)
+      }
+    }
+    reader.onerror = () => {
+      toast.error(String(t('editor.import.readError')))
+    }
+    reader.readAsText(file)
+  }
+
+  const handleReplace = () => {
+    setContent(pendingTextRef.current)
+    pendingTextRef.current = ''
+    setConfirmPending(false)
+  }
+
+  const handleAppend = () => {
+    setContent(content + '\n\n' + pendingTextRef.current)
+    pendingTextRef.current = ''
+    setConfirmPending(false)
+  }
+
+  const handleCancel = () => {
+    pendingTextRef.current = ''
+    setConfirmPending(false)
+  }
+
+  const onFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) handleFile(file)
+    e.target.value = ''
+  }
+
+  const openFilePicker = () => fileInputRef.current?.click()
+
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(true)
+  }
+
+  const onDragLeave = () => setIsDragging(false)
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+    const file = e.dataTransfer.files[0]
+    if (file) handleFile(file)
+  }
+
+  return {
+    fileInputRef,
+    confirmPending,
+    isDragging,
+    handleReplace,
+    handleAppend,
+    handleCancel,
+    onFileInputChange,
+    openFilePicker,
+    onDragOver,
+    onDragLeave,
+    onDrop,
+  }
+}
+
+export function StoryEditor() {
   const { t } = useI18n('comics')
   const [title, setTitle] = useAtom(mangaTitleAtom)
   const [content, setContent] = useAtom(fullStoryAtom)
   const [comicId] = useAtom(currentComicIdAtom)
   const [enhancing, setEnhancing] = useState(false)
-  // 创建漫画逻辑已移动到"生图"阶段，这里仅编辑文本与标题
+
+  const {
+    fileInputRef,
+    confirmPending,
+    isDragging,
+    handleReplace,
+    handleAppend,
+    handleCancel,
+    onFileInputChange,
+    openFilePicker,
+    onDragOver,
+    onDragLeave,
+    onDrop,
+  } = useFileImport()
 
   const charCount = content.replace(/\s/g, '').length
 
   const handleTitleUpdate = async (newTitle: string) => {
     setTitle(newTitle)
-
-    // If comic exists, persist to backend
     if (comicId) {
       try {
         await ComicsApi.update(comicId, { title: newTitle })
@@ -41,10 +154,8 @@ export function StoryEditor(){
     const trimmed = content.trim()
     if (!trimmed) {
       toast.error('请先输入故事内容')
-
       return
     }
-
     setEnhancing(true)
     try {
       const resp = await StoriesApi.enhance({ story: trimmed, comic_id: comicId ?? undefined })
@@ -86,6 +197,24 @@ export function StoryEditor(){
         <Button
           variant="outline"
           size="sm"
+          className="shrink-0 px-3"
+          onClick={openFilePicker}
+          title={String(t('editor.import.button'))}
+          aria-label={String(t('editor.import.button'))}
+        >
+          <Upload className="h-4 w-4" />
+        </Button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".txt"
+          className="hidden"
+          tabIndex={-1}
+          onChange={onFileInputChange}
+        />
+        <Button
+          variant="outline"
+          size="sm"
           className="ml-auto shrink-0 whitespace-nowrap px-4 sm:px-6"
           onClick={handleEnhance}
           disabled={enhancing || !content.trim()}
@@ -94,7 +223,12 @@ export function StoryEditor(){
           AI 增强剧情
         </Button>
       </div>
-      <div className="relative rounded-2xl border bg-card/40 p-2">
+      <div
+        className={`relative rounded-2xl border bg-card/40 p-2${isDragging ? ' ring-2 ring-primary/50' : ''}`}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+      >
         <Textarea
           placeholder="..."
           className="resize-none text-base leading-relaxed sm:text-lg min-h-[220px] max-h-[360px] overflow-y-auto pr-4 scrollbar-themed sm:min-h-[260px] sm:max-h-[420px] lg:min-h-[400px] lg:max-h-[600px]"
@@ -109,6 +243,26 @@ export function StoryEditor(){
           {charCount}/1000字
         </div>
       </div>
+
+      <Dialog open={confirmPending} onOpenChange={(open) => { if (!open) handleCancel() }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{String(t('editor.import.dialogTitle'))}</DialogTitle>
+            <DialogDescription>{String(t('editor.import.dialogBody'))}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={handleCancel}>
+              {String(t('cancel', { ns: 'common' }))}
+            </Button>
+            <Button variant="outline" onClick={handleReplace}>
+              {String(t('editor.import.replace'))}
+            </Button>
+            <Button onClick={handleAppend}>
+              {String(t('editor.import.append'))}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -119,9 +273,11 @@ export function PanelsView() {
   const [panels, setPanels] = useAtom(storyPanelsAtom)
 
   const handleDelete = (removeIndex: number) => {
-    setPanels((prev) => prev
-      .filter((_, i) => i !== removeIndex)
-      .map((p, i) => ({ ...p, id: i + 1 })))
+    setPanels((prev) =>
+      prev
+        .filter((_, i) => i !== removeIndex)
+        .map((p, i) => ({ ...p, id: i + 1 })),
+    )
   }
 
   return (
@@ -149,8 +305,12 @@ export function PanelsView() {
         </CardContent>
       </Card>
       <div className="flex justify-center gap-4">
-        <Button size="lg" variant="outline" onClick={() => setStoryStep('input')}>{String(t('common.back'))}</Button>
-        <Button size="lg" onClick={() => setStoryStep('generate')}>{String(t('common.next'))}</Button>
+        <Button size="lg" variant="outline" onClick={() => setStoryStep('input')}>
+          {String(t('common.back'))}
+        </Button>
+        <Button size="lg" onClick={() => setStoryStep('generate')}>
+          {String(t('common.next'))}
+        </Button>
       </div>
     </div>
   )
