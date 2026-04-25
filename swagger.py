@@ -539,6 +539,33 @@ CHARACTER_RENAME_DOC = {
     'security': [{'sessionCookie': []}],
 }
 
+CHARACTER_DELETE_DOC = {
+    'tags': ['Characters'],
+    'summary': 'Delete a character',
+    'description': 'Delete a character owned by the authenticated user.',
+    'parameters': [
+        {
+            'name': 'character_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        }
+    ],
+    'responses': {
+        '200': {
+            'description': 'Deletion confirmation',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'message': {'type': 'string', 'example': 'Character deleted'},
+                },
+            },
+        },
+        '404': {'description': 'Character not found'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
 SCRIPT_CREATE_DOC = {
     'tags': ['Scripts'],
     'summary': 'Create a script',
@@ -736,6 +763,76 @@ COMIC_DETAIL_DOC = {
     'security': [{'sessionCookie': []}],
 }
 
+COMIC_UPDATE_DOC = {
+    'tags': ['Comics'],
+    'summary': 'Update comic details',
+    'description': 'Updates editable fields of an existing comic (title, style_description, is_public).',
+    'parameters': [
+        {
+            'name': 'comic_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        },
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'title': {'type': 'string', 'example': 'Updated Comic Title'},
+                    'style_description': {'type': 'string', 'example': 'Dark cyberpunk aesthetic'},
+                    'is_public': {'type': 'boolean', 'example': True},
+                },
+            },
+        },
+    ],
+    'responses': {
+        '200': {
+            'description': 'Comic updated successfully',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'comic': COMIC_CREATE_DOC['responses']['201']['schema']['properties']['comic'],
+                },
+            },
+        },
+        '400': {'description': 'Validation error'},
+        '404': {'description': 'Comic not found'},
+        '500': {'description': 'Update failed'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+COMIC_DELETE_DOC = {
+    'tags': ['Comics'],
+    'summary': 'Delete a comic',
+    'description': 'Deletes a comic and all associated data owned by the authenticated user.',
+    'parameters': [
+        {
+            'name': 'comic_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        }
+    ],
+    'responses': {
+        '200': {
+            'description': 'Deletion confirmation',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'message': {'type': 'string', 'example': 'Comic deleted'},
+                },
+            },
+        },
+        '404': {'description': 'Comic not found'},
+        '500': {'description': 'Deletion failed'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
 COMIC_IMAGES_DOC = {
     'tags': ['Comics'],
     'summary': 'Get comic page image URLs',
@@ -776,11 +873,47 @@ COMIC_IMAGES_DOC = {
     'security': [{'sessionCookie': []}],
 }
 
+COMIC_PAGE_DELETE_DOC = {
+    'tags': ['Comics'],
+    'summary': 'Delete a rendered comic page',
+    'description': 'Removes a rendered page and clears any associated layouts or panel assignments.',
+    'parameters': [
+        {
+            'name': 'comic_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        },
+        {
+            'name': 'page_number',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        },
+    ],
+    'responses': {
+        '200': {
+            'description': 'Deletion confirmation with updated comic payload',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'message': {'type': 'string', 'example': 'Page deleted'},
+                    'comic': COMIC_CREATE_DOC['responses']['201']['schema']['properties']['comic'],
+                },
+            },
+        },
+        '400': {'description': 'Invalid page number'},
+        '404': {'description': 'Comic or page not found'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
 COMIC_PUBLISH_DOC = {
     'tags': ['Comics'],
     'summary': 'Publish comic (export assets)',
     'description': (
-        'Generates cover art (if absent), exports PDF/ZIP bundles, and optionally marks the comic as public.'
+        'Generates cover art (if absent), exports PDF/ZIP bundles, and optionally marks the comic as public. '
+        'Calling the endpoint again re-exports the assets; it only rejects when another publish run is still queued.'
     ),
     'parameters': [
         {
@@ -824,9 +957,47 @@ COMIC_PUBLISH_DOC = {
             },
         },
         '404': {'description': 'Comic not found'},
-        '409': {'description': 'Render stage not completed'},
+        '409': {
+            'description': 'Render stage not completed or publish already in progress',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'error': {'type': 'string'},
+                    'job_id': {'type': 'string'},
+                },
+            },
+        },
         '503': {'description': 'Background queue not configured'},
         '500': {'description': 'Failed to enqueue publish workflow'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+
+COMIC_UNPUBLISH_DOC = {
+    'tags': ['Comics'],
+    'summary': 'Unpublish comic',
+    'description': 'Marks an owned comic as private without requiring export assets.',
+    'parameters': [
+        {
+            'name': 'comic_id',
+            'in': 'path',
+            'required': True,
+            'type': 'integer',
+        }
+    ],
+    'responses': {
+        '200': {
+            'description': 'Comic unpublished successfully',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'comic': COMIC_CREATE_DOC['responses']['201']['schema']['properties']['comic'],
+                },
+            },
+        },
+        '404': {'description': 'Comic not found'},
+        '500': {'description': 'Unpublish failed'},
     },
     'security': [{'sessionCookie': []}],
 }
@@ -1096,7 +1267,7 @@ PANEL_LAYOUT_DOC = {
 PANEL_RENDER_DOC = {
     'tags': ['Panels'],
     'summary': 'Render a specific comic page',
-    'description': 'Queues an image generation job for the specified comic page.',
+    'description': 'Queues an image generation job for the specified comic page with optional customization.',
     'parameters': [
         {
             'name': 'comic_id',
@@ -1109,6 +1280,37 @@ PANEL_RENDER_DOC = {
             'in': 'path',
             'required': True,
             'type': 'integer',
+        },
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': False,
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'font_family': {
+                        'type': 'string',
+                        'description': 'Font family for speech bubble text',
+                        'example': 'Arial',
+                    },
+                    'font_size': {
+                        'type': 'string',
+                        'description': 'Font size for speech bubble text',
+                        'example': 'medium',
+                    },
+                    'bubble_shape': {
+                        'type': 'string',
+                        'description': 'Shape style for speech bubbles',
+                        'enum': ['rect', 'round'],
+                        'example': 'round',
+                    },
+                    'bubble_tail': {
+                        'type': 'boolean',
+                        'description': 'Whether to include tails on speech bubbles',
+                        'example': True,
+                    },
+                },
+            },
         },
     ],
     'responses': {
@@ -1218,6 +1420,53 @@ STORY_UPSERT_DOC = {
         },
         '400': {'description': 'Validation error'},
         '404': {'description': 'Comic not found'},
+    },
+    'security': [{'sessionCookie': []}],
+}
+
+
+STORY_ENHANCE_DOC = {
+    'tags': ['Stories'],
+    'summary': 'Enhance story draft with AI',
+    'description': 'Uses Gemini to polish the supplied story text and optionally updates the comic script.',
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['story'],
+                'properties': {
+                    'story': {'type': 'string', 'example': '原始故事内容'},
+                    'comic_id': {
+                        'type': 'integer',
+                        'description': 'Optional comic id to persist the enhanced story.',
+                    },
+                },
+            },
+        }
+    ],
+    'responses': {
+        '200': {
+            'description': 'Enhanced story text',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'story': {'type': 'string'},
+                    'comic': {
+                        'anyOf': [
+                            COMIC_CREATE_DOC['responses']['201']['schema']['properties']['comic'],
+                            {'type': 'null'},
+                        ],
+                    },
+                },
+            },
+        },
+        '400': {'description': 'Validation error'},
+        '404': {'description': 'Comic not found'},
+        '502': {'description': 'Gemini enhancement failed'},
+        '500': {'description': 'Failed to persist enhanced story'},
     },
     'security': [{'sessionCookie': []}],
 }
@@ -1467,24 +1716,30 @@ __all__ = [
     'CHARACTER_CREATE_DOC',
     'CHARACTER_LIST_DOC',
     'CHARACTER_RENAME_DOC',
+    'CHARACTER_DELETE_DOC',
     'SCRIPT_CREATE_DOC',
     'SCRIPT_LIST_DOC',
     'SCRIPT_DETAIL_DOC',
     'COMIC_CREATE_DOC',
     'COMIC_LIST_DOC',
     'COMIC_DETAIL_DOC',
+    'COMIC_UPDATE_DOC',
+    'COMIC_DELETE_DOC',
     'COMIC_IMAGES_DOC',
     'JOB_CREATE_DOC',
     'JOB_STATUS_DOC',
     'CHARACTER_DETAIL_DOC',
     'COMIC_PUBLISH_DOC',
+    'COMIC_UNPUBLISH_DOC',
     'COMIC_LIKE_DOC',
     'COMIC_UNLIKE_DOC',
+    'COMIC_PAGE_DELETE_DOC',
     'PANEL_UPDATE_DOC',
     'PANEL_LAYOUT_DOC',
     'PANEL_RENDER_DOC',
     'STORY_GET_DOC',
     'STORY_UPSERT_DOC',
+    'STORY_ENHANCE_DOC',
     'STORY_OPTIMIZE_DOC',
     'COMIC_PUBLIC_LIST_DOC',
     'COMIC_PUBLIC_DETAIL_DOC',

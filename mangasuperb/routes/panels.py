@@ -9,8 +9,9 @@ from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
 
 from mangasuperb.extensions import db
+from mangasuperb.services.generation import validate_aspect_ratio
 from mangasuperb.services.jobs import enqueue_page_render, set_comic_stage_status
-from models import Comic, ComicPageLayout, ComicPagePanel, ComicPanelShot
+from models import DEFAULT_COLOR_MODES, Comic, ComicPageLayout, ComicPagePanel, ComicPanelShot
 from swagger import PANEL_LAYOUT_DOC, PANEL_RENDER_DOC, PANEL_UPDATE_DOC
 
 bp = Blueprint("panels", __name__, url_prefix="/api/panels")
@@ -178,8 +179,28 @@ def render_page(comic_id: int, page_number: int) -> Any:
     if not comic:
         return jsonify({"error": "Comic not found"}), 404
 
-    _ = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True) or {}
     image_model = None
+    font_family = payload.get("font_family")
+    font_size = payload.get("font_size")
+    bubble_shape = payload.get("bubble_shape")
+    bubble_tail = payload.get("bubble_tail")
+    color_mode_raw = payload.get("color_mode")
+    aspect_ratio_raw = payload.get("aspect_ratio")
+
+    color_mode = None
+    if isinstance(color_mode_raw, str) and color_mode_raw.strip():
+        candidate = color_mode_raw.strip()
+        if candidate not in DEFAULT_COLOR_MODES:
+            return jsonify({"error": "color_mode is invalid"}), 400
+        color_mode = candidate
+
+    aspect_ratio = None
+    if aspect_ratio_raw is not None:
+        try:
+            aspect_ratio = validate_aspect_ratio(aspect_ratio_raw)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
 
     queue = current_app.extensions.get("rq_queue")
     if not queue:
@@ -190,6 +211,12 @@ def render_page(comic_id: int, page_number: int) -> Any:
         comic,
         page_number,
         image_model=image_model,
+        font_family=font_family,
+        font_size=font_size,
+        bubble_shape=bubble_shape,
+        bubble_tail=bubble_tail,
+        color_mode=color_mode,
+        aspect_ratio=aspect_ratio,
     )
     db.session.refresh(comic)
 

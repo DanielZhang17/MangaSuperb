@@ -76,6 +76,23 @@ class DummyCoverImageModel:
         return DummyModelResult(candidates=[candidate])
 
 
+class DummyGenAIClient:
+    """Small stand-in for google.genai.Client used by job tests."""
+
+    def __init__(self, responder) -> None:
+        self.models = SimpleNamespace(generate_content=responder)
+
+
+def _prompt_text(contents) -> str:
+    if isinstance(contents, str):
+        return contents
+    if isinstance(contents, list) and contents:
+        first = contents[0]
+        if isinstance(first, str):
+            return first
+    return str(contents)
+
+
 @pytest.fixture
 def script_payload() -> dict[str, object]:
     panels = []
@@ -117,23 +134,21 @@ def comic(app, user: User, script_payload) -> SimpleNamespace:
 
 
 def _patch_genai(monkeypatch: pytest.MonkeyPatch, store: list[str]) -> None:
-    monkeypatch.setattr(jobs.genai, "configure", lambda api_key: None)
-    monkeypatch.setattr(
-        jobs.genai,
-        "GenerativeModel",
-        lambda model_name: DummyGenerativeModel(model_name, store),
-    )
+    def _generate_content(*, model: str, contents, config=None):
+        store.append(_prompt_text(contents))
+        return DummyGenerativeModel(model, []).generate_content(_prompt_text(contents))
+
+    monkeypatch.setattr(jobs.genai, "Client", lambda api_key: DummyGenAIClient(_generate_content))
 
 
 def _patch_cover_models(monkeypatch: pytest.MonkeyPatch, store: list[tuple[str, str]]) -> None:
-    monkeypatch.setattr(jobs.genai, "configure", lambda api_key: None)
+    def _generate_content(*, model: str, contents, config=None):
+        prompt = _prompt_text(contents)
+        if model == "test-script-model":
+            return DummyTextModel(store).generate_content(prompt)
+        return DummyCoverImageModel(store).generate_content(prompt)
 
-    def _factory(model_name: str):
-        if model_name == "test-script-model":
-            return DummyTextModel(store)
-        return DummyCoverImageModel(store)
-
-    monkeypatch.setattr(jobs.genai, "GenerativeModel", _factory)
+    monkeypatch.setattr(jobs.genai, "Client", lambda api_key: DummyGenAIClient(_generate_content))
 
 
 def test_sequential_workflow_generates_resources(
@@ -446,7 +461,17 @@ def test_shot_stage_recovers_dialogue_from_summary(app, comic: Comic):
         db.session.commit()
 
         script = db.session.get(Script, comic.script_id)
-        script.content = json.dumps({})
+        script.content = json.dumps(
+            {
+                "panels": [
+                    {
+                        "panel_number": 1,
+                        "scene": "Original generated scene",
+                        "dialogue": "Original generated line",
+                    }
+                ]
+            }
+        )
 
         ComicOutlineSection.query.filter_by(comic_id=comic.id).delete()
         db.session.flush()
@@ -470,3 +495,4 @@ def test_shot_stage_recovers_dialogue_from_summary(app, comic: Comic):
         )
         assert len(panels) == 1
         assert panels[0].dialogue == "姓马的，我诅咒你不得好死！"
+        assert panels[0].description == section.summary
