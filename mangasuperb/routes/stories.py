@@ -14,13 +14,14 @@ from mangasuperb.routes._character_utils import (
     build_character_script_payload,
     resolve_character_assignments,
 )
+from mangasuperb.services.generation import enhance_story_text
 from mangasuperb.services.jobs import (
     bootstrap_comic_workflow,
     enqueue_story_optimization,
     set_comic_stage_status,
 )
-from models import Comic, ComicOutlineSection, ComicPageLayout, ComicPanelShot
-from swagger import STORY_GET_DOC, STORY_OPTIMIZE_DOC, STORY_UPSERT_DOC
+from models import Comic, ComicOutlineSection, ComicPageLayout, ComicPanelShot, Script
+from swagger import STORY_ENHANCE_DOC, STORY_GET_DOC, STORY_OPTIMIZE_DOC, STORY_UPSERT_DOC
 
 bp = Blueprint("stories", __name__, url_prefix="/api/stories")
 
@@ -30,6 +31,77 @@ def _load_comic_for_user(comic_id: int) -> Comic | None:
     if not comic or comic.user_id != current_user.id:
         return None
     return comic
+
+
+@bp.post("/enhance")
+@login_required
+@swag_from(STORY_ENHANCE_DOC)
+def enhance_story_inline() -> Any:
+    payload = request.get_json(silent=True) or {}
+    story_text = (payload.get("story") or "").strip()
+    if not story_text:
+        return jsonify({"error": "Story text is required"}), 400
+
+    comic_payload: dict[str, Any] | None = None
+    comic_id_raw = payload.get("comic_id")
+    comic: Comic | None = None
+
+    if comic_id_raw is not None:
+        try:
+            comic_id = int(comic_id_raw)
+        except (TypeError, ValueError):
+            return jsonify({"error": "comic_id must be an integer"}), 400
+
+        comic = _load_comic_for_user(comic_id)
+        if not comic:
+            return jsonify({"error": "Comic not found"}), 404
+
+    try:
+        enhanced_story = enhance_story_text(story_text)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # pragma: no cover - external failure
+        current_app.logger.exception("Story enhancement failed: %s", exc)
+        return jsonify({"error": "Failed to enhance story"}), 502
+
+    if comic is not None:
+        try:
+            script = comic.script
+            if not script:
+                script = Script(
+                    user_id=current_user.id,
+                    title=comic.title or "Untitled",
+                    content="",
+                )
+                comic.script = script
+                db.session.add(script)
+
+            script_payload: dict[str, Any]
+            if script.content:
+                try:
+                    script_payload = json.loads(script.content)
+                except json.JSONDecodeError:
+                    script_payload = {}
+            else:
+                script_payload = {}
+
+            script_payload["story"] = enhanced_story
+            script_payload.pop("panels", None)
+            script_payload.pop("outline_sections", None)
+            script.content = json.dumps(script_payload, ensure_ascii=False)
+            comic.status = "pending"
+            comic.workflow_stage = "outline"
+            comic.workflow_status = "pending"
+            comic.error_message = None
+            db.session.commit()
+            db.session.refresh(comic)
+            comic_payload = comic.to_dict()
+        except Exception as exc:  # pragma: no cover - database failure
+            db.session.rollback()
+            current_app.logger.exception("Failed to update story for comic_id=%s: %s", comic.id, exc)
+            return jsonify({"error": "Failed to persist enhanced story"}), 500
+
+    return jsonify({"story": enhanced_story, "comic": comic_payload}), 200
 
 
 @bp.get("/<int:comic_id>")

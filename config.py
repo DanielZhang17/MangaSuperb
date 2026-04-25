@@ -16,6 +16,9 @@ class Config:
     DEBUG = os.getenv('FLASK_DEBUG', 'True') == 'True'
     HOST = os.getenv('HOST', '0.0.0.0')
     PORT = int(os.getenv('PORT', '5000'))
+    # Max request size: 30MB to accommodate 20MB images encoded as base64 (~27MB) plus JSON overhead
+    MAX_CONTENT_LENGTH = int(os.getenv('MAX_CONTENT_LENGTH', str(30 * 1024 * 1024)))
+    SESSION_PROTECTION = os.getenv('SESSION_PROTECTION', 'basic') or None
 
     # Database
     _raw_db_url = os.getenv('DATABASE_URL')
@@ -54,6 +57,16 @@ class Config:
     GEMINI_SCRIPT_MODEL = os.getenv('GEMINI_SCRIPT_MODEL', 'gemini-2.5-pro')
     GEMINI_IMAGE_MODEL = os.getenv('GEMINI_IMAGE_MODEL', 'gemini-2.5-flash-image')
 
+    # AI provider selection ("gemini" or "third_party")
+    IMAGE_PROVIDER = os.getenv('IMAGE_PROVIDER', 'gemini')
+    TEXT_PROVIDER = os.getenv('TEXT_PROVIDER', 'gemini')
+
+    # Third-party OpenAI-compatible API
+    THIRD_PARTY_API_URL = os.getenv('THIRD_PARTY_API_URL', '')
+    THIRD_PARTY_API_KEY = os.getenv('THIRD_PARTY_API_KEY', '')
+    THIRD_PARTY_IMAGE_MODEL = os.getenv('THIRD_PARTY_IMAGE_MODEL', '')
+    THIRD_PARTY_TEXT_MODEL = os.getenv('THIRD_PARTY_TEXT_MODEL', '')
+
     # Cloudflare R2
     R2_ACCOUNT_ID = os.getenv('R2_ACCOUNT_ID', '')
     R2_ACCESS_KEY_ID = os.getenv('R2_ACCESS_KEY_ID', '')
@@ -71,6 +84,14 @@ class Config:
     # Logging
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
     LOG_FILE = os.getenv('LOG_FILE', 'logs/mangasuperb.log')
+
+    # Proxy awareness
+    PROXY_FIX_ENABLED = os.getenv('PROXY_FIX_ENABLED', 'True') == 'True'
+    PROXY_FIX_FOR = int(os.getenv('PROXY_FIX_FOR', '2'))
+    PROXY_FIX_PROTO = int(os.getenv('PROXY_FIX_PROTO', '1'))
+    PROXY_FIX_HOST = int(os.getenv('PROXY_FIX_HOST', '1'))
+    PROXY_FIX_PORT = int(os.getenv('PROXY_FIX_PORT', '1'))
+    PROXY_FIX_PREFIX = int(os.getenv('PROXY_FIX_PREFIX', '0'))
 
     # Rate limiting
     RATE_LIMIT_ENABLED = os.getenv('RATE_LIMIT_ENABLED', 'True') == 'True'

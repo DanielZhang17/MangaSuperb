@@ -20,6 +20,7 @@ from swagger import (
     CHARACTER_DETAIL_DOC,
     CHARACTER_LIST_DOC,
     CHARACTER_RENAME_DOC,
+    CHARACTER_DELETE_DOC,
 )
 
 logger = logging.getLogger(__name__)
@@ -215,3 +216,28 @@ def rename_character(character_id: int) -> Any:
     )
 
     return jsonify({"character": character.to_dict()}), 200
+
+
+@bp.delete("/<int:character_id>")
+@login_required
+@swag_from(CHARACTER_DELETE_DOC)
+def delete_character(character_id: int) -> Any:
+    character = db.session.get(Character, character_id)
+    if not character or character.user_id != current_user.id:
+        return jsonify({"error": "Character not found"}), 404
+
+    try:
+        db.session.delete(character)
+        db.session.commit()
+    except Exception as exc:  # pragma: no cover - database failure
+        db.session.rollback()
+        logger.exception(
+            "Failed to delete character user_id=%s character_id=%s: %s",
+            current_user.id,
+            character_id,
+            exc,
+        )
+        return jsonify({"error": "Failed to delete character"}), 500
+
+    logger.info("Character deleted user_id=%s character_id=%s", current_user.id, character_id)
+    return jsonify({"message": "Character deleted"}), 200

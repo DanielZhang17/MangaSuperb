@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import Mock
 
 from mangasuperb.extensions import db
+from mangasuperb.routes import stories
 from mangasuperb.services import jobs
 from models import (
     Comic,
@@ -57,6 +59,56 @@ def _create_comic(app, user: User, panel_count: int = 2) -> int:
         jobs.bootstrap_comic_workflow(comic)
         db.session.commit()
         return comic.id
+
+
+def test_enhance_story_inline_updates_script(app, auth_client, user: User, monkeypatch):
+    enhanced_value = "优化后的剧情"
+    monkeypatch.setattr(stories, "enhance_story_text", lambda story: enhanced_value)
+
+    with app.app_context():
+        script = Script(user_id=user.id, title="Draft", content=json.dumps({"story": "原始剧情"}))
+        comic = Comic(
+            user_id=user.id,
+            script=script,
+            title="Demo",
+            style_description="Ink",
+            aspect_ratio="16:9",
+        )
+        db.session.add_all([script, comic])
+        db.session.commit()
+        comic_id = comic.id
+
+    response = auth_client.post(
+        "/api/stories/enhance",
+        json={"story": "原始剧情", "comic_id": comic_id},
+    )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["story"] == enhanced_value
+    assert payload["comic"]["id"] == comic_id
+
+    with app.app_context():
+        comic = db.session.get(Comic, comic_id)
+        assert comic is not None
+        script = comic.script
+        assert script is not None
+        data = json.loads(script.content)
+        assert data["story"] == enhanced_value
+        assert "panels" not in data
+        assert comic.workflow_stage == "outline"
+
+
+def test_enhance_story_requires_text(auth_client):
+    response = auth_client.post("/api/stories/enhance", json={})
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "Story text is required"
+
+
+def test_build_outline_sections_splits_punctuation():
+    story_text = "第一段介绍角色和背景。随后冲突爆发！敌人出现逼迫主角行动？最后他们誓言反击。"
+    sections = jobs._build_outline_sections({"story": story_text})
+    assert len(sections) >= 3
+    assert sections[0]["summary"].startswith("第一段")
 
 
 def test_upsert_story_outline_resets_workflow(app, auth_client, user: User):
@@ -320,6 +372,85 @@ def test_get_comic_images_returns_urls(app, auth_client, user: User):
     ]
 
 
+def test_delete_comic_page_clears_layout_and_panels(app, auth_client, user: User):
+    comic_id = _create_comic(app, user)
+
+    with app.app_context():
+        comic = db.session.get(Comic, comic_id)
+        assert comic is not None
+        page = ComicPage(
+            comic_id=comic_id,
+            script_id=comic.script_id,
+            page_number=1,
+            image_url="https://cdn.example.com/page-1.png",
+            panel_text="[]",
+        )
+        layout = ComicPageLayout(
+            comic_id=comic_id,
+            page_number=1,
+            layout_key="auto-grid",
+            status="selected",
+        )
+        db.session.add_all([page, layout])
+        db.session.flush()
+        panel = ComicPanelShot(
+            comic_id=comic_id,
+            sequence_index=1,
+            description="Panel",
+            page_number=1,
+            panel_number=1,
+        )
+        db.session.add(panel)
+        db.session.flush()
+        db.session.add(ComicPagePanel(page_layout_id=layout.id, panel_shot_id=panel.id, position=1))
+        db.session.commit()
+        page_id = page.id
+        panel_id = panel.id
+
+    response = auth_client.delete(f"/api/comics/{comic_id}/pages/1")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["message"] == "Page deleted"
+    assert payload["comic"]["id"] == comic_id
+
+    with app.app_context():
+        assert db.session.get(ComicPage, page_id) is None
+        assert ComicPageLayout.query.filter_by(comic_id=comic_id, page_number=1).count() == 0
+        assert ComicPagePanel.query.count() == 0
+        panel = db.session.get(ComicPanelShot, panel_id)
+        assert panel is not None
+        assert panel.page_number is None
+        assert panel.panel_number is None
+        comic = db.session.get(Comic, comic_id)
+        assert comic.workflow_stage == "render"
+        assert comic.workflow_status == "pending"
+        assert comic.status == "pending"
+
+
+def test_delete_comic_page_requires_owner(app, auth_client, user: User):
+    comic_id = _create_comic(app, user)
+
+    with app.app_context():
+        comic = db.session.get(Comic, comic_id)
+        assert comic is not None
+        other = User(username="other", email="other@example.com", password_hash="hashed")
+        db.session.add(other)
+        db.session.commit()
+        comic.user_id = other.id
+        page = ComicPage(
+            comic_id=comic_id,
+            script_id=comic.script_id,
+            page_number=1,
+            image_url="https://cdn.example.com/page-1.png",
+        )
+        db.session.add(page)
+        db.session.commit()
+
+    response = auth_client.delete(f"/api/comics/{comic_id}/pages/1")
+    assert response.status_code == 404
+    assert response.get_json()["error"] == "Comic not found"
+
+
 def test_get_comic_images_rejects_other_user(app, auth_client, user: User):
     with app.app_context():
         other = User(
@@ -343,3 +474,48 @@ def test_get_comic_images_rejects_other_user(app, auth_client, user: User):
 
     response = auth_client.get(f"/api/comics/{other_comic_id}/images")
     assert response.status_code == 404
+
+
+def test_enhance_story_rejects_other_users_comic_before_gemini(
+    app,
+    auth_client,
+    monkeypatch,
+) -> None:
+    enhance_mock = Mock(return_value="should not be used")
+    monkeypatch.setattr(stories, "enhance_story_text", enhance_mock)
+
+    with app.app_context():
+        other = User(username="story-owner", email="story-owner@example.com", password_hash="x")
+        db.session.add(other)
+        db.session.flush()
+        script = Script(user_id=other.id, title="Other", content=json.dumps({"story": "secret"}))
+        comic = Comic(user_id=other.id, script=script, title="Other Comic")
+        db.session.add_all([script, comic])
+        db.session.commit()
+        comic_id = comic.id
+
+    response = auth_client.post(
+        "/api/stories/enhance",
+        json={"story": "please enhance", "comic_id": comic_id},
+    )
+
+    assert response.status_code == 404
+    assert response.get_json()["error"] == "Comic not found"
+    enhance_mock.assert_not_called()
+
+
+def test_enhance_story_rejects_non_integer_comic_id_before_gemini(
+    auth_client,
+    monkeypatch,
+) -> None:
+    enhance_mock = Mock(return_value="should not be used")
+    monkeypatch.setattr(stories, "enhance_story_text", enhance_mock)
+
+    response = auth_client.post(
+        "/api/stories/enhance",
+        json={"story": "please enhance", "comic_id": "not-an-int"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "comic_id must be an integer"
+    enhance_mock.assert_not_called()

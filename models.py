@@ -1,10 +1,178 @@
 """Database models for MangaSuperb."""
 
+import json
 from datetime import datetime
+from typing import Any
 
 from flask_login import UserMixin
 
 from mangasuperb.extensions import db
+
+DEFAULT_STYLE_PRESETS: tuple[dict[str, Any], ...] = (
+    {
+        "value": "Classic manga black and white linework.",
+        "label": "经典黑白漫画线稿",
+        "is_custom": False,
+    },
+    {
+        "value": "High-contrast ink with splashy gradients",
+        "label": "高对比墨线 + 渐变",
+        "is_custom": False,
+    },
+    {
+        "value": "Moebius-inspired clean lines, minimal shading",
+        "label": "莫比乌斯风·干净线条",
+        "is_custom": False,
+    },
+    {
+        "value": "Gritty seinen style with textured shading",
+        "label": "青年向质感阴影",
+        "is_custom": False,
+    },
+)
+DEFAULT_STYLE_VALUES = {preset["value"] for preset in DEFAULT_STYLE_PRESETS}
+DEFAULT_LAYOUT_OPTIONS: tuple[str, ...] = ("auto-grid", "grid-2x2", "vertical", "cinematic")
+DEFAULT_COLOR_MODES: tuple[str, ...] = ("black-white", "color")
+
+
+def _default_style_presets() -> list[dict[str, Any]]:
+    return [dict(preset) for preset in DEFAULT_STYLE_PRESETS]
+
+
+def _default_preferences_dict() -> dict[str, Any]:
+    return {
+        "style_presets": _default_style_presets(),
+        "selected_style": DEFAULT_STYLE_PRESETS[0]["value"],
+        "default_layout": DEFAULT_LAYOUT_OPTIONS[0],
+        "color_mode": DEFAULT_COLOR_MODES[0],
+    }
+
+
+def _default_preferences_json() -> str:
+    return json.dumps(_default_preferences_dict(), ensure_ascii=False)
+
+
+def _normalize_style_presets(raw_presets: Any) -> list[dict[str, Any]]:
+    presets = _default_style_presets()
+    if not isinstance(raw_presets, list):
+        return presets
+
+    seen = {preset["value"] for preset in presets}
+    for entry in raw_presets:
+        if not isinstance(entry, dict):
+            continue
+        value_raw = entry.get("value") or entry.get("prompt")
+        if not isinstance(value_raw, str):
+            continue
+        value = value_raw.strip()
+        if not value:
+            continue
+
+        label_raw = entry.get("label") or entry.get("name")
+        label = label_raw.strip() if isinstance(label_raw, str) else ""
+        if not label:
+            label = "Custom Style"
+
+        is_custom_flag = entry.get("is_custom")
+        is_custom = bool(is_custom_flag) or value not in DEFAULT_STYLE_VALUES
+
+        if value in DEFAULT_STYLE_VALUES:
+            # Preserve canonical defaults but allow label overrides if provided.
+            for preset in presets:
+                if preset["value"] == value and label_raw:
+                    preset["label"] = label
+            continue
+
+        if value in seen:
+            # Update existing custom entry label if needed.
+            for preset in presets:
+                if preset["value"] == value:
+                    preset["label"] = label
+                    preset["is_custom"] = True
+                    break
+            continue
+
+        presets.append(
+            {
+                "value": value,
+                "label": label,
+                "is_custom": is_custom,
+            }
+        )
+        seen.add(value)
+
+    return presets
+
+
+def _normalize_preferences(raw: Any) -> dict[str, Any]:
+    base = _default_preferences_dict()
+    if raw is None:
+        return base
+
+    data: dict[str, Any]
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            parsed = {}
+        data = parsed if isinstance(parsed, dict) else {}
+    elif isinstance(raw, dict):
+        data = raw
+    else:
+        data = {}
+
+    base["style_presets"] = _normalize_style_presets(data.get("style_presets"))
+
+    selected = data.get("selected_style")
+    if isinstance(selected, str) and selected.strip():
+        base["selected_style"] = selected.strip()
+
+    preset_values = {preset["value"] for preset in base["style_presets"]}
+    if base["selected_style"] not in preset_values:
+        base["selected_style"] = base["style_presets"][0]["value"]
+
+    layout = data.get("default_layout")
+    if isinstance(layout, str) and layout in DEFAULT_LAYOUT_OPTIONS:
+        base["default_layout"] = layout
+
+    color_mode = data.get("color_mode")
+    if isinstance(color_mode, str) and color_mode in DEFAULT_COLOR_MODES:
+        base["color_mode"] = color_mode
+
+    return base
+
+
+def _apply_preferences_update(current: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
+    working = {
+        "style_presets": [
+            dict(item) for item in current.get("style_presets", _default_style_presets())
+        ],
+        "selected_style": current.get("selected_style", DEFAULT_STYLE_PRESETS[0]["value"]),
+        "default_layout": current.get("default_layout", DEFAULT_LAYOUT_OPTIONS[0]),
+        "color_mode": current.get("color_mode", DEFAULT_COLOR_MODES[0]),
+    }
+
+    style_presets_update = updates.get("style_presets")
+    if isinstance(style_presets_update, list):
+        working["style_presets"] = _normalize_style_presets(style_presets_update)
+
+    selected_update = updates.get("selected_style")
+    if isinstance(selected_update, str) and selected_update.strip():
+        working["selected_style"] = selected_update.strip()
+
+    preset_values = {preset["value"] for preset in working["style_presets"]}
+    if working["selected_style"] not in preset_values:
+        working["selected_style"] = working["style_presets"][0]["value"]
+
+    layout_update = updates.get("default_layout")
+    if isinstance(layout_update, str) and layout_update in DEFAULT_LAYOUT_OPTIONS:
+        working["default_layout"] = layout_update
+
+    color_update = updates.get("color_mode")
+    if isinstance(color_update, str) and color_update in DEFAULT_COLOR_MODES:
+        working["color_mode"] = color_update
+
+    return working
 
 
 class User(UserMixin, db.Model):
@@ -17,6 +185,12 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(128), nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     avatar_index = db.Column(db.Integer, nullable=False, default=1)
+    preferences = db.Column(
+        db.Text,
+        nullable=False,
+        default=_default_preferences_json,
+        server_default=db.text("'{}'"),
+    )
 
     # Relationships
     characters = db.relationship(
@@ -55,7 +229,26 @@ class User(UserMixin, db.Model):
             'email': self.email,
             'avatar_index': self.avatar_index,
             'created_at': self.created_at.isoformat() if self.created_at else None,
+            'preferences': self.get_preferences(),
         }
+
+    @staticmethod
+    def default_preferences() -> dict[str, Any]:
+        return _default_preferences_dict()
+
+    def get_preferences(self) -> dict[str, Any]:
+        return _normalize_preferences(self.preferences)
+
+    def set_preferences(self, preferences: dict[str, Any]) -> None:
+        normalized = _apply_preferences_update(_default_preferences_dict(), preferences)
+        self.preferences = json.dumps(normalized, ensure_ascii=False)
+
+    def apply_preferences_update(self, updates: dict[str, Any]) -> dict[str, Any]:
+        current = self.get_preferences()
+        merged = _apply_preferences_update(current, updates)
+        self.preferences = json.dumps(merged, ensure_ascii=False)
+        return merged
+
 
 class Character(db.Model):
     """User-created characters"""
@@ -68,7 +261,12 @@ class Character(db.Model):
         nullable=False,
         index=True,
     )
-    name = db.Column(db.String(100), nullable=False, default='unspecified', server_default='unspecified')
+    name = db.Column(
+        db.String(100),
+        nullable=False,
+        default='unspecified',
+        server_default='unspecified',
+    )
     description = db.Column(db.Text, nullable=False)
     sex = db.Column(db.String(20), nullable=False, default='unspecified')
     is_public = db.Column(db.Boolean, nullable=False, default=False, index=True)
@@ -76,6 +274,7 @@ class Character(db.Model):
     image_url = db.Column(db.String(255), nullable=True)
     optimized_description = db.Column(db.Text, nullable=True)
     image_job_id = db.Column(db.String(64), nullable=True, index=True)
+    optimization_job_id = db.Column(db.String(64), nullable=True, index=True)
     image_status = db.Column(db.String(20), nullable=False, default='idle')
     image_error = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=datetime.utcnow)
@@ -91,6 +290,7 @@ class Character(db.Model):
         "ComicCharacter",
         back_populates="character",
         lazy=True,
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self):
@@ -179,7 +379,7 @@ class Comic(db.Model):
         nullable=False,
         default='Classic manga black and white linework',
     )
-    aspect_ratio = db.Column(db.String(5), nullable=False, default='16:9')
+    aspect_ratio = db.Column(db.String(5), nullable=False, default='2:3')
 
     pdf_url = db.Column(db.String(255), nullable=True)
     zip_url = db.Column(db.String(255), nullable=True)

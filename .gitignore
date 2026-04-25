@@ -1,7 +1,10 @@
 CLAUDE.md
 .venv/
-mangasuperb/static/generated_images
+mangasuperb/static/
 __pycache__/
 .env
 AGENTS.md
+frontend/node_modules/
+logs/
+.codex
 

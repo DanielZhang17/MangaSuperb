@@ -26,7 +26,8 @@ def init_extensions(app: Flask) -> Tuple[Redis, Queue]:
     bcrypt.init_app(app)
     login_manager.init_app(app)
 
-    login_manager.session_protection = "strong"
+    # Use basic session protection to avoid logging users out when proxy IPs change.
+    login_manager.session_protection = app.config.get("SESSION_PROTECTION", "basic") or None
     login_manager.login_view = None
     login_manager.login_message = None
 

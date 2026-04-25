@@ -10,12 +10,14 @@ from .jobs import bp as jobs_bp
 from .panels import bp as panels_bp
 from .stories import bp as stories_bp
 from .scripts import bp as scripts_bp
+from .preferences import bp as preferences_bp
 from .system import bp as system_bp
 
 
 def register_blueprints(app: Flask) -> None:
     app.register_blueprint(system_bp)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(preferences_bp)
     app.register_blueprint(characters_bp)
     app.register_blueprint(scripts_bp)
     app.register_blueprint(comics_bp)

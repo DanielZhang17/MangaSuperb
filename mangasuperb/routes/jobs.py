@@ -3,13 +3,15 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Callable, Dict, Tuple
+from collections.abc import Callable
+from typing import Any
 
 from flasgger import swag_from
 from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
 from rq import Worker
 from rq.job import Job
+from sqlalchemy import or_
 
 from mangasuperb.extensions import db
 from mangasuperb.routes._character_utils import (
@@ -29,7 +31,7 @@ from mangasuperb.services.jobs import (
     enqueue_story_optimization,
     process_character_optimization,
 )
-from models import Character, Comic, Script
+from models import Character, Comic, ComicWorkflowStage, Script
 from swagger import JOB_CREATE_DOC, JOB_STATUS_DOC
 
 logger = logging.getLogger(__name__)
@@ -99,7 +101,7 @@ def _queue_worker_snapshot(queue=None) -> dict[str, object]:
         return {"status": "error", "active": 0, "workers": []}
 
 
-def _handle_comic_generation(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
+def _handle_comic_generation(data: dict[str, Any]) -> tuple[dict[str, Any], int]:
     prompt = (data.get("prompt") or "").strip()
     if not prompt:
         return {"error": "Prompt is required"}, 400
@@ -187,7 +189,7 @@ def _handle_comic_generation(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]
         return {"error": "Failed to create comic generation job"}, 500
 
 
-def _handle_story_optimization(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
+def _handle_story_optimization(data: dict[str, Any]) -> tuple[dict[str, Any], int]:
     comic_id = data.get("comic_id")
     if comic_id is None:
         return {"error": "comic_id is required"}, 400
@@ -215,7 +217,7 @@ def _handle_story_optimization(data: Dict[str, Any]) -> Tuple[Dict[str, Any], in
         return {"error": "Failed to enqueue story optimisation"}, 500
 
 
-def _handle_character_optimization(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
+def _handle_character_optimization(data: dict[str, Any]) -> tuple[dict[str, Any], int]:
     character_id = data.get("character_id")
     if character_id is None:
         return {"error": "character_id is required"}, 400
@@ -241,17 +243,20 @@ def _handle_character_optimization(data: Dict[str, Any]) -> Tuple[Dict[str, Any]
             result_ttl=current_app.config["RQ_RESULT_TTL"],
             description=f"Character optimisation for {character.id}",
         )
+        character.optimization_job_id = job.id
+        db.session.commit()
         _log_queue_snapshot(queue, "character_optimization_enqueued")
         return {"job_id": job.id, "character_id": character.id}, 202
     except RuntimeError as exc:
         logger.error("Character optimisation queue unavailable: %s", exc)
         return {"error": "Background queue is not configured"}, 503
     except Exception:  # pragma: no cover - unexpected queue error
+        db.session.rollback()
         logger.exception("Failed to enqueue character optimisation for %s", character_id)
         return {"error": "Failed to enqueue character optimisation"}, 500
 
 
-def _handle_page_render(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
+def _handle_page_render(data: dict[str, Any]) -> tuple[dict[str, Any], int]:
     comic_id = data.get("comic_id")
     page_number = data.get("page_number")
     if comic_id is None or page_number is None:
@@ -270,9 +275,16 @@ def _handle_page_render(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
     if not comic or comic.user_id != current_user.id:
         return {"error": "Comic not found"}, 404
 
+    aspect_ratio = None
+    if data.get("aspect_ratio") is not None:
+        try:
+            aspect_ratio = validate_aspect_ratio(data.get("aspect_ratio"))
+        except ValueError as exc:
+            return {"error": str(exc)}, 400
+
     try:
         queue = _require_queue()
-        job = enqueue_page_render(queue, comic, page_number)
+        job = enqueue_page_render(queue, comic, page_number, aspect_ratio=aspect_ratio)
         db.session.refresh(comic)
         _log_queue_snapshot(queue, "page_render_enqueued")
         return {"job_id": job.id, "comic": comic.to_dict()}, 202
@@ -280,11 +292,15 @@ def _handle_page_render(data: Dict[str, Any]) -> Tuple[Dict[str, Any], int]:
         logger.error("Page render queue unavailable: %s", exc)
         return {"error": "Background queue is not configured"}, 503
     except Exception:  # pragma: no cover - unexpected queue error
-        logger.exception("Failed to enqueue page render for comic=%s page=%s", comic_id, page_number)
+        logger.exception(
+            "Failed to enqueue page render for comic=%s page=%s",
+            comic_id,
+            page_number,
+        )
         return {"error": "Failed to enqueue page render"}, 500
 
 
-JOB_HANDLERS: Dict[str, Callable[[Dict[str, Any]], Tuple[Dict[str, Any], int]]] = {
+JOB_HANDLERS: dict[str, Callable[[dict[str, Any]], tuple[dict[str, Any], int]]] = {
     JOB_TYPE_COMIC_GENERATION: _handle_comic_generation,
     JOB_TYPE_STORY_OPTIMIZATION: _handle_story_optimization,
     JOB_TYPE_CHARACTER_OPTIMIZATION: _handle_character_optimization,
@@ -308,9 +324,37 @@ def create_job() -> Any:
 
 
 @bp.get("/<job_id>")
+@login_required
 @swag_from(JOB_STATUS_DOC)
 def get_job_status(job_id: str) -> Any:
     try:
+        comic = Comic.query.filter_by(job_id=job_id, user_id=current_user.id).first()
+        if not comic:
+            stage_match = (
+                db.session.query(ComicWorkflowStage, Comic)
+                .join(Comic, ComicWorkflowStage.comic_id == Comic.id)
+                .filter(
+                    ComicWorkflowStage.job_id == job_id,
+                    Comic.user_id == current_user.id,
+                )
+                .first()
+            )
+            if stage_match:
+                _, comic = stage_match
+
+        character = None
+        if not comic:
+            character = Character.query.filter(
+                Character.user_id == current_user.id,
+                or_(
+                    Character.image_job_id == job_id,
+                    Character.optimization_job_id == job_id,
+                ),
+            ).first()
+
+        if not comic and not character:
+            return jsonify({"error": "Job not found"}), 404
+
         try:
             job = Job.fetch(job_id, connection=current_app.extensions["redis_conn"])
             rq_status = job.get_status()
@@ -319,25 +363,46 @@ def get_job_status(job_id: str) -> Any:
             rq_status = "unknown"
 
         worker_snapshot = _queue_worker_snapshot()
-
-        comic = Comic.query.filter_by(job_id=job_id).first()
+        response = {
+            "job_id": job_id,
+            "rq_status": rq_status,
+            "worker_snapshot": worker_snapshot,
+        }
         if comic:
-            response = {
-                "job_id": job_id,
-                "rq_status": rq_status,
-                "comic": comic.to_dict(),
-                "worker_snapshot": worker_snapshot,
-            }
-            if worker_snapshot.get("active", 0) == 0:
-                response["warning"] = "No active RQ workers detected; job will remain queued."
-            return jsonify(response), 200
-
-        payload = {"job_id": job_id, "rq_status": rq_status, "worker_snapshot": worker_snapshot}
+            response["comic"] = comic.to_dict()
         if worker_snapshot.get("active", 0) == 0:
-            payload["warning"] = "No active RQ workers detected; job will remain queued."
+            response["warning"] = "No active RQ workers detected; job will remain queued."
 
-        return jsonify(payload), 200
+        return jsonify(response), 200
 
     except Exception as exc:  # pragma: no cover - unexpected failure
         logger.error("Error getting job status: %s", exc)
         return jsonify({"error": str(exc)}), 500
+
+
+@bp.get("/active")
+@login_required
+def list_active_jobs() -> Any:
+    """Return in-flight workflow stages owned by the current user."""
+    rows = (
+        db.session.query(ComicWorkflowStage, Comic)
+        .join(Comic, ComicWorkflowStage.comic_id == Comic.id)
+        .filter(Comic.user_id == current_user.id)
+        .filter(ComicWorkflowStage.status.in_(("pending", "in_progress")))
+        .filter(ComicWorkflowStage.job_id.isnot(None))
+        .order_by(ComicWorkflowStage.started_at.asc())
+        .all()
+    )
+
+    active = [
+        {
+            "job_id": stage.job_id,
+            "comic_id": comic.id,
+            "stage": stage.stage,
+            "status": stage.status,
+            "title": comic.title,
+            "started_at": stage.started_at.isoformat() if stage.started_at else None,
+        }
+        for stage, comic in rows
+    ]
+    return jsonify({"active": active}), 200

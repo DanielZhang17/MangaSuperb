@@ -34,6 +34,15 @@ class DummyQueue:
         self.jobs.append(job)
         return job
 
+    def fetch_job(self, job_id: str | int):
+        for job in self.jobs:
+            if str(job.id) == str(job_id):
+                return SimpleNamespace(
+                    id=job.id,
+                    get_status=lambda: "queued",
+                )
+        return None
+
 
 class DummyStorage:
     """Record uploads to mimic R2 storage interactions."""
@@ -101,6 +110,12 @@ def app() -> Generator[Flask, None, None]:
         GEMINI_API_KEY="test-api-key",
         GEMINI_SCRIPT_MODEL="test-script-model",
         GEMINI_IMAGE_MODEL="test-image-model",
+        IMAGE_PROVIDER="gemini",
+        TEXT_PROVIDER="gemini",
+        THIRD_PARTY_API_URL="https://test-api.example.com",
+        THIRD_PARTY_API_KEY="test-third-party-key",
+        THIRD_PARTY_IMAGE_MODEL="test-image-model-tp",
+        THIRD_PARTY_TEXT_MODEL="test-text-model-tp",
     )
 
     db.init_app(app)
