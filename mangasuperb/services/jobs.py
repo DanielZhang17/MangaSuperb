@@ -15,17 +15,15 @@ from io import BytesIO
 from typing import Any
 
 from flask import current_app
-from google import genai
-from google.genai import types
 from PIL import Image, UnidentifiedImageError
 from rq import get_current_job
 from sqlalchemy import func
 
 from config import Config
 from mangasuperb.extensions import db
+from mangasuperb.services.ai_provider import get_image_provider, get_text_provider
 from mangasuperb.services.generation import (
     DEFAULT_ASPECT_RATIO,
-    log_gemini_contents,
     optimize_character_description,
     validate_aspect_ratio,
 )
@@ -124,65 +122,6 @@ def _config_value(key: str, default: str) -> str:
         return getattr(Config, key, default)
 
 
-def _gemini_api_key() -> str:
-    api_key = _config_value("GEMINI_API_KEY", Config.GEMINI_API_KEY)
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY is not configured")
-    return api_key
-
-
-def _genai_client() -> genai.Client:
-    return genai.Client(api_key=_gemini_api_key())
-
-
-def _build_image_generation_config(aspect_ratio: str | None):
-    """Construct an image config for Gemini generation."""
-    if not aspect_ratio:
-        return None
-    try:
-        return types.GenerateContentConfig(
-            image_config=types.ImageConfig(aspect_ratio=aspect_ratio)
-        )
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.warning("Failed to build image config for aspect_ratio=%s: %s", aspect_ratio, exc)
-        return None
-
-
-def _extract_image_bytes(response: Any) -> bytes | None:
-    """Pull the first inline image bytes from a Gemini response."""
-    if getattr(response, "parts", None):
-        for part in response.parts:
-            inline = getattr(part, "inline_data", None)
-            if inline and inline.data:
-                data = inline.data
-                return base64.b64decode(data) if isinstance(data, str) else data
-            if hasattr(part, "as_image"):
-                try:
-                    image_obj = part.as_image()
-                    buf = BytesIO()
-                    image_obj.save(buf, format="PNG")
-                    return buf.getvalue()
-                except Exception:  # pragma: no cover - defensive
-                    continue
-
-    candidates = getattr(response, "candidates", None) or []
-    for candidate in candidates:
-        content = getattr(candidate, "content", None)
-        parts = getattr(content, "parts", None) or []
-        for part in parts:
-            inline = getattr(part, "inline_data", None)
-            if inline and inline.data:
-                data = inline.data
-                return base64.b64decode(data) if isinstance(data, str) else data
-            if hasattr(part, "as_image"):
-                try:
-                    image_obj = part.as_image()
-                    buf = BytesIO()
-                    image_obj.save(buf, format="PNG")
-                    return buf.getvalue()
-                except Exception:  # pragma: no cover
-                    continue
-    return None
 
 
 def _collect_character_image_references(
@@ -416,23 +355,6 @@ def build_page_render_prompt(
         )
 
     return "\n\n".join(section for section in sections if section)
-
-
-def _extract_text_from_response(response: Any) -> str:
-    text = getattr(response, "text", "") or ""
-    if text:
-        return text.strip()
-
-    candidates = getattr(response, "candidates", None) or []
-    chunks: list[str] = []
-    for candidate in candidates:
-        content = getattr(candidate, "content", None)
-        parts = getattr(content, "parts", None) or []
-        for part in parts:
-            part_text = getattr(part, "text", None)
-            if part_text:
-                chunks.append(part_text)
-    return "\n".join(chunk.strip() for chunk in chunks if chunk).strip()
 
 
 def _panel_summary_lines(panels: Sequence[ComicPanelShot]) -> list[str]:
@@ -1262,12 +1184,6 @@ def process_page_render_stage(
             if layout.notes:
                 layout_instruction += f" Notes: {layout.notes}"
 
-            model_name = image_model or _config_value(
-                "GEMINI_IMAGE_MODEL",
-                Config.GEMINI_IMAGE_MODEL,
-            )
-            image_model_client = _genai_client()
-
             previous_panels = (
                 ComicPanelShot.query.filter(
                     ComicPanelShot.comic_id == comic_id,
@@ -1296,27 +1212,9 @@ def process_page_render_stage(
                 previous_context_lines=previous_context_lines,
             )
 
-            contents: list[Any] = [prompt]
-            contents.extend(ref_parts)
-
-            gen_config = _build_image_generation_config(normalized_aspect_ratio)
-            log_gemini_contents(
-                contents,
-                model_name,
-                context=(
-                    f"page_render comic={comic_id} page={page_number} "
-                    f"aspect={normalized_aspect_ratio}"
-                ),
+            img_data = get_image_provider().generate_image(
+                prompt, ref_parts, normalized_aspect_ratio
             )
-            result = image_model_client.models.generate_content(
-                model=model_name,
-                contents=contents,
-                config=gen_config,
-            )
-
-            img_data = _extract_image_bytes(result)
-            if not img_data:
-                raise ValueError("No image data returned from Gemini")
 
             storage = _get_storage()
             timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -1604,10 +1502,6 @@ def process_cover_generation(
             raise ValueError("Cannot generate cover without panel context")
 
         try:
-            client = _genai_client()
-
-            text_model_name = _config_value("GEMINI_SCRIPT_MODEL", Config.GEMINI_SCRIPT_MODEL)
-
             summary_prompt = (
                 "You are a manga editor distilling a finished comic into a single "
                 "evocative cover brief.\n"
@@ -1619,24 +1513,16 @@ def process_cover_generation(
                 + "\n".join(_panel_summary_lines(panels))
             )
 
-            summary_response = client.models.generate_content(
-                model=text_model_name,
-                contents=summary_prompt,
-            )
-            summary_text = _extract_text_from_response(summary_response)
+            summary_text = get_text_provider().generate_text(summary_prompt)
             if not summary_text:
-                raise ValueError("Gemini summary was empty")
+                raise ValueError("Summary was empty")
 
-            image_model_name = image_model or _config_value(
-                "GEMINI_IMAGE_MODEL", Config.GEMINI_IMAGE_MODEL
-            )
             try:
                 cover_aspect_ratio = validate_aspect_ratio(
                     comic.aspect_ratio or DEFAULT_ASPECT_RATIO
                 )
             except ValueError:
                 cover_aspect_ratio = DEFAULT_ASPECT_RATIO
-            gen_config = _build_image_generation_config(cover_aspect_ratio)
 
             cover_prompt = (
                 f"Design a finished manga cover for '{comic.title}'.\n"
@@ -1646,15 +1532,9 @@ def process_cover_generation(
                 "for title typography at the top."
             )
 
-            result = client.models.generate_content(
-                model=image_model_name,
-                contents=cover_prompt,
-                config=gen_config,
-            )
-
-            img_data = _extract_image_bytes(result)
+            img_data = get_image_provider().generate_image(cover_prompt, None, cover_aspect_ratio)
             if not img_data:
-                raise ValueError("No cover image data returned from Gemini")
+                raise ValueError("No cover image data returned")
 
             filename = f"comic_{comic_id}_cover_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.png"
             storage = _get_storage()
@@ -1849,9 +1729,6 @@ def process_character_image_generation(
             character.image_error = None
             db.session.commit()
 
-            model_name = _config_value("GEMINI_IMAGE_MODEL", Config.GEMINI_IMAGE_MODEL)
-            client = _genai_client()
-
             prompt = (
                 "Create a polished character concept illustration based on the description below. "
                 "Incorporate notable traits and align with the provided reference imagery. "
@@ -1859,7 +1736,7 @@ def process_character_image_generation(
                 f"Character description:\n{prompt_description}"
             )
 
-            parts: list[dict[str, Any]] = []
+            ref_image_parts: list[dict] = []
             for idx, ref in enumerate(image_refs):
                 data = ref.get("data")
                 mime_type = ref.get("mime_type", "image/png")
@@ -1871,31 +1748,22 @@ def process_character_image_generation(
                 except Exception:
                     logger.warning("Failed to decode reference image %s", idx)
                     continue
-                parts.append({"inline_data": {"mime_type": mime_type, "data": image_bytes}})
+                ref_image_parts.append(
+                    {"inline_data": {"mime_type": mime_type, "data": image_bytes}}
+                )
 
             logger.info(
                 "Submitting character image prompt job_id=%s character_id=%s reference_count=%s",
                 job_id,
                 character_id,
-                len(parts),
+                len(ref_image_parts),
             )
 
-            contents = parts + [{"text": prompt}]
-            gen_config = _build_image_generation_config(DEFAULT_ASPECT_RATIO)
-            log_gemini_contents(
-                contents,
-                model_name,
-                context=f"character_image character={character_id} aspect={DEFAULT_ASPECT_RATIO}",
+            img_data = get_image_provider().generate_image(
+                prompt, ref_image_parts, DEFAULT_ASPECT_RATIO
             )
-            response = client.models.generate_content(
-                model=model_name,
-                contents=contents,
-                config=gen_config,
-            )
-
-            img_data = _extract_image_bytes(response)
             if not img_data:
-                raise ValueError("Gemini image generation did not return image data")
+                raise ValueError("Image generation did not return image data")
 
             filename = f"character_{character_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.png"
             storage = _get_storage()

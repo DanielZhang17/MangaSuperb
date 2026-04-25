@@ -134,21 +134,25 @@ def comic(app, user: User, script_payload) -> SimpleNamespace:
 
 
 def _patch_genai(monkeypatch: pytest.MonkeyPatch, store: list[str]) -> None:
+    from mangasuperb.services import ai_provider
+
     def _generate_content(*, model: str, contents, config=None):
         store.append(_prompt_text(contents))
         return DummyGenerativeModel(model, []).generate_content(_prompt_text(contents))
 
-    monkeypatch.setattr(jobs.genai, "Client", lambda api_key: DummyGenAIClient(_generate_content))
+    monkeypatch.setattr(ai_provider.genai, "Client", lambda api_key: DummyGenAIClient(_generate_content))
 
 
 def _patch_cover_models(monkeypatch: pytest.MonkeyPatch, store: list[tuple[str, str]]) -> None:
+    from mangasuperb.services import ai_provider
+
     def _generate_content(*, model: str, contents, config=None):
         prompt = _prompt_text(contents)
         if model == "test-script-model":
             return DummyTextModel(store).generate_content(prompt)
         return DummyCoverImageModel(store).generate_content(prompt)
 
-    monkeypatch.setattr(jobs.genai, "Client", lambda api_key: DummyGenAIClient(_generate_content))
+    monkeypatch.setattr(ai_provider.genai, "Client", lambda api_key: DummyGenAIClient(_generate_content))
 
 
 def test_sequential_workflow_generates_resources(
