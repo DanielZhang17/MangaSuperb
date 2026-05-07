@@ -27,6 +27,12 @@ from mangasuperb.services.generation import (
     optimize_character_description,
     validate_aspect_ratio,
 )
+from mangasuperb.services.generation_skills import (
+    PromptRenderer,
+    SkillPipeline,
+    build_page_generation_context,
+    page_render_skills,
+)
 from models import (
     DEFAULT_COLOR_MODES,
     Character,
@@ -1148,19 +1154,6 @@ def process_page_render_stage(
             if not panels:
                 raise ValueError("No panel shots assigned to this page")
 
-            panel_lines: list[str] = []
-            for panel in panels:
-                panel_index = panel.panel_number or panel.sequence_index
-                description = panel.description or "Scene description missing"
-                line_parts = [f"Panel {panel_index}: {description}"]
-                if panel.dialogue:
-                    line_parts.append(f"Dialogue: {panel.dialogue}")
-                if panel.camera_notes:
-                    line_parts.append(f"Camera: {panel.camera_notes}")
-                if panel.style_notes:
-                    line_parts.append(f"Style: {panel.style_notes}")
-                panel_lines.append(" ".join(line_parts))
-
             script_color = script_data.get("color_mode")
             effective_color = color_mode if color_mode is not None else script_color
             normalized_color = DEFAULT_COLOR_MODES[0]
@@ -1181,8 +1174,6 @@ def process_page_render_stage(
                 layout.layout_key,
                 LAYOUT_INSTRUCTIONS["auto-grid"],
             )
-            if layout.notes:
-                layout_instruction += f" Notes: {layout.notes}"
 
             previous_panels = (
                 ComicPanelShot.query.filter(
@@ -1196,20 +1187,37 @@ def process_page_render_stage(
             previous_context_lines = _panel_summary_lines(previous_panels)
 
             ref_lines, ref_parts = _collect_character_image_references(comic)
-            prompt = build_page_render_prompt(
-                comic,
-                script_data,
-                page_number,
-                layout_instruction,
-                panel_lines,
+            generation_context = build_page_generation_context(
+                comic=comic,
+                script_data=script_data,
+                page_number=page_number,
+                layout_key=layout.layout_key,
+                layout_instruction=layout_instruction,
+                layout_notes=layout.notes,
+                panels=panels,
                 color_mode=normalized_color,
-                font_family=font_family,
-                font_size=font_size,
-                bubble_shape=bubble_shape,
-                bubble_tail=bubble_tail,
                 aspect_ratio=normalized_aspect_ratio,
                 reference_notes=ref_lines,
                 previous_context_lines=previous_context_lines,
+                text_options={
+                    "font_family": font_family,
+                    "font_size": font_size,
+                    "bubble_shape": bubble_shape,
+                    "bubble_tail": bubble_tail,
+                },
+            )
+            resolved_generation = SkillPipeline(page_render_skills()).run(
+                generation_context
+            )
+            prompt = PromptRenderer().render_page_prompt(resolved_generation)
+            logger.info(
+                "Generation skills resolved task_type=%s skills=%s visual_mode=%s "
+                "dialogue_mode=%s skipped_skills=%s",
+                generation_context.task_type,
+                ",".join(resolved_generation.constraints.applied_skills),
+                resolved_generation.constraints.visual_mode,
+                resolved_generation.constraints.dialogue_mode,
+                ",".join(resolved_generation.constraints.skipped_skills),
             )
 
             img_data = get_image_provider().generate_image(
