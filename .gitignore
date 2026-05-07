@@ -8,3 +8,4 @@ AGENTS.md
 frontend/node_modules/
 logs/
 .codex
+.worktrees/
