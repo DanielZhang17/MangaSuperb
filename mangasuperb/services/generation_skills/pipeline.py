@@ -43,23 +43,13 @@ class SkillPipeline:
         for skill in self._skills:
             if context.task_type not in skill.scopes:
                 continue
-            if not skill.should_apply(context):
-                continue
 
             try:
+                if not skill.should_apply(context):
+                    continue
                 skill.apply(context, constraints)
             except Exception as exc:
-                if skill.required:
-                    raise SkillPipelineError(f"{skill.id} failed: {exc}") from exc
-                constraints.skipped_skills.append(skill.id)
-                constraints.warnings.append(f"{skill.id}: {exc}")
-                logger.warning(
-                    "Generation skill skipped skill_id=%s task_type=%s error=%s",
-                    skill.id,
-                    context.task_type,
-                    exc,
-                    exc_info=True,
-                )
+                self._handle_failure(skill, context, constraints, exc)
                 continue
 
             constraints.applied_skills.append(skill.id)
@@ -74,3 +64,22 @@ class SkillPipeline:
             constraints.visual_mode_source = source
         if constraints.dialogue_mode is None:
             constraints.dialogue_mode = "hybrid"
+
+    def _handle_failure(
+        self,
+        skill: GenerationSkill,
+        context: GenerationContext,
+        constraints: ConstraintSet,
+        exc: Exception,
+    ) -> None:
+        if skill.required:
+            raise SkillPipelineError(f"{skill.id} failed: {exc}") from exc
+        constraints.skipped_skills.append(skill.id)
+        constraints.warnings.append(f"{skill.id}: {exc}")
+        logger.warning(
+            "Generation skill skipped skill_id=%s task_type=%s error=%s",
+            skill.id,
+            context.task_type,
+            exc,
+            exc_info=True,
+        )

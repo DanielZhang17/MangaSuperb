@@ -458,6 +458,10 @@ def test_render_prompt_includes_character_roster(
             stored_comic.id,
             page_number=1,
             image_model="test-model",
+            font_family="Noto Sans",
+            font_size="large",
+            bubble_shape="rect",
+            bubble_tail=False,
         )
 
         assert prompts, "Expected image generation prompt to be captured"
@@ -467,6 +471,10 @@ def test_render_prompt_includes_character_roster(
         assert "Layout Discipline:" in prompts[0]
         assert "Aya" in prompts[0]
         assert "Protagonist" in prompts[0]
+        assert "Use rectangular speech bubbles for dialogue" in prompts[0]
+        assert "Draw speech bubble tails without pointers to speakers" in prompts[0]
+        assert "Use Noto Sans font family for text" in prompts[0]
+        assert "Use large font size for text" in prompts[0]
 
 
 def test_render_stage_uses_generation_skills_to_suppress_conflicting_color_prompt(

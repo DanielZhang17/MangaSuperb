@@ -109,6 +109,22 @@ class VisualModeSkill:
             )
             if layout_text
         )
+        text.extend(
+            character_text
+            for character in context.characters
+            for character_text in (
+                character.name,
+                character.role,
+                character.description,
+                character.sex,
+                character.style_prompt,
+                character.optimized_description,
+            )
+            if character_text
+        )
+        text.extend(context.reference_notes)
+        text.extend(context.previous_context_lines)
+        text.extend(self._string_values(context.text_options))
         return text
 
     def _string_values(

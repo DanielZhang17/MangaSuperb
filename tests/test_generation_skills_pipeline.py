@@ -95,6 +95,18 @@ class FailingRequiredSkill(FailingOptionalSkill):
     required = True
 
 
+class ShouldApplyFailingOptionalSkill(FailingOptionalSkill):
+    id = "optional_should_apply_failure"
+
+    def should_apply(self, context: GenerationContext) -> bool:
+        raise RuntimeError("optional gate exploded")
+
+
+class ShouldApplyFailingRequiredSkill(ShouldApplyFailingOptionalSkill):
+    id = "required_should_apply_failure"
+    required = True
+
+
 def test_pipeline_runs_skills_in_priority_order() -> None:
     sink: list[str] = []
 
@@ -171,3 +183,27 @@ def test_pipeline_raises_for_required_skill_failures() -> None:
 
     assert "required_failure" in str(exc.value)
     assert "optional exploded" in str(exc.value)
+
+
+def test_pipeline_skips_non_required_should_apply_failures(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING)
+
+    result = SkillPipeline([ShouldApplyFailingOptionalSkill(), RecordingSkill([])]).run(
+        _context()
+    )
+
+    assert result.constraints.skipped_skills == ["optional_should_apply_failure"]
+    assert result.constraints.applied_skills == ["recording"]
+    assert "optional_should_apply_failure" in caplog.text
+    assert "optional gate exploded" in caplog.text
+    assert caplog.records[0].exc_info is not None
+
+
+def test_pipeline_raises_skill_error_for_required_should_apply_failures() -> None:
+    with pytest.raises(SkillPipelineError) as exc:
+        SkillPipeline([ShouldApplyFailingRequiredSkill()]).run(_context())
+
+    assert "required_should_apply_failure" in str(exc.value)
+    assert "optional gate exploded" in str(exc.value)
