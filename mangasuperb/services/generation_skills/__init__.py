@@ -10,6 +10,7 @@ from mangasuperb.services.generation_skills.context import (
     LayoutContext,
     PanelContext,
 )
+from mangasuperb.services.generation_skills.page_render import build_page_generation_context
 from mangasuperb.services.generation_skills.pipeline import (
     GenerationSkill,
     SkillPipeline,
@@ -43,5 +44,6 @@ __all__ = [
     "SkillPipeline",
     "SkillPipelineError",
     "VisualModeSkill",
+    "build_page_generation_context",
     "page_render_skills",
 ]
