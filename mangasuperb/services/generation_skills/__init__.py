@@ -15,6 +15,8 @@ from mangasuperb.services.generation_skills.pipeline import (
     SkillPipeline,
     SkillPipelineError,
 )
+from mangasuperb.services.generation_skills.registry import page_render_skills
+from mangasuperb.services.generation_skills.renderer import PromptRenderer
 from mangasuperb.services.generation_skills.skills import (
     CharacterConsistencySkill,
     DialogueRenderingSkill,
@@ -36,8 +38,10 @@ __all__ = [
     "LayoutDisciplineSkill",
     "PanelContext",
     "PanelFidelitySkill",
+    "PromptRenderer",
     "ResolvedGenerationContext",
     "SkillPipeline",
     "SkillPipelineError",
     "VisualModeSkill",
+    "page_render_skills",
 ]
