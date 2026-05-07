@@ -105,3 +105,44 @@ def test_black_white_mode_suppresses_script_only_full_color_language() -> None:
     )
 
     assert "vibrant full color" in result.constraints.suppressed_phrases
+
+
+def test_black_white_mode_suppresses_vibrant_color_but_not_gradients() -> None:
+    result = SkillPipeline([VisualModeSkill()]).run(
+        _context(
+            "black-white",
+            "Use vibrant color accents with screentone gradients and standalone gradients.",
+            script_data={"color_mode": "color"},
+        )
+    )
+
+    suppressed = result.constraints.suppressed_phrases
+
+    assert "vibrant color" in suppressed
+    assert "gradients" not in suppressed
+
+
+def test_visual_mode_scanning_handles_cycles() -> None:
+    cyclic_notes: list[object] = ["Use vibrant color."]
+    cyclic_notes.append(cyclic_notes)
+
+    result = SkillPipeline([VisualModeSkill()]).run(
+        _context(
+            "black-white",
+            "Classic manga ink linework.",
+            script_data={
+                "color_mode": "color",
+                "nested": cyclic_notes,
+            },
+        )
+    )
+
+    assert "vibrant color" in result.constraints.suppressed_phrases
+
+
+def test_visual_mode_skill_is_exported_from_generation_skills() -> None:
+    from mangasuperb.services.generation_skills import (
+        VisualModeSkill as ExportedVisualModeSkill,
+    )
+
+    assert ExportedVisualModeSkill is VisualModeSkill

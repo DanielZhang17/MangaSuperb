@@ -143,6 +143,15 @@ def test_pipeline_normalizes_default_visual_mode(
     assert result.constraints.visual_mode == expected
 
 
+def test_pipeline_resolves_visual_mode_from_script_without_explicit_preference() -> None:
+    result = SkillPipeline([]).run(
+        _context(script_data={"color_mode": "color"}, visual_preferences={})
+    )
+
+    assert result.constraints.visual_mode == "color"
+    assert result.constraints.visual_mode_source == "script"
+
+
 def test_pipeline_skips_non_required_skill_failures(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.WARNING)
 

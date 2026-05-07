@@ -5,6 +5,7 @@ from typing import Any
 
 from mangasuperb.services.generation_skills.constraints import ConstraintSet
 from mangasuperb.services.generation_skills.context import GenerationContext
+from mangasuperb.services.generation_skills.visual_modes import resolve_visual_mode
 
 
 class VisualModeSkill:
@@ -13,14 +14,14 @@ class VisualModeSkill:
     priority = 10
     required = True
 
-    _VALID_MODES = frozenset(("black-white", "color"))
+    _MAX_SCAN_DEPTH = 20
     _FULL_COLOR_PHRASES = (
         "vibrant full color",
+        "vibrant color",
         "watercolor color wash",
         "full color",
         "rich chromatic lighting",
         "chromatic lighting",
-        "gradients",
     )
     _BLACK_WHITE_ONLY_PHRASES = (
         "monochrome only",
@@ -33,7 +34,7 @@ class VisualModeSkill:
         return True
 
     def apply(self, context: GenerationContext, constraints: ConstraintSet) -> None:
-        visual_mode, source = self._resolve_visual_mode(context)
+        visual_mode, source = resolve_visual_mode(context)
 
         constraints.visual_mode = visual_mode
         constraints.visual_mode_source = source
@@ -47,17 +48,6 @@ class VisualModeSkill:
             return
 
         self._apply_color(context, constraints)
-
-    def _resolve_visual_mode(self, context: GenerationContext) -> tuple[str, str]:
-        explicit = self._normalize_mode(context.visual_preferences.get("color_mode"))
-        if explicit is not None:
-            return explicit, "explicit"
-
-        scripted = self._normalize_mode(context.script_data.get("color_mode"))
-        if scripted is not None:
-            return scripted, "script"
-
-        return "black-white", "default"
 
     def _apply_black_white(
         self,
@@ -121,28 +111,38 @@ class VisualModeSkill:
         )
         return text
 
-    def _string_values(self, value: Any) -> list[str]:
+    def _string_values(
+        self,
+        value: Any,
+        seen: set[int] | None = None,
+        depth: int = 0,
+    ) -> list[str]:
+        if depth > self._MAX_SCAN_DEPTH:
+            return []
         if isinstance(value, str):
             return [value]
+
+        if seen is None:
+            seen = set()
+
         if isinstance(value, Mapping):
+            value_id = id(value)
+            if value_id in seen:
+                return []
+            seen.add(value_id)
             return [
                 nested
                 for item in value.values()
-                for nested in self._string_values(item)
+                for nested in self._string_values(item, seen, depth + 1)
             ]
         if isinstance(value, (list, tuple)):
+            value_id = id(value)
+            if value_id in seen:
+                return []
+            seen.add(value_id)
             return [
                 nested
                 for item in value
-                for nested in self._string_values(item)
+                for nested in self._string_values(item, seen, depth + 1)
             ]
         return []
-
-    def _normalize_mode(self, value: Any) -> str | None:
-        if not isinstance(value, str):
-            return None
-
-        normalized = value.replace("_", "-").strip().lower()
-        if normalized in self._VALID_MODES:
-            return normalized
-        return None

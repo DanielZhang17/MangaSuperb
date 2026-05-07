@@ -15,6 +15,7 @@ from mangasuperb.services.generation_skills.pipeline import (
     SkillPipeline,
     SkillPipelineError,
 )
+from mangasuperb.services.generation_skills.skills import VisualModeSkill
 
 __all__ = [
     "CharacterContext",
@@ -28,4 +29,5 @@ __all__ = [
     "ResolvedGenerationContext",
     "SkillPipeline",
     "SkillPipelineError",
+    "VisualModeSkill",
 ]

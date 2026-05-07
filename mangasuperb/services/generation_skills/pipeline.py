@@ -8,6 +8,7 @@ from mangasuperb.services.generation_skills.constraints import (
     ResolvedGenerationContext,
 )
 from mangasuperb.services.generation_skills.context import GenerationContext
+from mangasuperb.services.generation_skills.visual_modes import resolve_visual_mode
 
 logger = logging.getLogger(__name__)
 
@@ -68,11 +69,8 @@ class SkillPipeline:
 
     def _resolve_defaults(self, context: GenerationContext, constraints: ConstraintSet) -> None:
         if constraints.visual_mode is None:
-            candidate = str(
-                context.visual_preferences.get("color_mode") or "black-white"
-            )
-            candidate = candidate.replace("_", "-").strip().lower()
-            constraints.visual_mode = "color" if candidate == "color" else "black-white"
-            constraints.visual_mode_source = "pipeline-default"
+            visual_mode, source = resolve_visual_mode(context)
+            constraints.visual_mode = visual_mode
+            constraints.visual_mode_source = source
         if constraints.dialogue_mode is None:
             constraints.dialogue_mode = "hybrid"
