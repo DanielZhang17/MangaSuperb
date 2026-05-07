@@ -15,13 +15,14 @@ from mangasuperb.services.generation_skills.pipeline import (
     SkillPipeline,
     SkillPipelineError,
 )
-from mangasuperb.services.generation_skills.skills import VisualModeSkill
+from mangasuperb.services.generation_skills.skills import DialogueRenderingSkill, VisualModeSkill
 
 __all__ = [
     "CharacterContext",
     "CharacterLock",
     "ConstraintSet",
     "DialogueLine",
+    "DialogueRenderingSkill",
     "GenerationContext",
     "GenerationSkill",
     "LayoutContext",
