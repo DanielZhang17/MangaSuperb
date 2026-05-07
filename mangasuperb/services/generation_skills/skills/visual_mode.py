@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from mangasuperb.services.generation_skills.constraints import ConstraintSet
@@ -124,7 +124,7 @@ class VisualModeSkill:
     def _string_values(self, value: Any) -> list[str]:
         if isinstance(value, str):
             return [value]
-        if isinstance(value, dict):
+        if isinstance(value, Mapping):
             return [
                 nested
                 for item in value.values()

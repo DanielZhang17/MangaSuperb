@@ -13,13 +13,18 @@ def _context(
     color_mode: str,
     style_notes: str,
     panel_style: str | None = None,
+    script_data: dict[str, object] | None = None,
 ) -> GenerationContext:
     return GenerationContext(
         task_type="page_render",
         comic_title="Visual Test",
         page_number=1,
         style_notes=style_notes,
-        script_data={"color_mode": "color", "style_notes": style_notes},
+        script_data=(
+            {"color_mode": "color", "style_notes": style_notes}
+            if script_data is None
+            else script_data
+        ),
         panels=(
             PanelContext(
                 panel_number=1,
@@ -85,3 +90,18 @@ def test_color_mode_suppresses_black_white_only_language() -> None:
     assert any(
         "controlled full color" in text for text in constraints.positive_constraints
     )
+
+
+def test_black_white_mode_suppresses_script_only_full_color_language() -> None:
+    result = SkillPipeline([VisualModeSkill()]).run(
+        _context(
+            "black-white",
+            "Classic manga ink linework.",
+            script_data={
+                "color_mode": "color",
+                "rendering_notes": "Use vibrant full color.",
+            },
+        )
+    )
+
+    assert "vibrant full color" in result.constraints.suppressed_phrases
