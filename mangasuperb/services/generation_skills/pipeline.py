@@ -30,7 +30,10 @@ class SkillPipelineError(RuntimeError):
 
 
 class SkillPipeline:
-    def __init__(self, skills: list[GenerationSkill] | tuple[GenerationSkill, ...]) -> None:
+    def __init__(
+        self,
+        skills: list[GenerationSkill] | tuple[GenerationSkill, ...],
+    ) -> None:
         self._skills = tuple(sorted(skills, key=lambda skill: (skill.priority, skill.id)))
 
     def run(self, context: GenerationContext) -> ResolvedGenerationContext:
@@ -49,7 +52,13 @@ class SkillPipeline:
                     raise SkillPipelineError(f"{skill.id} failed: {exc}") from exc
                 constraints.skipped_skills.append(skill.id)
                 constraints.warnings.append(f"{skill.id}: {exc}")
-                logger.warning("Generation skill skipped skill_id=%s error=%s", skill.id, exc)
+                logger.warning(
+                    "Generation skill skipped skill_id=%s task_type=%s error=%s",
+                    skill.id,
+                    context.task_type,
+                    exc,
+                    exc_info=True,
+                )
                 continue
 
             constraints.applied_skills.append(skill.id)
@@ -59,7 +68,10 @@ class SkillPipeline:
 
     def _resolve_defaults(self, context: GenerationContext, constraints: ConstraintSet) -> None:
         if constraints.visual_mode is None:
-            candidate = str(context.visual_preferences.get("color_mode") or "black-white")
+            candidate = str(
+                context.visual_preferences.get("color_mode") or "black-white"
+            )
+            candidate = candidate.replace("_", "-").strip().lower()
             constraints.visual_mode = "color" if candidate == "color" else "black-white"
             constraints.visual_mode_source = "pipeline-default"
         if constraints.dialogue_mode is None:

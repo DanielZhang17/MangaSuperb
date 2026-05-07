@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from types import MappingProxyType
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -49,3 +51,16 @@ class GenerationContext:
     reference_notes: tuple[str, ...]
     previous_context_lines: tuple[str, ...]
     text_options: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "script_data", _freeze_mapping(self.script_data))
+        object.__setattr__(
+            self,
+            "visual_preferences",
+            _freeze_mapping(self.visual_preferences),
+        )
+        object.__setattr__(self, "text_options", _freeze_mapping(self.text_options))
+
+
+def _freeze_mapping(mapping: Mapping[str, Any]) -> Mapping[str, Any]:
+    return MappingProxyType(dict(mapping))

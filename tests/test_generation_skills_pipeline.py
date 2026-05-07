@@ -5,21 +5,28 @@ import logging
 import pytest
 
 from mangasuperb.services.generation_skills.constraints import ConstraintSet
-from mangasuperb.services.generation_skills.context import GenerationContext, LayoutContext, PanelContext
+from mangasuperb.services.generation_skills.context import (
+    GenerationContext,
+    LayoutContext,
+    PanelContext,
+)
 from mangasuperb.services.generation_skills.pipeline import (
-    GenerationSkill,
     SkillPipeline,
     SkillPipelineError,
 )
 
 
-def _context() -> GenerationContext:
+def _context(
+    script_data: dict[str, object] | None = None,
+    visual_preferences: dict[str, object] | None = None,
+    text_options: dict[str, object] | None = None,
+) -> GenerationContext:
     return GenerationContext(
         task_type="page_render",
         comic_title="Test Comic",
         page_number=1,
         style_notes="Classic manga black and white linework.",
-        script_data={},
+        script_data={} if script_data is None else script_data,
         panels=(
             PanelContext(
                 panel_number=1,
@@ -37,10 +44,14 @@ def _context() -> GenerationContext:
             aspect_ratio="2:3",
         ),
         characters=(),
-        visual_preferences={"color_mode": "black-white"},
+        visual_preferences=(
+            {"color_mode": "black-white"}
+            if visual_preferences is None
+            else visual_preferences
+        ),
         reference_notes=(),
         previous_context_lines=(),
-        text_options={},
+        text_options={} if text_options is None else text_options,
     )
 
 
@@ -96,6 +107,42 @@ def test_pipeline_runs_skills_in_priority_order() -> None:
     assert result.constraints.dialogue_mode == "hybrid"
 
 
+def test_generation_context_copies_mapping_inputs() -> None:
+    script_data = {"chapter": 1}
+    visual_preferences = {"color_mode": "black-white"}
+    text_options = {"font": "dialogue"}
+
+    context = _context(
+        script_data=script_data,
+        visual_preferences=visual_preferences,
+        text_options=text_options,
+    )
+
+    script_data["chapter"] = 2
+    visual_preferences["color_mode"] = "color"
+    text_options["font"] = "sound-effect"
+
+    assert context.script_data["chapter"] == 1
+    assert context.visual_preferences["color_mode"] == "black-white"
+    assert context.text_options["font"] == "dialogue"
+
+
+@pytest.mark.parametrize(
+    ("color_mode", "expected"),
+    [
+        (" COLOR ", "color"),
+        ("sepia", "black-white"),
+    ],
+)
+def test_pipeline_normalizes_default_visual_mode(
+    color_mode: str,
+    expected: str,
+) -> None:
+    result = SkillPipeline([]).run(_context(visual_preferences={"color_mode": color_mode}))
+
+    assert result.constraints.visual_mode == expected
+
+
 def test_pipeline_skips_non_required_skill_failures(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.WARNING)
 
@@ -105,6 +152,8 @@ def test_pipeline_skips_non_required_skill_failures(caplog: pytest.LogCaptureFix
     assert result.constraints.applied_skills == ["recording"]
     assert "optional_failure" in caplog.text
     assert "optional exploded" in caplog.text
+    assert "page_render" in caplog.text
+    assert caplog.records[0].exc_info is not None
 
 
 def test_pipeline_raises_for_required_skill_failures() -> None:
