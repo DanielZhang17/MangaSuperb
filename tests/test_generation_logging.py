@@ -41,3 +41,11 @@ def test_prompt_logging_unset_is_disabled(monkeypatch, tmp_path: Path) -> None:
     generation.log_gemini_contents(["SECRET_PROMPT"], "test-model", context="unit")
 
     assert not _prompt_log_path(tmp_path).exists()
+
+
+def test_app_fixture_disables_inherited_prompt_logging(monkeypatch, request) -> None:
+    monkeypatch.setenv("LOG_PROMPTS", "true")
+
+    request.getfixturevalue("app")
+
+    assert not generation._prompt_logging_enabled()

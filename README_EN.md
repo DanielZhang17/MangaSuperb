@@ -8,10 +8,11 @@ An AI-powered manga generation tool that uses Google's Gemini API to create mang
 - 🖼️ AI-generated manga panel images (when available)
 - 💾 Server-side environment configuration for API access and generated content
 - 👤 Randomly assigned default user avatars (index 1–4) surfaced via the REST API
-- 🔒 Gemini API keys and model choices managed entirely by the backend configuration
+- 🔒 API keys and model choices managed entirely by the backend configuration
 - 🔄 Regenerate stories on demand
 - ⬇️ Download individual or all panel images
-- 🔑 Support for multiple Gemini models
+- 🔑 Support for multiple AI models
+- 🔌 Pluggable AI provider: switch image and text generation between Google Gemini and any OpenAI-compatible third-party endpoint independently via environment variables
 
 ## Setup
 
@@ -20,6 +21,7 @@ An AI-powered manga generation tool that uses Google's Gemini API to create mang
 - Python 3.10 or higher
 - Redis instance for background jobs
 - Google Gemini API key configured as `GEMINI_API_KEY` in your `.env` file (get one at [Google AI Studio](https://makersuite.google.com/app/apikey))
+- (Optional) A third-party OpenAI-compatible API endpoint — set `IMAGE_PROVIDER=third_party` or `TEXT_PROVIDER=third_party` and configure `THIRD_PARTY_API_URL`, `THIRD_PARTY_API_KEY`, and the model names in `.env`
 
 ### Installation
 
@@ -81,7 +83,10 @@ MangaSuperb/
 │   ├── __init__.py          # Flask application factory
 │   ├── extensions.py        # Shared extensions (db, login, queue)
 │   ├── routes/              # Blueprint modules grouped by domain
-│   └── services/            # Gemini helpers and background jobs
+│   └── services/
+│       ├── ai_provider.py   # AI provider abstraction (Gemini / third-party)
+│       ├── generation.py    # Script generation and character optimization
+│       └── jobs.py          # RQ background job implementations
 ├── models.py                # SQLAlchemy models
 ├── storage.py               # Cloudflare R2 helper
 ├── worker.py                # RQ worker bootstrap

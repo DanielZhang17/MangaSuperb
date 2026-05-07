@@ -91,8 +91,10 @@ class DummyStorage:
 
 
 @pytest.fixture
-def app() -> Generator[Flask, None, None]:
+def app(monkeypatch: pytest.MonkeyPatch) -> Generator[Flask, None, None]:
     """Create a Flask application configured for tests."""
+
+    monkeypatch.setenv("LOG_PROMPTS", "false")
 
     app = Flask(__name__)
     app.config.update(

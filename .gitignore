@@ -3,8 +3,8 @@ CLAUDE.md
 mangasuperb/static/
 __pycache__/
 .env
+.env.bak
 AGENTS.md
 frontend/node_modules/
 logs/
 .codex
-
