@@ -1,6 +1,5 @@
-import { cn } from '@/lib/utils'
-
 import type { ActiveJobStage } from '@/atoms'
+import { cn } from '@/lib/utils'
 
 interface StageBarProps {
   currentStage: string
@@ -11,6 +10,7 @@ function segmentTone(status: string, isCurrent: boolean): string {
   if (status === 'completed') return 'bg-emerald-500/90'
   if (status === 'failed') return 'bg-rose-500/90'
   if (status === 'in_progress' || isCurrent) return 'bg-sky-500/90'
+
   return 'bg-border'
 }
 
@@ -20,6 +20,7 @@ export function StageBar({ currentStage, stages }: StageBarProps) {
       <div className="flex gap-1.5">
         {stages.map((stage) => {
           const isCurrent = stage.stage === currentStage
+
           return (
             <div
               key={stage.stage}

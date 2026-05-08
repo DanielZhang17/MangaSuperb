@@ -1,11 +1,11 @@
+import { useAtom, useAtomValue } from 'jotai'
 import { Plus, X } from 'lucide-react'
 import { useMemo } from 'react'
-import { useAtom, useAtomValue } from 'jotai'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
-import { customPagesAtom, currentComicDetailAtom, selectedPageAtom } from '../atoms'
+import { currentComicDetailAtom, customPagesAtom, selectedPageAtom } from '../atoms'
 
 interface PageSidebarProps {
   className?: string
@@ -91,6 +91,7 @@ export function PageSidebar({ className, showAddButton = true }: PageSidebarProp
           {pages.map((page) => {
             const isActive = page === selectedPage
             const isPlaceholder = placeholders.has(page)
+
             return (
               <div
                 key={page}

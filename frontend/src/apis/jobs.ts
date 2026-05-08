@@ -10,6 +10,19 @@ export interface JobDetail {
   [k: string]: any
 }
 
+export interface ActiveJob {
+  job_id: string
+  comic_id: number
+  stage: string
+  status: string
+  title: string
+  started_at: string | null
+}
+
+export interface ActiveJobsResponse {
+  active: ActiveJob[]
+}
+
 export type CreateComicJobRequest =
   | {
       job_type: 'story_optimization'
@@ -37,6 +50,14 @@ export interface CreateComicJobResponse {
 }
 
 export const JobsApi = {
+  // List active workflow jobs for the logged-in user
+  listActive() {
+    return request<void, ActiveJobsResponse>({
+      url: '/api/jobs/active',
+      method: 'GET',
+    })
+  },
+
   // Get a job detail and its current rq_status
   get(jobId: string) {
     return request<void, JobDetail>({

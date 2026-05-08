@@ -5,8 +5,8 @@ import { useNavigate } from 'react-router'
 
 import type { ActiveJobEntry, ActiveJobStage } from '@/atoms'
 import { Button } from '@/components/ui/button'
-import { currentComicDetailAtom, currentComicIdAtom, activeTabAtom } from '@/pages/comics/atoms'
 import useActiveJobs, { mapStageToComicsTab } from '@/hooks/use-active-jobs'
+import { activeTabAtom, currentComicDetailAtom, currentComicIdAtom } from '@/pages/comics/atoms'
 
 import { ProgressRow } from './progress-row'
 
@@ -14,6 +14,7 @@ const STAGE_ORDER = ['outline', 'shots', 'render', 'cover', 'export', 'publish']
 
 function rankStage(stage: string): number {
   const index = STAGE_ORDER.indexOf(stage)
+
   return index === -1 ? STAGE_ORDER.length : index
 }
 
@@ -26,6 +27,7 @@ function mergeWorkflowStages(jobs: ActiveJobEntry[]): ActiveJobStage[] | undefin
   }
 
   if (map.size === 0) return undefined
+
   return [...map.values()].sort((left, right) => rankStage(left.stage) - rankStage(right.stage))
 }
 
@@ -70,9 +72,11 @@ export function ProgressShelf() {
     if (job.comic_id) {
       setComicId(job.comic_id)
     }
+
     if (job.comic) {
       setComicDetail(job.comic)
     }
+
     setActiveTab(mapStageToComicsTab(job.stage))
     navigate('/comics')
   }

@@ -2,16 +2,16 @@ import { useAtomValue } from 'jotai'
 import { useEffect, useRef, useState } from 'react'
 
 import { ComicsApi } from '@/apis/comics'
-import { JobsApi, type ActiveJob as ApiActiveJob, type JobDetail } from '@/apis/jobs'
+import { type ActiveJob as ApiActiveJob, type JobDetail, JobsApi } from '@/apis/jobs'
 import {
+  type ActiveJobEntry,
+  type ActiveJobRenderProgress,
   activeJobsAtom,
+  type ActiveJobStage,
   clearActiveJobs,
   mergeActiveJobs,
   removeActiveJob,
   replaceActiveJobs,
-  type ActiveJobEntry,
-  type ActiveJobRenderProgress,
-  type ActiveJobStage,
 } from '@/atoms'
 import type { IComic } from '@/service/types'
 
@@ -21,7 +21,7 @@ const COMIC_REFRESH_MS = 5000
 const REMOVAL_DELAY_MS = 5000
 const MAX_BACKOFF_MS = 60000
 
-type ComicCacheEntry = {
+interface ComicCacheEntry {
   comic: IComic
   fetchedAt: number
 }
@@ -59,6 +59,7 @@ function countRenderProgress(comic: IComic | null | undefined): ActiveJobRenderP
   }
 
   const completed = pages.filter((page) => Boolean(page?.image_url)).length
+
   return {
     completed,
     total: totalPages.size,
@@ -67,6 +68,7 @@ function countRenderProgress(comic: IComic | null | undefined): ActiveJobRenderP
 
 function extractWorkflowStages(comic: IComic | null | undefined): ActiveJobStage[] | undefined {
   if (!comic || !Array.isArray(comic.workflow_stages)) return undefined
+
   return comic.workflow_stages.map((stage) => ({
     stage: String(stage?.stage ?? ''),
     status: String(stage?.status ?? ''),
@@ -101,11 +103,13 @@ function isUnauthorized(error: unknown): boolean {
 
 function isNotFound(error: unknown): boolean {
   const response = (error as { response?: { status?: number } } | undefined)?.response
+
   return response?.status === 404
 }
 
 function mapBackoffDelay(visible: boolean, failures: number): number {
   const base = visible ? VISIBLE_POLL_MS : HIDDEN_POLL_MS
+
   return Math.min(base * (2 ** failures), MAX_BACKOFF_MS)
 }
 
@@ -150,6 +154,7 @@ export function useActiveJobs() {
     }
 
     document.addEventListener('visibilitychange', handleVisibilityChange)
+
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
   }, [])
 
@@ -169,6 +174,7 @@ export function useActiveJobs() {
     }
 
     void hydrate()
+
     return () => {
       cancelled = true
     }
@@ -207,6 +213,7 @@ export function useActiveJobs() {
 
       const comic = await ComicsApi.get(comicId)
       comicCacheRef.current.set(comicId, { comic, fetchedAt: now })
+
       return comic
     }
 
@@ -230,6 +237,7 @@ export function useActiveJobs() {
           currentJobs.map(async (job) => {
             try {
               const detail = await JobsApi.get(job.job_id)
+
               return { job, detail, error: null as null }
             } catch (error) {
               return { job, detail: null as JobDetail | null, error }
@@ -255,6 +263,7 @@ export function useActiveJobs() {
           } catch (error) {
             if (isUnauthorized(error)) {
               clearActiveJobs()
+
               return
             }
           }
@@ -267,12 +276,15 @@ export function useActiveJobs() {
           if (item.error) {
             if (isUnauthorized(item.error)) {
               clearActiveJobs()
+
               return
             }
+
             if (isNotFound(item.error)) {
               removeActiveJob(item.job.job_id)
               continue
             }
+
             batchFailed = true
             nextJobs.push(item.job)
             continue
@@ -302,8 +314,10 @@ export function useActiveJobs() {
       } catch (error) {
         if (isUnauthorized(error)) {
           clearActiveJobs()
+
           return
         }
+
         failureCountRef.current += 1
         applyReconnectingFlag()
       } finally {
@@ -327,6 +341,7 @@ export function useActiveJobs() {
     for (const timerId of removalTimersRef.current.values()) {
       window.clearTimeout(timerId)
     }
+
     removalTimersRef.current.clear()
   }, [])
 

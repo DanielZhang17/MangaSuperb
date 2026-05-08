@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { createStore, Provider } from 'jotai'
 import { act } from 'react'
-import { Provider, createStore } from 'jotai'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
 import toast from 'react-hot-toast'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { fullStoryAtom } from '../../atoms'
 import { StoryEditor } from '../story-editor'
@@ -28,18 +28,20 @@ let mockReader: {
 
 vi.stubGlobal('FileReader', vi.fn().mockImplementation(() => {
   mockReader = { result: null, onload: null, onerror: null, readAsText: vi.fn() }
+
   return mockReader
 }))
 
 function renderEditor(initialContent = '') {
   const store = createStore()
   store.set(fullStoryAtom, initialContent)
+
   return {
     store,
     ...render(
       <Provider store={store}>
         <StoryEditor />
-      </Provider>
+      </Provider>,
     ),
   }
 }

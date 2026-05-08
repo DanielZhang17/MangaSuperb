@@ -321,7 +321,15 @@ const resources = {
   },
 }
 
-const saved = localStorage.getItem('i18nextLng') || 'zh-CN'
+function getSavedLanguage() {
+  if (typeof window === 'undefined' || !window.localStorage?.getItem) {
+    return 'zh-CN'
+  }
+
+  return window.localStorage.getItem('i18nextLng') || 'zh-CN'
+}
+
+const saved = getSavedLanguage()
 
 if (!i18next.isInitialized) {
   i18next.init({

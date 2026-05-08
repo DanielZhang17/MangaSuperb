@@ -10,6 +10,7 @@ import { useActiveJobs } from '../use-active-jobs'
 
 vi.mock('@/apis/jobs', async () => {
   const actual = await vi.importActual<typeof import('@/apis/jobs')>('@/apis/jobs')
+
   return {
     ...actual,
     JobsApi: {
@@ -22,6 +23,7 @@ vi.mock('@/apis/jobs', async () => {
 
 vi.mock('@/apis/comics', async () => {
   const actual = await vi.importActual<typeof import('@/apis/comics')>('@/apis/comics')
+
   return {
     ...actual,
     ComicsApi: {

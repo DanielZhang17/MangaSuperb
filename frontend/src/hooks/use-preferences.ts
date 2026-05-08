@@ -48,6 +48,7 @@ export function usePreferences() {
         setUser({ ...user, preferences: response.preferences })
       }
     }
+
     return response
   }
 

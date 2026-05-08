@@ -57,7 +57,7 @@ export function LegalDocument({ variant }: LegalDocumentProps) {
         <div className="space-y-3 text-center">
           <Icon className="mx-auto size-10 text-primary" aria-hidden="true" />
           <p className="text-sm uppercase tracking-wider text-muted-foreground">
-            {String(t(`action.documentLabel`))}
+            {String(t('action.documentLabel'))}
           </p>
           <h1 className="text-3xl font-semibold tracking-tight">{String(t(`${variant}.title`))}</h1>
           <p className="text-sm text-muted-foreground">{String(t(`${variant}.updated`))}</p>
