@@ -114,6 +114,8 @@ def app(monkeypatch: pytest.MonkeyPatch) -> Generator[Flask, None, None]:
         GEMINI_IMAGE_MODEL="test-image-model",
         IMAGE_PROVIDER="gemini",
         TEXT_PROVIDER="gemini",
+        GENERATION_PROMPT_OPTIMIZATION_ENABLED=False,
+        GENERATION_PROMPT_OPTIMIZATION_SCOPES="shot_split,page_render",
         THIRD_PARTY_API_URL="https://test-api.example.com",
         THIRD_PARTY_API_KEY="test-third-party-key",
         THIRD_PARTY_IMAGE_MODEL="test-image-model-tp",

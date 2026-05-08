@@ -60,6 +60,14 @@ class Config:
     # AI provider selection ("gemini" or "third_party")
     IMAGE_PROVIDER = os.getenv('IMAGE_PROVIDER', 'gemini')
     TEXT_PROVIDER = os.getenv('TEXT_PROVIDER', 'gemini')
+    GENERATION_PROMPT_OPTIMIZATION_ENABLED = (
+        os.getenv("GENERATION_PROMPT_OPTIMIZATION_ENABLED", "false").strip().lower()
+        == "true"
+    )
+    GENERATION_PROMPT_OPTIMIZATION_SCOPES = os.getenv(
+        "GENERATION_PROMPT_OPTIMIZATION_SCOPES",
+        "shot_split,page_render",
+    )
 
     # Third-party OpenAI-compatible API
     THIRD_PARTY_API_URL = os.getenv('THIRD_PARTY_API_URL', '')
