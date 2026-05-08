@@ -365,7 +365,7 @@ def test_requeue_render_includes_context(
         )
         assert second_pass["status"] == "processing"
         assert len(prompts) == 2
-        assert "Previous pages context" in prompts[1]
+        assert "Continuity Context:" in prompts[1]
         assert "Page 1 Panel 1" in prompts[1]
 
         refreshed_comic = db.session.get(Comic, comic.id)
@@ -471,12 +471,88 @@ def test_render_prompt_includes_character_roster(
             stored_comic.id,
             page_number=1,
             image_model="test-model",
+            font_family="Noto Sans",
+            font_size="large",
+            bubble_shape="rect",
+            bubble_tail=False,
         )
 
         assert prompts, "Expected image generation prompt to be captured"
-        assert "Character roster:" in prompts[0]
+        assert "Character Locks:" in prompts[0]
+        assert "Task Intent:" in prompts[0]
+        assert "Dialogue Policy:" in prompts[0]
+        assert "Layout Discipline:" in prompts[0]
         assert "Aya" in prompts[0]
         assert "Protagonist" in prompts[0]
+        assert "Use rectangular speech bubbles for dialogue" in prompts[0]
+        assert "Draw speech bubble tails without pointers to speakers" in prompts[0]
+        assert "Use Noto Sans font family for text" in prompts[0]
+        assert "Use large font size for text" in prompts[0]
+
+
+def test_render_stage_uses_generation_skills_to_suppress_conflicting_color_prompt(
+    app,
+    user: User,
+    dummy_storage,
+    monkeypatch,
+):
+    prompts: list[str] = []
+    _patch_genai(monkeypatch, prompts)
+
+    script_payload = {
+        "title": "Color Conflict",
+        "story": "A hero crosses the city.",
+        "style_notes": (
+            "Classic manga black and white linework with vibrant full color watercolor "
+            "color wash."
+        ),
+        "color_mode": "black-white",
+        "panels": [
+            {
+                "panel_number": 1,
+                "scene": "Aya crosses a rain-slick street.",
+                "dialogue": "Move.",
+                "visual_notes": "Use rich chromatic lighting and gradients.",
+            }
+        ],
+    }
+
+    with app.app_context():
+        script = Script(
+            user_id=user.id,
+            title=script_payload["title"],
+            content=json.dumps(script_payload),
+        )
+        comic = Comic(
+            user_id=user.id,
+            script=script,
+            title=script_payload["title"],
+            style_description=script_payload["style_notes"],
+            aspect_ratio="2:3",
+        )
+        db.session.add_all([script, comic])
+        db.session.commit()
+
+        jobs.bootstrap_comic_workflow(comic)
+        db.session.commit()
+
+        jobs.process_outline_stage(comic.id)
+        jobs.process_shot_stage(comic.id)
+        result = jobs.process_page_render_stage(
+            comic.id,
+            page_number=1,
+            image_model="test-model",
+            color_mode="black-white",
+        )
+
+        assert result["status"] == "processing"
+        assert prompts
+        assert "Resolved Visual Mode:" in prompts[0]
+        assert "Visual mode: black-white" in prompts[0]
+        assert "black-and-white manga linework" in prompts[0]
+        assert "vibrant full color" not in prompts[0]
+        assert "watercolor color wash" not in prompts[0]
+        assert "rich chromatic lighting" not in prompts[0]
 
 
 def test_shot_stage_recovers_dialogue_from_summary(app, comic: Comic):

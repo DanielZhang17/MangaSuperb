@@ -33,7 +33,10 @@ from mangasuperb.services.generation_skills.context import (
     LayoutContext,
     PanelContext,
 )
-from mangasuperb.services.generation_skills.page_render import render_page_prompt
+from mangasuperb.services.generation_skills.page_render import (
+    build_page_generation_context,
+    render_page_prompt,
+)
 from mangasuperb.services.generation_skills.prompt_optimizer import optimize_text_if_enabled
 from mangasuperb.services.generation_skills.shot_split import resolve_shot_drafts
 from models import (
@@ -1286,8 +1289,6 @@ def process_page_render_stage(
                 layout.layout_key,
                 LAYOUT_INSTRUCTIONS["auto-grid"],
             )
-            if layout.notes:
-                layout_instruction += f" Notes: {layout.notes}"
 
             previous_panels = (
                 ComicPanelShot.query.filter(
@@ -1301,18 +1302,24 @@ def process_page_render_stage(
             previous_context_lines = _panel_summary_lines(previous_panels)
 
             ref_lines, ref_parts = _collect_character_image_references(comic)
-            page_context = _build_page_render_context(
-                comic,
-                script_data,
-                page_number,
-                layout_instruction,
-                layout.layout_key,
-                layout.notes,
-                panels,
-                normalized_color,
-                normalized_aspect_ratio,
-                ref_lines,
-                previous_context_lines,
+            page_context = build_page_generation_context(
+                comic=comic,
+                script_data=script_data,
+                page_number=page_number,
+                layout_key=layout.layout_key,
+                layout_instruction=layout_instruction,
+                layout_notes=layout.notes,
+                panels=panels,
+                color_mode=normalized_color,
+                aspect_ratio=normalized_aspect_ratio,
+                reference_notes=ref_lines,
+                previous_context_lines=previous_context_lines,
+                text_options={
+                    "font_family": font_family,
+                    "font_size": font_size,
+                    "bubble_shape": bubble_shape,
+                    "bubble_tail": bubble_tail,
+                },
             )
             prompt, prompt_metadata = render_page_prompt(page_context)
             optimization = optimize_text_if_enabled(

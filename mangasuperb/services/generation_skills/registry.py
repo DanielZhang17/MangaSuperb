@@ -2,42 +2,38 @@
 from __future__ import annotations
 
 from mangasuperb.services.generation_skills.pipeline import GenerationSkill
+from mangasuperb.services.generation_skills.skills import (
+    CameraStyleEnrichmentSkill,
+    CharacterConsistencySkill,
+    DialogueExtractionSkill,
+    DialogueRenderingSkill,
+    LayoutDisciplineSkill,
+    PanelAssignmentSkill,
+    PanelFidelitySkill,
+    ShotBoundarySkill,
+    VisualModeSkill,
+)
 
 
-def get_builtin_skills(task_type: str) -> tuple[GenerationSkill, ...]:
-    from mangasuperb.services.generation_skills.skills.camera_style_enrichment import (
-        CameraStyleEnrichmentSkill,
-    )
-    from mangasuperb.services.generation_skills.skills.character_consistency import (
-        CharacterConsistencySkill,
-    )
-    from mangasuperb.services.generation_skills.skills.dialogue_extraction import (
-        DialogueExtractionSkill,
-    )
-    from mangasuperb.services.generation_skills.skills.dialogue_rendering import (
-        DialogueRenderingSkill,
-    )
-    from mangasuperb.services.generation_skills.skills.layout_discipline import (
-        LayoutDisciplineSkill,
-    )
-    from mangasuperb.services.generation_skills.skills.panel_assignment import (
-        PanelAssignmentSkill,
-    )
-    from mangasuperb.services.generation_skills.skills.panel_fidelity import (
-        PanelFidelitySkill,
-    )
-    from mangasuperb.services.generation_skills.skills.shot_boundary import ShotBoundarySkill
-    from mangasuperb.services.generation_skills.skills.visual_mode import VisualModeSkill
-
-    skills: tuple[GenerationSkill, ...] = (
+def shot_split_skills() -> tuple[GenerationSkill, ...]:
+    return (
         ShotBoundarySkill(),
         DialogueExtractionSkill(),
         CameraStyleEnrichmentSkill(),
         PanelAssignmentSkill(),
+    )
+
+
+def page_render_skills() -> tuple[GenerationSkill, ...]:
+    return (
         VisualModeSkill(),
         CharacterConsistencySkill(),
         DialogueRenderingSkill(),
-        PanelFidelitySkill(),
         LayoutDisciplineSkill(),
+        PanelFidelitySkill(),
     )
+
+
+def get_builtin_skills(task_type: str) -> tuple[GenerationSkill, ...]:
+    skills = (*shot_split_skills(), *page_render_skills())
     return tuple(skill for skill in skills if task_type in skill.scopes)

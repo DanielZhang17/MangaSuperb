@@ -7,12 +7,29 @@ from mangasuperb.services.generation_skills.context import GenerationContext
 class PanelFidelitySkill:
     id = "panel_fidelity"
     scopes = ("page_render",)
-    priority = 40
-    required = True
+    priority = 50
+    required = False
 
     def should_apply(self, context: GenerationContext) -> bool:
         return bool(context.panels)
 
     def apply(self, context: GenerationContext, constraints: ConstraintSet) -> None:
-        constraints.add_panel_constraint("Current page panels override previous page context.")
-        constraints.add_panel_constraint("Focus only on the panels described for this page.")
+        constraints.panel_constraints.append(
+            f"Focus only on current page {context.page_number}; render the panels listed "
+            "for this page."
+        )
+        for panel in context.panels:
+            panel_number = panel.panel_number or panel.sequence_index
+            constraints.panel_constraints.append(
+                f"Panel {panel_number}: keep this panel scoped to sequence "
+                f"{panel.sequence_index}."
+            )
+        if context.previous_context_lines:
+            constraints.add_positive(
+                "Previous page context is continuity only and must not override current "
+                "panel descriptions, dialogue, camera notes, or layout."
+            )
+            constraints.add_positive(
+                "Current page panels override previous page context."
+            )
+        constraints.metadata["panel_fidelity_panel_count"] = len(context.panels)

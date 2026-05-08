@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from mangasuperb.services.generation_skills.constraints import ConstraintSet
+from mangasuperb.services.generation_skills.constraints import CharacterLock, ConstraintSet
 from mangasuperb.services.generation_skills.context import GenerationContext
 
 
@@ -15,16 +15,33 @@ class CharacterConsistencySkill:
 
     def apply(self, context: GenerationContext, constraints: ConstraintSet) -> None:
         for character in context.characters:
-            parts = [character.name]
-            if character.role:
-                parts.append(f"role: {character.role}")
-            description = character.optimized_description or character.description
-            if description:
-                parts.append(description)
-            if character.reference_note:
-                parts.append(character.reference_note)
-            constraints.add_character_lock("; ".join(parts))
-        if context.reference_notes:
-            constraints.add_positive(
-                "Reference images outrank conflicting text descriptions for character appearance."
+            description = (
+                character.optimized_description
+                or character.description
+                or character.style_prompt
+                or "No character description supplied."
+            ).strip()
+            constraints.character_locks.append(
+                CharacterLock(
+                    name=character.name,
+                    role=character.role,
+                    description=description,
+                    sex=character.sex,
+                    reference_index=character.reference_index,
+                    has_reference_image=character.has_reference_image,
+                )
             )
+
+        constraints.add_positive(
+            "Reference images outrank text descriptions for character identity, face, "
+            "hairstyle, body type, clothing identity, age, and sex presentation."
+        )
+        constraints.add_positive(
+            "Keep recurring characters visually consistent across all panels on this page."
+        )
+        constraints.add_negative(
+            "Do not invent extra primary characters unless the current panel description "
+            "requires them."
+        )
+        constraints.metadata["character_lock_count"] = len(constraints.character_locks)
+        constraints.metadata["reference_note_count"] = len(context.reference_notes)

@@ -7,18 +7,32 @@ from mangasuperb.services.generation_skills.context import GenerationContext
 class LayoutDisciplineSkill:
     id = "layout_discipline"
     scopes = ("page_render",)
-    priority = 50
+    priority = 40
     required = True
 
     def should_apply(self, context: GenerationContext) -> bool:
-        return context.layout is not None
+        return True
 
     def apply(self, context: GenerationContext, constraints: ConstraintSet) -> None:
         panel_count = len(context.panels)
-        aspect_ratio = context.layout.aspect_ratio if context.layout else None
-        constraints.add_layout_constraint(f"Preserve exactly {panel_count} panel(s).")
-        constraints.add_layout_constraint(
-            "Use clear panel boundaries, gutters, and manga reading order."
+        layout = context.layout
+        if layout is None:
+            constraints.layout_constraints.append(f"Preserve panel count: {panel_count}.")
+            constraints.add_negative("Avoid collapsing the page into a single poster-style image.")
+            constraints.metadata["panel_count"] = panel_count
+            return
+
+        constraints.layout_constraints.extend(
+            [
+                f"Preserve panel count: {panel_count}.",
+                f"Preserve page aspect ratio: {layout.aspect_ratio}.",
+                f"Use layout key: {layout.layout_key}.",
+                "Keep clear panel boundaries, consistent gutters, and manga reading order.",
+                layout.instruction,
+            ]
         )
-        if aspect_ratio:
-            constraints.add_layout_constraint(f"Target aspect ratio: {aspect_ratio}.")
+        if layout.notes:
+            constraints.layout_constraints.append(f"Layout notes: {layout.notes}")
+        constraints.add_negative("Avoid collapsing the page into a single poster-style image.")
+        constraints.metadata["layout_key"] = layout.layout_key
+        constraints.metadata["panel_count"] = panel_count
