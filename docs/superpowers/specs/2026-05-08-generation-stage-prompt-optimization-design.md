@@ -66,8 +66,6 @@ Prompt optimization is disabled by default and enabled through `.env`.
 ```text
 GENERATION_PROMPT_OPTIMIZATION_ENABLED=false
 GENERATION_PROMPT_OPTIMIZATION_SCOPES=shot_split,page_render
-GENERATION_PROMPT_OPTIMIZATION_MODEL=
-GENERATION_PROMPT_OPTIMIZATION_TIMEOUT_SECONDS=30
 ```
 
 Behavior:
@@ -77,8 +75,6 @@ Behavior:
   for the configured scopes.
 - `GENERATION_PROMPT_OPTIMIZATION_SCOPES` limits where the extra call can run.
   Operators can enable only `shot_split`, only `page_render`, or both.
-- `GENERATION_PROMPT_OPTIMIZATION_MODEL` is optional. If empty, the optimizer
-  uses the default text provider model.
 - The first implementation treats model-backed optimization as optional. If it
   fails or times out, the job logs the failure and falls back to deterministic
   skills or current behavior.
@@ -234,18 +230,18 @@ Add structured logs at both stages:
 ```text
 task_type=shot_split
 skills=shot_boundary,dialogue_extraction,camera_style_enrichment,panel_assignment
-prompt_optimizer_enabled=<true|false>
-text_model_call_count=<0|1>
-panel_count=<integer>
-skipped_skills=<comma-separated skill ids or empty>
+prompt_optimizer_enabled=true|false
+text_model_call_count=0|1
+panel_count=integer
+skipped_skills=comma-separated skill ids or empty
 
 task_type=page_render
 skills=visual_mode,character_consistency,dialogue_rendering,panel_fidelity,layout_discipline
-prompt_optimizer_enabled=<true|false>
-text_model_call_count=<0|1>
-visual_mode=<black-white|color>
-dialogue_mode=<render_text|hybrid|blank_bubbles>
-skipped_skills=<comma-separated skill ids or empty>
+prompt_optimizer_enabled=true|false
+text_model_call_count=0|1
+visual_mode=black-white|color
+dialogue_mode=render_text|hybrid|blank_bubbles
+skipped_skills=comma-separated skill ids or empty
 ```
 
 Full prompt bodies remain gated behind existing prompt logging controls.
