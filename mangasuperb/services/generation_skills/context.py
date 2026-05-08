@@ -50,3 +50,15 @@ class GenerationContext:
     reference_notes: tuple[str, ...] = ()
     previous_context_lines: tuple[str, ...] = ()
     text_options: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ShotDraft:
+    sequence_index: int
+    title: str
+    description: str
+    dialogue: str | None
+    camera_notes: str | None
+    style_notes: str | None
+    page_number: int
+    panel_number: int
