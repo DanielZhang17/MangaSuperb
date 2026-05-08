@@ -27,6 +27,15 @@ from mangasuperb.services.generation import (
     optimize_character_description,
     validate_aspect_ratio,
 )
+from mangasuperb.services.generation_skills.context import (
+    CharacterContext,
+    GenerationContext,
+    LayoutContext,
+    PanelContext,
+)
+from mangasuperb.services.generation_skills.page_render import render_page_prompt
+from mangasuperb.services.generation_skills.prompt_optimizer import optimize_text_if_enabled
+from mangasuperb.services.generation_skills.shot_split import resolve_shot_drafts
 from models import (
     DEFAULT_COLOR_MODES,
     Character,
@@ -583,6 +592,103 @@ def _resolve_panel_fields(
     )
 
 
+def _build_shot_split_context(
+    comic: Comic,
+    script_data: dict[str, Any],
+    outline_sections: Sequence[ComicOutlineSection],
+) -> GenerationContext:
+    panels = tuple(
+        PanelContext(
+            panel_number=None,
+            sequence_index=idx,
+            description=section.summary or "",
+            dialogue=None,
+            camera_notes=None,
+            style_notes=None,
+            source_title=section.title,
+        )
+        for idx, section in enumerate(outline_sections, start=1)
+    )
+    story_value = script_data.get("story")
+    story = story_value if isinstance(story_value, str) else ""
+    return GenerationContext(
+        task_type="shot_split",
+        comic_id=comic.id,
+        comic_title=comic.title or "Untitled",
+        page_number=None,
+        story=story,
+        style_notes=script_data.get("style_notes") or comic.style_description or "",
+        script_data=script_data,
+        panels=panels,
+        layout=None,
+        characters=(),
+        visual_preferences={},
+        reference_notes=(),
+        previous_context_lines=(),
+        text_options={},
+    )
+
+
+def _build_page_render_context(
+    comic: Comic,
+    script_data: dict[str, Any],
+    page_number: int,
+    layout_instruction: str,
+    layout_key: str,
+    layout_notes: str | None,
+    panels: Sequence[ComicPanelShot],
+    normalized_color: str,
+    normalized_aspect_ratio: str,
+    ref_lines: Sequence[str],
+    previous_context_lines: Sequence[str],
+) -> GenerationContext:
+    panel_contexts = tuple(
+        PanelContext(
+            panel_number=panel.panel_number,
+            sequence_index=panel.sequence_index,
+            description=panel.description or "Scene description missing",
+            dialogue=panel.dialogue,
+            camera_notes=panel.camera_notes,
+            style_notes=panel.style_notes,
+            source_title=None,
+        )
+        for panel in panels
+    )
+    characters = tuple(
+        CharacterContext(
+            name=link.character.name,
+            role=link.role,
+            description=link.character.description,
+            optimized_description=link.character.optimized_description,
+            style_prompt=link.character.style_prompt,
+            reference_note=None,
+        )
+        for link in comic.character_links
+        if link.character
+    )
+    return GenerationContext(
+        task_type="page_render",
+        comic_id=comic.id,
+        comic_title=script_data.get("title") or comic.title or "Untitled",
+        page_number=page_number,
+        story=str(script_data.get("story") or ""),
+        style_notes=script_data.get("style_notes") or comic.style_description or "",
+        script_data=script_data,
+        panels=panel_contexts,
+        layout=LayoutContext(
+            layout_key=layout_key,
+            instruction=layout_instruction,
+            notes=layout_notes,
+            aspect_ratio=normalized_aspect_ratio,
+        ),
+        characters=characters,
+        visual_preferences={"color_mode": normalized_color},
+        reference_notes=tuple(ref_lines),
+        previous_context_lines=tuple(previous_context_lines),
+        text_options={},
+    )
+
+
 def enqueue_comic_workflow(
     queue,
     comic: Comic,
@@ -919,8 +1025,6 @@ def process_shot_stage(comic_id: int) -> dict[str, Any]:
                 .all()
             )
 
-            panel_payload = script_data.get("panels") if isinstance(script_data, dict) else None
-
             existing_panels = (
                 ComicPanelShot.query.filter_by(comic_id=comic_id)
                 .order_by(ComicPanelShot.sequence_index)
@@ -974,17 +1078,31 @@ def process_shot_stage(comic_id: int) -> dict[str, Any]:
             layouts_updated: list[ComicPageLayout] = []
             page_panel_map: defaultdict[int, list[ComicPanelShot]] = defaultdict(list)
 
-            for idx in range(1, total_sections + 1):
+            shot_context = _build_shot_split_context(comic, script_data, outline_sections)
+            shot_drafts, shot_metadata = resolve_shot_drafts(
+                shot_context,
+                panels_per_page=PANELS_PER_PAGE,
+            )
+            logger.info(
+                "Generation skills task_type=shot_split skills=%s "
+                "prompt_optimizer_enabled=%s text_model_call_count=%s "
+                "panel_count=%s skipped_skills=%s",
+                ",".join(shot_metadata.get("applied_skills", [])),
+                shot_metadata.get("prompt_optimizer_enabled", False),
+                shot_metadata.get("text_model_call_count", 0),
+                shot_metadata.get("panel_count", 0),
+                ",".join(shot_metadata.get("skipped_skills", [])),
+            )
+
+            for draft in shot_drafts:
+                idx = draft.sequence_index
                 section = outline_sections[idx - 1]
-                description, dialogue_text, camera_notes, style_notes = _resolve_panel_fields(
-                    idx,
-                    section,
-                    panel_payload,
-                    script_data,
-                    comic,
-                )
-                page_number = (idx - 1) // PANELS_PER_PAGE + 1
-                panel_number = ((idx - 1) % PANELS_PER_PAGE) + 1
+                description = draft.description
+                dialogue_text = draft.dialogue
+                camera_notes = draft.camera_notes
+                style_notes = draft.style_notes
+                page_number = draft.page_number
+                panel_number = draft.panel_number
 
                 panel = panel_map.get(idx)
                 if panel:
@@ -1148,19 +1266,6 @@ def process_page_render_stage(
             if not panels:
                 raise ValueError("No panel shots assigned to this page")
 
-            panel_lines: list[str] = []
-            for panel in panels:
-                panel_index = panel.panel_number or panel.sequence_index
-                description = panel.description or "Scene description missing"
-                line_parts = [f"Panel {panel_index}: {description}"]
-                if panel.dialogue:
-                    line_parts.append(f"Dialogue: {panel.dialogue}")
-                if panel.camera_notes:
-                    line_parts.append(f"Camera: {panel.camera_notes}")
-                if panel.style_notes:
-                    line_parts.append(f"Style: {panel.style_notes}")
-                panel_lines.append(" ".join(line_parts))
-
             script_color = script_data.get("color_mode")
             effective_color = color_mode if color_mode is not None else script_color
             normalized_color = DEFAULT_COLOR_MODES[0]
@@ -1196,20 +1301,39 @@ def process_page_render_stage(
             previous_context_lines = _panel_summary_lines(previous_panels)
 
             ref_lines, ref_parts = _collect_character_image_references(comic)
-            prompt = build_page_render_prompt(
+            page_context = _build_page_render_context(
                 comic,
                 script_data,
                 page_number,
                 layout_instruction,
-                panel_lines,
-                color_mode=normalized_color,
-                font_family=font_family,
-                font_size=font_size,
-                bubble_shape=bubble_shape,
-                bubble_tail=bubble_tail,
-                aspect_ratio=normalized_aspect_ratio,
-                reference_notes=ref_lines,
-                previous_context_lines=previous_context_lines,
+                layout.layout_key,
+                layout.notes,
+                panels,
+                normalized_color,
+                normalized_aspect_ratio,
+                ref_lines,
+                previous_context_lines,
+            )
+            prompt, prompt_metadata = render_page_prompt(page_context)
+            optimization = optimize_text_if_enabled(
+                scope="page_render",
+                source_text=prompt,
+                metadata=prompt_metadata,
+                required_phrases=tuple(
+                    f"Panel {panel.panel_number or panel.sequence_index}" for panel in panels
+                ),
+            )
+            prompt = optimization.text
+            logger.info(
+                "Generation skills task_type=page_render skills=%s "
+                "prompt_optimizer_enabled=%s text_model_call_count=%s "
+                "visual_mode=%s dialogue_mode=%s skipped_skills=%s",
+                ",".join(prompt_metadata.get("applied_skills", [])),
+                optimization.enabled,
+                1 if optimization.called else 0,
+                prompt_metadata.get("visual_mode"),
+                prompt_metadata.get("dialogue_mode"),
+                ",".join(prompt_metadata.get("skipped_skills", [])),
             )
 
             img_data = get_image_provider().generate_image(

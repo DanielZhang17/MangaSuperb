@@ -189,6 +189,9 @@ def test_sequential_workflow_generates_resources(
         )
         assert render_result["status"] == "processing"
         assert len(prompts) == 1
+        assert "Panel-by-panel content:" in prompts[0]
+        assert "Layout constraints:" in prompts[0]
+        assert "Character locks" not in prompts[0]
         assert dummy_storage.uploads[0].filename.endswith(".png")
 
         refreshed_comic = db.session.get(Comic, comic.id)
@@ -500,3 +503,26 @@ def test_shot_stage_recovers_dialogue_from_summary(app, comic: Comic):
         assert len(panels) == 1
         assert panels[0].dialogue == "姓马的，我诅咒你不得好死！"
         assert panels[0].description == section.summary
+
+
+def test_default_workflow_does_not_call_text_optimizer(app, comic: Comic, monkeypatch):
+    calls: list[str] = []
+
+    def fail_text_provider():
+        raise AssertionError("text optimizer should be disabled by default")
+
+    monkeypatch.setattr(
+        "mangasuperb.services.generation_skills.prompt_optimizer.get_text_provider",
+        fail_text_provider,
+    )
+
+    with app.app_context():
+        comic_row = db.session.get(Comic, comic.id)
+        jobs.bootstrap_comic_workflow(comic_row)
+        db.session.commit()
+
+        jobs.process_outline_stage(comic.id)
+        result = jobs.process_shot_stage(comic.id)
+
+        assert result["status"] == "completed"
+        assert calls == []

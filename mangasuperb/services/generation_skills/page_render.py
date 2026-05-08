@@ -27,7 +27,7 @@ def render_page_prompt(context: GenerationContext) -> tuple[str, dict]:
     if resolved.positive_constraints:
         sections.append("Positive constraints:\n" + "\n".join(resolved.positive_constraints))
     if resolved.character_locks:
-        sections.append("Character locks:\n" + "\n".join(resolved.character_locks))
+        sections.append("Character locks / Character roster:\n" + "\n".join(resolved.character_locks))
     if context.layout:
         sections.append("Layout instruction:\n" + context.layout.instruction)
     if resolved.layout_constraints:
@@ -53,7 +53,7 @@ def render_page_prompt(context: GenerationContext) -> tuple[str, dict]:
     if resolved.panel_constraints:
         sections.append("Panel fidelity:\n" + "\n".join(resolved.panel_constraints))
     if context.previous_context_lines:
-        sections.append("Previous page continuity:\n" + "\n".join(context.previous_context_lines))
+        sections.append("Previous pages context:\n" + "\n".join(context.previous_context_lines))
     if resolved.negative_constraints:
         sections.append("Negative constraints:\n" + "\n".join(resolved.negative_constraints))
 
