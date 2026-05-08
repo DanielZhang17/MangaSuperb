@@ -83,6 +83,16 @@ class DummyGenAIClient:
         self.models = SimpleNamespace(generate_content=responder)
 
 
+class FakeOptimizerProvider:
+    def __init__(self, calls: list[str], response: str) -> None:
+        self.calls = calls
+        self.response = response
+
+    def generate_text(self, prompt: str) -> str:
+        self.calls.append(prompt)
+        return self.response
+
+
 def _prompt_text(contents) -> str:
     if isinstance(contents, str):
         return contents
@@ -526,3 +536,148 @@ def test_default_workflow_does_not_call_text_optimizer(app, comic: Comic, monkey
 
         assert result["status"] == "completed"
         assert calls == []
+
+
+def test_render_optimizer_runs_once_when_enabled(
+    app,
+    comic: Comic,
+    dummy_storage,
+    monkeypatch,
+):
+    image_prompts: list[str] = []
+    optimizer_calls: list[str] = []
+    _patch_genai(monkeypatch, image_prompts)
+
+    monkeypatch.setattr(
+        "mangasuperb.services.generation_skills.prompt_optimizer.get_text_provider",
+        lambda: FakeOptimizerProvider(
+            optimizer_calls,
+            "Optimized render prompt\n"
+            "Panel 1: Scene 1\n"
+            "Panel 2: Scene 2\n"
+            "Panel 3: Scene 3\n"
+            "Panel 4: Scene 4",
+        ),
+    )
+
+    with app.app_context():
+        app.config["GENERATION_PROMPT_OPTIMIZATION_ENABLED"] = True
+        app.config["GENERATION_PROMPT_OPTIMIZATION_SCOPES"] = "page_render"
+        comic_row = db.session.get(Comic, comic.id)
+        jobs.bootstrap_comic_workflow(comic_row)
+        db.session.commit()
+
+        jobs.process_outline_stage(comic.id)
+        jobs.process_shot_stage(comic.id)
+        result = jobs.process_page_render_stage(
+            comic.id,
+            page_number=1,
+            image_model="test-model",
+        )
+
+        assert result["status"] == "processing"
+        assert len(optimizer_calls) == 1
+        assert image_prompts[0].startswith("Optimized render prompt")
+
+
+def test_render_optimizer_fallback_when_required_panel_is_dropped(
+    app,
+    comic: Comic,
+    monkeypatch,
+):
+    image_prompts: list[str] = []
+    optimizer_calls: list[str] = []
+    _patch_genai(monkeypatch, image_prompts)
+
+    monkeypatch.setattr(
+        "mangasuperb.services.generation_skills.prompt_optimizer.get_text_provider",
+        lambda: FakeOptimizerProvider(optimizer_calls, "Optimized prompt without panel labels"),
+    )
+
+    with app.app_context():
+        app.config["GENERATION_PROMPT_OPTIMIZATION_ENABLED"] = True
+        app.config["GENERATION_PROMPT_OPTIMIZATION_SCOPES"] = "page_render"
+        comic_row = db.session.get(Comic, comic.id)
+        jobs.bootstrap_comic_workflow(comic_row)
+        db.session.commit()
+
+        jobs.process_outline_stage(comic.id)
+        jobs.process_shot_stage(comic.id)
+        jobs.process_page_render_stage(comic.id, page_number=1, image_model="test-model")
+
+        assert len(optimizer_calls) == 1
+        assert "Panel-by-panel content:" in image_prompts[0]
+
+
+def test_shot_optimizer_runs_once_when_enabled(app, comic: Comic, monkeypatch):
+    optimizer_calls: list[str] = []
+
+    monkeypatch.setattr(
+        "mangasuperb.services.generation_skills.prompt_optimizer.get_text_provider",
+        lambda: FakeOptimizerProvider(optimizer_calls, "[]"),
+    )
+
+    with app.app_context():
+        app.config["GENERATION_PROMPT_OPTIMIZATION_ENABLED"] = True
+        app.config["GENERATION_PROMPT_OPTIMIZATION_SCOPES"] = "shot_split"
+        comic_row = db.session.get(Comic, comic.id)
+        jobs.bootstrap_comic_workflow(comic_row)
+        db.session.commit()
+
+        jobs.process_outline_stage(comic.id)
+        result = jobs.process_shot_stage(comic.id)
+
+        assert result["status"] == "completed"
+        assert len(optimizer_calls) == 1
+        assert ComicPanelShot.query.filter_by(comic_id=comic.id).count() == PANELS_PER_PAGE
+
+
+def test_shot_optimizer_advisory_updates_structured_fields(
+    app,
+    comic: Comic,
+    monkeypatch,
+):
+    optimizer_calls: list[str] = []
+    advisory = json.dumps(
+        [
+            {
+                "sequence_index": 1,
+                "description": "Model-refined opening action.",
+                "dialogue": "Stay close.",
+                "camera_notes": "wide shot",
+                "style_notes": "speed lines",
+            },
+            {
+                "sequence_index": 99,
+                "description": "This extra panel must be ignored.",
+            },
+        ]
+    )
+
+    monkeypatch.setattr(
+        "mangasuperb.services.generation_skills.prompt_optimizer.get_text_provider",
+        lambda: FakeOptimizerProvider(optimizer_calls, advisory),
+    )
+
+    with app.app_context():
+        app.config["GENERATION_PROMPT_OPTIMIZATION_ENABLED"] = True
+        app.config["GENERATION_PROMPT_OPTIMIZATION_SCOPES"] = "shot_split"
+        comic_row = db.session.get(Comic, comic.id)
+        jobs.bootstrap_comic_workflow(comic_row)
+        db.session.commit()
+
+        jobs.process_outline_stage(comic.id)
+        result = jobs.process_shot_stage(comic.id)
+
+        assert result["status"] == "completed"
+        panels = (
+            ComicPanelShot.query.filter_by(comic_id=comic.id)
+            .order_by(ComicPanelShot.sequence_index)
+            .all()
+        )
+        assert len(panels) == PANELS_PER_PAGE
+        assert panels[0].description == "Model-refined opening action."
+        assert panels[0].dialogue == "Stay close."
+        assert panels[0].camera_notes == "wide shot"
+        assert panels[0].style_notes == "speed lines"
+        assert all(panel.sequence_index != 99 for panel in panels)

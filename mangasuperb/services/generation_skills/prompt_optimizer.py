@@ -64,14 +64,15 @@ def optimize_text_if_enabled(
     source_text: str,
     metadata: dict[str, Any],
     required_phrases: Iterable[str] = (),
-    provider_factory: Callable[[], TextProvider] = get_text_provider,
+    provider_factory: Callable[[], TextProvider] | None = None,
 ) -> PromptOptimizationResult:
     if not _scope_enabled(scope):
         return PromptOptimizationResult(text=source_text, enabled=False, called=False)
 
     try:
         prompt = _build_optimizer_prompt(scope, source_text, metadata)
-        optimized = provider_factory().generate_text(prompt).strip()
+        provider = provider_factory or get_text_provider
+        optimized = provider().generate_text(prompt).strip()
         if not optimized:
             return PromptOptimizationResult(
                 text=source_text,
