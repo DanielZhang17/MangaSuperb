@@ -150,7 +150,11 @@ def _patch_genai(monkeypatch: pytest.MonkeyPatch, store: list[str]) -> None:
         store.append(_prompt_text(contents))
         return DummyGenerativeModel(model, []).generate_content(_prompt_text(contents))
 
-    monkeypatch.setattr(ai_provider.genai, "Client", lambda api_key: DummyGenAIClient(_generate_content))
+    monkeypatch.setattr(
+        ai_provider.genai,
+        "Client",
+        lambda api_key: DummyGenAIClient(_generate_content),
+    )
 
 
 def _patch_cover_models(monkeypatch: pytest.MonkeyPatch, store: list[tuple[str, str]]) -> None:
@@ -162,7 +166,11 @@ def _patch_cover_models(monkeypatch: pytest.MonkeyPatch, store: list[tuple[str, 
             return DummyTextModel(store).generate_content(prompt)
         return DummyCoverImageModel(store).generate_content(prompt)
 
-    monkeypatch.setattr(ai_provider.genai, "Client", lambda api_key: DummyGenAIClient(_generate_content))
+    monkeypatch.setattr(
+        ai_provider.genai,
+        "Client",
+        lambda api_key: DummyGenAIClient(_generate_content),
+    )
 
 
 def test_sequential_workflow_generates_resources(

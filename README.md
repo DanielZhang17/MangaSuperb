@@ -51,6 +51,10 @@ pnpm dev
 - AI 提供商可通过 `IMAGE_PROVIDER` 和 `TEXT_PROVIDER` 独立切换：
   - `gemini`（默认）：使用 Google Gemini SDK，需配置 `GEMINI_API_KEY`。
   - `third_party`：使用任意 OpenAI 兼容接口，需配置 `THIRD_PARTY_API_URL`、`THIRD_PARTY_API_KEY`、`THIRD_PARTY_IMAGE_MODEL`、`THIRD_PARTY_TEXT_MODEL`。
+- 生成阶段 Prompt Optimization 默认关闭。若要在后台启用额外文本模型优化，可设置：
+  - `GENERATION_PROMPT_OPTIMIZATION_ENABLED=true`
+  - `GENERATION_PROMPT_OPTIMIZATION_SCOPES=shot_split,page_render`
+  启用后，`shot_split` 每个漫画流程最多多一次文本模型调用，`page_render` 每页最多多一次文本模型调用。
 
 ---
 
@@ -76,5 +80,4 @@ pnpm dev
 - **日志与排查**：`services/jobs.py` 中每个阶段都会记录 `job_id` 与执行情况；`/health` 增加 `rq_workers` 字段，帮助观察活跃 worker。
 
 ---
-
 

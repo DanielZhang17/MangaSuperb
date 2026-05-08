@@ -27,7 +27,9 @@ def render_page_prompt(context: GenerationContext) -> tuple[str, dict]:
     if resolved.positive_constraints:
         sections.append("Positive constraints:\n" + "\n".join(resolved.positive_constraints))
     if resolved.character_locks:
-        sections.append("Character locks / Character roster:\n" + "\n".join(resolved.character_locks))
+        sections.append(
+            "Character locks / Character roster:\n" + "\n".join(resolved.character_locks)
+        )
     if context.layout:
         sections.append("Layout instruction:\n" + context.layout.instruction)
     if resolved.layout_constraints:
