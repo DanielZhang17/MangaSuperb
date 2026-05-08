@@ -11,7 +11,20 @@ class CharacterConsistencySkill:
     required = False
 
     def should_apply(self, context: GenerationContext) -> bool:
-        return False
+        return bool(context.characters or context.reference_notes)
 
     def apply(self, context: GenerationContext, constraints: ConstraintSet) -> None:
-        return None
+        for character in context.characters:
+            parts = [character.name]
+            if character.role:
+                parts.append(f"role: {character.role}")
+            description = character.optimized_description or character.description
+            if description:
+                parts.append(description)
+            if character.reference_note:
+                parts.append(character.reference_note)
+            constraints.add_character_lock("; ".join(parts))
+        if context.reference_notes:
+            constraints.add_positive(
+                "Reference images outrank conflicting text descriptions for character appearance."
+            )

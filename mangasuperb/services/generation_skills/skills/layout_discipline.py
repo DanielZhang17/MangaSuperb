@@ -11,7 +11,14 @@ class LayoutDisciplineSkill:
     required = True
 
     def should_apply(self, context: GenerationContext) -> bool:
-        return False
+        return context.layout is not None
 
     def apply(self, context: GenerationContext, constraints: ConstraintSet) -> None:
-        return None
+        panel_count = len(context.panels)
+        aspect_ratio = context.layout.aspect_ratio if context.layout else None
+        constraints.add_layout_constraint(f"Preserve exactly {panel_count} panel(s).")
+        constraints.add_layout_constraint(
+            "Use clear panel boundaries, gutters, and manga reading order."
+        )
+        if aspect_ratio:
+            constraints.add_layout_constraint(f"Target aspect ratio: {aspect_ratio}.")
