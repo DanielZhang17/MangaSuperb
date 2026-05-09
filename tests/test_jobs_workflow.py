@@ -31,6 +31,7 @@ class DummyModelResult(SimpleNamespace):
 MINI_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC"
 )
+MINI_JPEG = b"\xff\xd8\xff\xe0" + b"jpeg-payload"
 
 
 class DummyGenerativeModel:
@@ -91,6 +92,11 @@ class FakeOptimizerProvider:
     def generate_text(self, prompt: str) -> str:
         self.calls.append(prompt)
         return self.response
+
+
+class FakeJpegImageProvider:
+    def generate_image(self, prompt: str, reference_images=None, aspect_ratio=None) -> bytes:
+        return MINI_JPEG
 
 
 def _prompt_text(contents) -> str:
@@ -171,6 +177,15 @@ def _patch_cover_models(monkeypatch: pytest.MonkeyPatch, store: list[tuple[str, 
         "Client",
         lambda api_key: DummyGenAIClient(_generate_content),
     )
+
+
+def test_application_context_preserves_runtime_errors_inside_existing_context(app):
+    with (
+        app.app_context(),
+        pytest.raises(RuntimeError, match="boom"),
+        jobs._application_context(),
+    ):
+        raise RuntimeError("boom")
 
 
 def test_sequential_workflow_generates_resources(
@@ -412,6 +427,38 @@ def test_cover_generation_creates_cover_asset(
         assert "Design a finished manga cover" in prompts[1][1]
 
         assert any("cover" in upload.filename for upload in dummy_storage.uploads)
+
+
+def test_character_image_generation_saves_detected_jpeg_url(
+    app,
+    user: User,
+    dummy_storage,
+    monkeypatch,
+):
+    monkeypatch.setattr(jobs, "get_image_provider", lambda provider=None: FakeJpegImageProvider())
+
+    with app.app_context():
+        character = Character(
+            user_id=user.id,
+            name="JPEG Hero",
+            description="A simple manga character.",
+            image_status="pending",
+        )
+        db.session.add(character)
+        db.session.commit()
+
+        result = jobs.process_character_image_generation(
+            character.id,
+            description="A simple manga character.",
+            image_provider="gemini",
+        )
+
+        refreshed = db.session.get(Character, character.id)
+        assert result["status"] == "completed"
+        assert result["image_url"].endswith(".jpg")
+        assert refreshed.image_url == result["image_url"]
+        assert dummy_storage.uploads[-1].filename.endswith(".jpg")
+        assert dummy_storage.uploads[-1].content_type == "image/jpeg"
 
 
 def test_render_prompt_includes_character_roster(

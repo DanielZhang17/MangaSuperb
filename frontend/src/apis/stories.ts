@@ -1,8 +1,20 @@
 import request from '@/service'
+import type { AiProviderId } from '@/service/types'
 
 export interface UpdateStoryRequest {
   old_story: string
   new_story: string
+}
+
+export interface EnhanceStoryRequest {
+  story: string
+  comic_id?: number
+  text_provider?: AiProviderId
+}
+
+export interface EnhanceStoryResponse {
+  story: string
+  comic?: any
 }
 
 export const StoriesApi = {
@@ -21,6 +33,14 @@ export const StoriesApi = {
       url: `/api/stories/${comicId}/optimize`,
       method: 'POST',
       data: {},
+    })
+  },
+
+  enhance(body: EnhanceStoryRequest) {
+    return request<EnhanceStoryRequest, EnhanceStoryResponse>({
+      url: '/api/stories/enhance',
+      method: 'POST',
+      data: body,
     })
   },
 }

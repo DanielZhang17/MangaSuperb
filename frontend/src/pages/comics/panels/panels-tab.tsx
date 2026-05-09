@@ -7,7 +7,6 @@ import { ComicsApi } from '@/apis/comics'
 import { JobsApi } from '@/apis/jobs'
 import PanelsApi from '@/apis/panels'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -24,7 +23,9 @@ import {
   selectedCharacterIdsAtom,
   selectedCharacterRolesAtom,
   styleAtom,
+  textProviderAtom,
 } from '../atoms'
+import { ComicsWorkflowShell, WorkflowActionBar, WorkflowContent } from '../components/workflow-layout'
 
 const LAYOUT_OPTIONS = [
   { value: 'auto-grid', label: '自动布局 (auto-grid)' },
@@ -35,14 +36,27 @@ const LAYOUT_OPTIONS = [
 
 interface Scene { id: number; label: string }
 
+function shotFailureMessage(comic: any): string | null {
+  const stages = Array.isArray(comic?.workflow_stages) ? comic.workflow_stages : []
+  const shotsStage = stages.find((stage: any) => stage?.stage === 'shots')
+
+  if (shotsStage?.status === 'failed') {
+    return shotsStage.error_message || comic?.error_message || '分镜任务失败'
+  }
+
+  if (comic?.workflow_stage === 'shots' && comic?.workflow_status === 'failed') {
+    return comic?.error_message || '分镜任务失败'
+  }
+
+  return null
+}
+
 function PanelCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <Card className="rounded-3xl border border-border/60 bg-muted/60">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base font-semibold text-foreground/80">{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">{children}</CardContent>
-    </Card>
+    <section className="rounded-lg border border-border/60 bg-card p-4 shadow-sm">
+      <h3 className="mb-4 text-base font-semibold text-foreground/80">{title}</h3>
+      <div className="flex flex-col gap-4">{children}</div>
+    </section>
   )
 }
 
@@ -65,12 +79,14 @@ export function PanelsTab() {
   const [title] = useAtom(mangaTitleAtom)
   const [story] = useAtom(fullStoryAtom)
   const [style] = useAtom(styleAtom)
+  const [textProvider] = useAtom(textProviderAtom)
   const [aspect] = useAtom(aspectRatioAtom)
   const [selectedIds] = useAtom(selectedCharacterIdsAtom)
   const [rolesMap] = useAtom(selectedCharacterRolesAtom)
   const [submitting, setSubmitting] = useState(false)
   const [polling, setPolling] = useState(false)
   const [pollPct, setPollPct] = useState(0)
+  const [panelError, setPanelError] = useState<string | null>(null)
   const pollRef = (typeof window !== 'undefined' ? (window as any) : {}) as { __panelsPoll?: number | null }
   const [editingPanelId, setEditingPanelId] = useState<number | null>(null)
   const [editingDialogue, setEditingDialogue] = useState<string>('')
@@ -111,6 +127,7 @@ export function PanelsTab() {
   const handleGeneratePanels = async () => {
     try {
       setSubmitting(true)
+      setPanelError(null)
       let cid = comicId
 
       // 1) 如果还没有漫画，先在此创建
@@ -140,7 +157,11 @@ export function PanelsTab() {
       const hasShotsNow = (comicDetail?.panel_shots ?? []).some((s: any) => s?.page_number === selectedScene)
       if (!hasShotsNow) {
         try {
-          await JobsApi.createComic({ job_type: 'story_optimization', comic_id: cid as number })
+          await JobsApi.createComic({
+            job_type: 'story_optimization',
+            comic_id: cid as number,
+            text_provider: textProvider,
+          })
           toast.success('已提交分镜生成任务')
         } catch {}
 
@@ -157,7 +178,9 @@ export function PanelsTab() {
         setComicDetail(layoutComic)
       }
     } catch (e: any) {
-      toast.error(e?.message || '分镜生成失败')
+      const message = e?.message || '分镜生成失败'
+      setPanelError(message)
+      toast.error(message)
     } finally {
       setSubmitting(false)
     }
@@ -186,6 +209,19 @@ export function PanelsTab() {
           setComicDetail(comic)
           const shotsArr: any[] = comic?.panel_shots ?? []
           const hasShotsForPage = shotsArr.some((s) => s?.page_number === selectedScene)
+          const failureMessage = shotFailureMessage(comic)
+          if (failureMessage) {
+            if (pollRef.__panelsPoll) {
+              window.clearInterval(pollRef.__panelsPoll)
+              pollRef.__panelsPoll = null
+            }
+
+            setPolling(false)
+            reject(new Error(`分镜生成失败：${failureMessage}`))
+
+            return
+          }
+
           if (hasShotsForPage) {
             toast.success('分镜生成成功')
             if (pollRef.__panelsPoll) {
@@ -210,7 +246,7 @@ export function PanelsTab() {
           }
           
           setPolling(false)
-          reject(new Error('分镜数据生成超时'))
+          reject(new Error('分镜数据生成超时，请检查文本模型或任务队列状态'))
         }
       }
 
@@ -221,108 +257,114 @@ export function PanelsTab() {
   }
 
   return (
-    <div className="flex w-full flex-col gap-4">
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 rounded-3xl border border-border/60 bg-card p-6 shadow-sm">
-        <div className="lg:col-span-3">
-          <Card className="border-0 shadow-none bg-transparent">
-            <CardContent className="p-6 space-y-4">
-              {sortedShots.length === 0 ? (
-                <div className="h-80 flex items-center justify-center text-muted-foreground">
-                  <div className="flex flex-col items-center gap-2">
-                    <ImageIcon className="h-8 w-8" />
-                    <span className="text-sm">暂无分镜数据，请点击下侧“生成分镜”。</span>
-                  </div>
+    <ComicsWorkflowShell>
+      <WorkflowContent>
+        <section className="min-w-0 rounded-lg border border-border/60 bg-card p-4 shadow-sm sm:p-5">
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold">分镜</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {sortedShots.length > 0 ? `${sortedShots.length} 个镜头 · 当前第 ${selectedScene} 页` : '还没有可用镜头'}
+              </p>
+            </div>
+          </div>
+          <div className="space-y-3">
+            {sortedShots.length === 0 ? (
+              <div className="flex min-h-[320px] items-center justify-center rounded-lg border border-dashed border-border text-muted-foreground">
+                <div className="flex flex-col items-center gap-2">
+                  <ImageIcon className="h-8 w-8" />
+                  <span className="text-sm">暂无分镜数据，请点击下侧“生成分镜”。</span>
                 </div>
-              ) : (
-                sortedShots.map((s: any, idx: number) => {
-                  const isEditing = editingPanelId === s.id
-                  const displayText = s.description
+              </div>
+            ) : (
+              sortedShots.map((s: any, idx: number) => {
+                const isEditing = editingPanelId === s.id
+                const displayText = s.description
                   
-                  return (
-                    <div key={`${s.page_number}-${s.panel_number}-${s.id ?? idx}`} className="flex items-start gap-4 p-4 border rounded-md">
-                      <div className="text-lg font-bold w-10">{String(idx + 1).padStart(2, '0')}</div>
-                      <div className="flex-1 text-muted-foreground whitespace-pre-wrap">
-                        {isEditing ? (
-                          <Textarea
-                            value={editingDialogue}
-                            onChange={(e) => setEditingDialogue(e.target.value)}
-                            placeholder="填写对白（必填）"
-                            className="min-h-[72px] text-sm"
-                          />
-                        ) : (
-                          <>{displayText}</>
-                        )}
-                      </div>
-                      <div className="ml-4 flex items-center gap-3 text-xs text-muted-foreground">
-                        <span>第{s.page_number}页 · #{s.panel_number}</span>
-                        {!isEditing ? (
+                return (
+                  <div key={`${s.page_number}-${s.panel_number}-${s.id ?? idx}`} className="grid gap-3 rounded-md border p-4 md:grid-cols-[52px_minmax(0,1fr)_auto] md:items-start">
+                    <div className="text-lg font-bold md:w-10">{String(idx + 1).padStart(2, '0')}</div>
+                    <div className="min-w-0 whitespace-pre-wrap text-muted-foreground">
+                      {isEditing ? (
+                        <Textarea
+                          value={editingDialogue}
+                          onChange={(e) => setEditingDialogue(e.target.value)}
+                          placeholder="填写对白（必填）"
+                          className="min-h-[72px] text-sm"
+                        />
+                      ) : (
+                        <>{displayText}</>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground md:justify-end">
+                      <span className="whitespace-nowrap">第{s.page_number}页 · #{s.panel_number}</span>
+                      {!isEditing ? (
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label="编辑对白"
+                          onClick={() => {
+                            setEditingPanelId(s.id)
+                            setEditingDialogue(s.dialogue || s.description || '')
+                          }}
+                        >
+                          <Pencil className="size-4" />
+                        </Button>
+                      ) : (
+                        <div className="flex items-center gap-2">
                           <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label="编辑对白"
-                            onClick={() => {
-                              setEditingPanelId(s.id)
-                              setEditingDialogue(s.dialogue || s.description || '')
-                            }}
-                          >
-                            <Pencil className="size-4" />
-                          </Button>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            <Button
-                              size="sm"
-                              onClick={async () => {
-                                if (!editingDialogue.trim()) {
-                                  toast.error('对白不能为空')
+                            size="sm"
+                            onClick={async () => {
+                              if (!editingDialogue.trim()) {
+                                toast.error('对白不能为空')
                                   
-                                  return
-                                }
+                                return
+                              }
                                 
-                                try {
-                                  setSavingId(s.id)
-                                  await PanelsApi.updatePanel(s.id, { dialogue: editingDialogue.trim() })
-                                  if (comicId) {
-                                    const latest = await ComicsApi.get(comicId)
-                                    setComicDetail(latest as any)
-                                    // 不再维护上次快照
-                                  }
-                                  
-                                  setEditingPanelId(null)
-                                  setEditingDialogue('')
-                                  toast.success('已保存')
-                                } catch (err: any) {
-                                  toast.error(err?.message || '保存失败')
-                                } finally {
-                                  setSavingId(null)
+                              try {
+                                setSavingId(s.id)
+                                await PanelsApi.updatePanel(s.id, { dialogue: editingDialogue.trim() })
+                                if (comicId) {
+                                  const latest = await ComicsApi.get(comicId)
+                                  setComicDetail(latest as any)
+                                  // 不再维护上次快照
                                 }
-                              }}
-                              disabled={savingId === s.id}
-                            >
-                              {savingId === s.id ? '保存中…' : '保存'}
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
+                                  
                                 setEditingPanelId(null)
                                 setEditingDialogue('')
-                              }}
-                              disabled={savingId === s.id}
-                            >
+                                toast.success('已保存')
+                              } catch (err: any) {
+                                toast.error(err?.message || '保存失败')
+                              } finally {
+                                setSavingId(null)
+                              }
+                            }}
+                            disabled={savingId === s.id}
+                          >
+                            {savingId === s.id ? '保存中…' : '保存'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setEditingPanelId(null)
+                              setEditingDialogue('')
+                            }}
+                            disabled={savingId === s.id}
+                          >
                               取消
-                            </Button>
-                          </div>
-                        )}
-                      </div>
+                          </Button>
+                        </div>
+                      )}
                     </div>
-                  )
-                })
-              )}
-            </CardContent>
-          </Card>
-        </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </section>
 
-        <aside className="flex flex-col gap-4">
+        <aside className="flex min-w-0 flex-col gap-4">
           <PanelCard title="布局">
             <LabelRow label="页面选择">
               <Select value={String(selectedScene)} onValueChange={(v) => setSelectedScene(Number(v))}>
@@ -354,13 +396,30 @@ export function PanelsTab() {
             </LabelRow>
           </PanelCard>
         </aside>
-      </div>
+      </WorkflowContent>
       {(() => {
         const hasShotsForPage = sortedShots.some((s: any) => s?.page_number === selectedScene)
 
         return (
-          <div className="flex flex-col items-center gap-2">
-            <div className="flex items-center gap-3">
+          <WorkflowActionBar className="flex-col">
+            {polling && (
+              <div role="status" className="w-full max-w-xl rounded-lg border border-primary/30 bg-primary/10 p-4">
+                <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+                  <span className="font-medium text-primary">正在生成分镜</span>
+                  <span className="text-muted-foreground">{pollPct}%</span>
+                </div>
+                <Progress value={pollPct} />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  正在拆分镜头和整理页面布局，完成后会自动刷新列表。
+                </p>
+              </div>
+            )}
+            {panelError && (
+              <div role="alert" className="w-full max-w-xl rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+                {panelError}
+              </div>
+            )}
+            <div className="flex flex-wrap items-center justify-center gap-3">
               <Button
                 variant="outline"
                 onClick={handleGeneratePanels}
@@ -376,15 +435,10 @@ export function PanelsTab() {
                 {String(t('common.next'))}
               </Button>
             </div>
-            {polling && (
-              <div className="w-64">
-                <Progress value={pollPct} />
-              </div>
-            )}
-          </div>
+          </WorkflowActionBar>
         )
       })()}
-    </div>
+    </ComicsWorkflowShell>
   )
 }
 

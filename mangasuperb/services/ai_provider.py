@@ -16,7 +16,7 @@ from config import Config
 logger = logging.getLogger(__name__)
 
 
-def _cfg(key: str, fallback: str) -> str:
+def _cfg(key: str, fallback: Any) -> Any:
     try:
         return current_app.config.get(key, fallback)
     except RuntimeError:
@@ -87,14 +87,31 @@ class ThirdPartyImageProvider(ImageProvider):
         api_url = _cfg("THIRD_PARTY_API_URL", Config.THIRD_PARTY_API_URL)
         api_key = _cfg("THIRD_PARTY_API_KEY", Config.THIRD_PARTY_API_KEY)
         model = _cfg("THIRD_PARTY_IMAGE_MODEL", Config.THIRD_PARTY_IMAGE_MODEL)
+        timeout = int(
+            _cfg(
+                "THIRD_PARTY_IMAGE_TIMEOUT_SECONDS",
+                Config.THIRD_PARTY_IMAGE_TIMEOUT_SECONDS,
+            )
+        )
 
         if not api_key:
             raise ValueError("THIRD_PARTY_API_KEY is not configured")
 
         full_prompt = f"{prompt}\nUse a {aspect_ratio} aspect ratio." if aspect_ratio else prompt
+        refs = list(ref_images or [])
+
+        if model.startswith("gpt-image"):
+            return self._generate_with_image_api(
+                api_url,
+                api_key,
+                model,
+                full_prompt,
+                refs,
+                timeout,
+            )
 
         content_parts: list[dict] = []
-        for ref in ref_images or []:
+        for ref in refs:
             inline = ref.get("inline_data", {})
             data = inline.get("data")
             mime_type = inline.get("mime_type", "image/png")
@@ -114,12 +131,10 @@ class ThirdPartyImageProvider(ImageProvider):
                 "Content-Type": "application/json",
             },
             json={"model": model, "messages": [{"role": "user", "content": content_parts}]},
-            timeout=120,
+            timeout=timeout,
         )
         if not response.ok:
-            raise RuntimeError(
-                f"Third-party API error {response.status_code}: {response.text[:500]}"
-            )
+            raise RuntimeError(_third_party_error_message(response))
 
         images = (
             response.json()
@@ -136,6 +151,60 @@ class ThirdPartyImageProvider(ImageProvider):
 
         _, _, b64_data = url.partition(",")
         return base64.b64decode(b64_data or url)
+
+    def _generate_with_image_api(
+        self,
+        api_url: str,
+        api_key: str,
+        model: str,
+        prompt: str,
+        ref_images: list[dict],
+        timeout: int,
+    ) -> bytes:
+        headers = {"Authorization": f"Bearer {api_key}"}
+        if ref_images:
+            files = []
+            for index, ref in enumerate(ref_images, start=1):
+                inline = ref.get("inline_data", {})
+                data = inline.get("data")
+                if data is None:
+                    continue
+                image_bytes = (
+                    data if isinstance(data, (bytes, bytearray))
+                    else base64.b64decode(data)
+                )
+                mime_type = inline.get("mime_type", "image/png")
+                ext = "jpg" if mime_type == "image/jpeg" else "png"
+                files.append(
+                    (
+                        "image[]",
+                        (f"reference_{index}.{ext}", bytes(image_bytes), mime_type),
+                    )
+                )
+            if not files:
+                raise ValueError("No valid reference image data provided")
+            response = requests.post(
+                f"{api_url.rstrip('/')}/v1/images/edits",
+                headers=headers,
+                data={"model": model, "prompt": prompt},
+                files=files,
+                timeout=timeout,
+            )
+        else:
+            response = requests.post(
+                f"{api_url.rstrip('/')}/v1/images/generations",
+                headers={**headers, "Content-Type": "application/json"},
+                json={"model": model, "prompt": prompt},
+                timeout=timeout,
+            )
+
+        if not response.ok:
+            raise RuntimeError(_third_party_error_message(response, operation="image"))
+
+        image_bytes = _extract_image_api_bytes(response.json())
+        if not image_bytes:
+            raise ValueError("No image data returned")
+        return image_bytes
 
 
 class ThirdPartyTextProvider(TextProvider):
@@ -157,9 +226,7 @@ class ThirdPartyTextProvider(TextProvider):
             timeout=60,
         )
         if not response.ok:
-            raise RuntimeError(
-                f"Third-party API error {response.status_code}: {response.text[:500]}"
-            )
+            raise RuntimeError(_third_party_error_message(response, operation="text"))
 
         content = (
             response.json()
@@ -172,8 +239,76 @@ class ThirdPartyTextProvider(TextProvider):
         return content
 
 
-def get_image_provider() -> ImageProvider:
-    provider = _cfg("IMAGE_PROVIDER", Config.IMAGE_PROVIDER)
+PROVIDER_LABELS = {
+    "gemini": "Gemini",
+    "third_party": "OpenAI",
+}
+
+
+def _configured_provider(raw_provider: str | None, fallback: str) -> str:
+    provider = (raw_provider or fallback or "").strip()
+    if provider == "openai":
+        return "third_party"
+    return provider
+
+
+def _gemini_image_available() -> bool:
+    return bool(_cfg("GEMINI_API_KEY", Config.GEMINI_API_KEY)) and bool(
+        _cfg("GEMINI_IMAGE_MODEL", Config.GEMINI_IMAGE_MODEL)
+    )
+
+
+def _gemini_text_available() -> bool:
+    return bool(_cfg("GEMINI_API_KEY", Config.GEMINI_API_KEY)) and bool(
+        _cfg("GEMINI_SCRIPT_MODEL", Config.GEMINI_SCRIPT_MODEL)
+    )
+
+
+def _third_party_image_available() -> bool:
+    return all(
+        [
+            _cfg("THIRD_PARTY_API_URL", Config.THIRD_PARTY_API_URL),
+            _cfg("THIRD_PARTY_API_KEY", Config.THIRD_PARTY_API_KEY),
+            _cfg("THIRD_PARTY_IMAGE_MODEL", Config.THIRD_PARTY_IMAGE_MODEL),
+        ]
+    )
+
+
+def _third_party_text_available() -> bool:
+    return all(
+        [
+            _cfg("THIRD_PARTY_API_URL", Config.THIRD_PARTY_API_URL),
+            _cfg("THIRD_PARTY_API_KEY", Config.THIRD_PARTY_API_KEY),
+            _cfg("THIRD_PARTY_TEXT_MODEL", Config.THIRD_PARTY_TEXT_MODEL),
+        ]
+    )
+
+
+def available_ai_providers() -> dict[str, Any]:
+    """Return provider availability without exposing credentials."""
+
+    default_image = _configured_provider(None, Config.IMAGE_PROVIDER)
+    default_text = _configured_provider(None, Config.TEXT_PROVIDER)
+    return {
+        "defaults": {
+            "image": _configured_provider(_cfg("IMAGE_PROVIDER", default_image), default_image),
+            "text": _configured_provider(_cfg("TEXT_PROVIDER", default_text), default_text),
+        },
+        "providers": {
+            "gemini": {
+                "image": _gemini_image_available(),
+                "text": _gemini_text_available(),
+            },
+            "third_party": {
+                "image": _third_party_image_available(),
+                "text": _third_party_text_available(),
+            },
+        },
+    }
+
+
+def get_image_provider(provider: str | None = None) -> ImageProvider:
+    provider = _configured_provider(provider, _cfg("IMAGE_PROVIDER", Config.IMAGE_PROVIDER))
     if provider == "gemini":
         return GeminiImageProvider()
     if provider == "third_party":
@@ -183,8 +318,8 @@ def get_image_provider() -> ImageProvider:
     )
 
 
-def get_text_provider() -> TextProvider:
-    provider = _cfg("TEXT_PROVIDER", Config.TEXT_PROVIDER)
+def get_text_provider(provider: str | None = None) -> TextProvider:
+    provider = _configured_provider(provider, _cfg("TEXT_PROVIDER", Config.TEXT_PROVIDER))
     if provider == "gemini":
         return GeminiTextProvider()
     if provider == "third_party":
@@ -192,6 +327,25 @@ def get_text_provider() -> TextProvider:
     raise ValueError(
         f"Unknown TEXT_PROVIDER: {provider!r}. Use 'gemini' or 'third_party'."
     )
+
+
+def _extract_image_api_bytes(payload: dict[str, Any]) -> bytes | None:
+    for item in payload.get("data", []) or []:
+        b64_data = item.get("b64_json") or item.get("image_base64")
+        if b64_data:
+            return base64.b64decode(b64_data)
+        url = item.get("url") or ""
+        if url.startswith("data:"):
+            _, _, encoded = url.partition(",")
+            if encoded:
+                return base64.b64decode(encoded)
+    return None
+
+
+def _third_party_error_message(response: requests.Response, *, operation: str = "image") -> str:
+    if response.status_code == 524:
+        return f"Third-party API error 524: upstream {operation} service timed out"
+    return f"Third-party API error {response.status_code}: {response.text[:500]}"
 
 
 def _extract_gemini_image(response: Any) -> bytes | None:

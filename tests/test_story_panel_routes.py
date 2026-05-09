@@ -340,6 +340,18 @@ def test_render_page_endpoint_enqueues_job(app, auth_client, user: User, dummy_q
         assert comic.status == "processing"
 
 
+def test_render_page_endpoint_passes_image_provider(app, auth_client, user: User, dummy_queue):
+    comic_id = _create_comic(app, user)
+
+    response = auth_client.post(
+        f"/api/panels/{comic_id}/pages/1/render",
+        json={"image_provider": "third_party"},
+    )
+
+    assert response.status_code == 202
+    assert dummy_queue.jobs[-1].kwargs["image_provider"] == "third_party"
+
+
 def test_get_comic_images_returns_urls(app, auth_client, user: User):
     comic_id = _create_comic(app, user)
 

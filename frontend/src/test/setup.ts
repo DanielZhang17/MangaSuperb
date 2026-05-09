@@ -26,6 +26,14 @@ Object.defineProperty(window, 'localStorage', {
 
 vi.stubGlobal('localStorage', localStorageMock)
 
+class ResizeObserverMock {
+  observe = vi.fn()
+  unobserve = vi.fn()
+  disconnect = vi.fn()
+}
+
+vi.stubGlobal('ResizeObserver', ResizeObserverMock)
+
 beforeEach(() => {
   clearActiveJobs()
   window.localStorage.clear()

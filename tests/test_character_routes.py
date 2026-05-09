@@ -142,6 +142,94 @@ def test_create_character_enqueues_image_job_without_references(
         assert persisted.image_job_id == payload["job_id"]
 
 
+def test_create_character_passes_provider_override_to_image_job(
+    auth_client,
+    dummy_queue,
+) -> None:
+    response = auth_client.post(
+        "/api/characters",
+        json={
+            "name": "Provider Scout",
+            "description": "A pathfinder rendered by the selected provider.",
+            "sex": "female",
+            "image_provider": "third_party",
+            "text_provider": "third_party",
+        },
+    )
+
+    assert response.status_code == 201
+    job = dummy_queue.jobs[-1]
+    assert job.kwargs["image_provider"] == "third_party"
+
+
+def test_update_character_regenerates_image_with_new_profile_and_provider(
+    app: Flask,
+    auth_client,
+    user: Any,
+    dummy_queue,
+) -> None:
+    with app.app_context():
+        owner = db.session.get(User, user.id)
+        assert owner is not None
+        character = _make_character(
+            user_id=owner.id,
+            name="Old Name",
+            description="Old description",
+            sex="unspecified",
+            style_prompt="Old style",
+        )
+        character.image_url = "https://cdn.example.com/old.png"
+        character.image_status = "completed"
+        db.session.commit()
+        character_id = character.id
+
+    response = auth_client.patch(
+        f"/api/characters/{character_id}",
+        json={
+            "name": "白石遥",
+            "description": "角色名：白石遥。黑发，高中女生，温柔可靠。",
+            "sex": "female",
+            "style_prompt": "日式校园漫画风格",
+            "image_provider": "third_party",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["character"]["name"] == "白石遥"
+    assert payload["character"]["sex"] == "female"
+    assert payload["character"]["image_status"] == "pending"
+    assert payload["job_id"] == dummy_queue.jobs[-1].id
+    assert dummy_queue.jobs[-1].kwargs["image_provider"] == "third_party"
+    assert "白石遥" in dummy_queue.jobs[-1].kwargs["description"]
+
+    with app.app_context():
+        persisted = db.session.get(Character, character_id)
+        assert persisted is not None
+        assert persisted.name == "白石遥"
+        assert persisted.description.startswith("角色名：白石遥")
+        assert persisted.sex == "female"
+        assert persisted.style_prompt == "日式校园漫画风格"
+        assert persisted.image_status == "pending"
+        assert persisted.image_error is None
+
+
+def test_update_character_requires_owner(app: Flask, auth_client, user: Any) -> None:
+    with app.app_context():
+        other = _create_user("other-update", "other-update@example.com")
+        character = _make_character(user_id=other.id, name="Private")
+        db.session.commit()
+        character_id = character.id
+
+    response = auth_client.patch(
+        f"/api/characters/{character_id}",
+        json={"name": "Nope", "description": "Still private."},
+    )
+
+    assert response.status_code == 404
+    assert response.get_json()["error"] == "Character not found"
+
+
 def test_rename_character_updates_only_name(app: Flask, auth_client, user: Any) -> None:
     with app.app_context():
         owner = db.session.get(User, user.id)

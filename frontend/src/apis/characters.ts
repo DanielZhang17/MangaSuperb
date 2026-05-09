@@ -7,6 +7,8 @@ import type {
   ListCharactersResponse,
   UpdateCharacterNameRequest,
   UpdateCharacterNameResponse,
+  UpdateCharacterRequest,
+  UpdateCharacterResponse,
 } from '@/service/types'
 
 export const CharactersApi = {
@@ -41,6 +43,14 @@ export const CharactersApi = {
   updateName(characterId: number, body: UpdateCharacterNameRequest) {
     return request<UpdateCharacterNameRequest, UpdateCharacterNameResponse>({
       url: `/api/characters/${characterId}/name`,
+      method: 'PATCH',
+      data: body,
+    })
+  },
+
+  update(characterId: number, body: UpdateCharacterRequest) {
+    return request<UpdateCharacterRequest, UpdateCharacterResponse>({
+      url: `/api/characters/${characterId}`,
       method: 'PATCH',
       data: body,
     })

@@ -1,5 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
+import toast from 'react-hot-toast'
 import { useLocation, useNavigate } from 'react-router'
 import { z } from 'zod'
 
@@ -25,16 +26,36 @@ const anyZodResolver = zodResolver as unknown as (schema: unknown) => any
 
 const LoginFormSchema = z.object({
   email: z.string().min(1, '邮箱不能为空').email('请输入有效邮箱'),
-  password: z.string().min(6, '密码至少6位'),
+  password: z.string().min(8, '密码至少8位'),
   terms: z.boolean().refine((v) => v === true, '请勾选同意协议后继续'),
 })
 
 const RegisterFormSchema = z.object({
-  username: z.string().min(2, '用户名至少2个字符'),
+  username: z.string().min(3, '用户名至少3个字符'),
   email: z.string().min(1, '邮箱不能为空').email('请输入有效邮箱'),
-  password: z.string().min(6, '密码至少6位'),
+  password: z.string().min(8, '密码至少8位'),
   terms: z.boolean().refine((v) => v === true, '请勾选同意协议后继续'),
 })
+
+function authErrorMessage(error: any, fallback: string): string {
+  const payload = error?.response?.data
+  if (payload && typeof payload === 'object') {
+    const message = payload.error || payload.message
+
+    if (typeof message === 'string' && message.trim()) return message
+  }
+
+  if (typeof error?.message === 'string' && error.message.trim()) return error.message
+
+  return fallback
+}
+
+function firstValidationMessage(errors: Record<string, any>, fallback: string): string {
+  const first = Object.values(errors)[0]
+  const message = first?.message
+
+  return typeof message === 'string' && message.trim() ? message : fallback
+}
 
 /**
  * 左侧的品牌展示面板
@@ -92,19 +113,27 @@ const AuthForm = () => {
   })
 
   async function onLoginSubmit(values: any) {
-    await login({ email: values.email, password: values.password })
-    const to = location?.state?.from?.pathname ?? '/'
-    navigate(to, { replace: true })
+    try {
+      await login({ email: values.email, password: values.password })
+      const to = location?.state?.from?.pathname ?? '/'
+      navigate(to, { replace: true })
+    } catch (error: any) {
+      toast.error(authErrorMessage(error, '登录失败，请检查账号或密码'))
+    }
   }
 
   async function onRegisterSubmit(values: any) {
-    await registerAction({
-      username: values.username,
-      email: values.email,
-      password: values.password,
-    })
-    const to = location?.state?.from?.pathname ?? '/'
-    navigate(to, { replace: true })
+    try {
+      await registerAction({
+        username: values.username,
+        email: values.email,
+        password: values.password,
+      })
+      const to = location?.state?.from?.pathname ?? '/'
+      navigate(to, { replace: true })
+    } catch (error: any) {
+      toast.error(authErrorMessage(error, '注册失败，请检查输入后重试'))
+    }
   }
 
   return (
@@ -121,7 +150,13 @@ const AuthForm = () => {
           <TabsContent value="login" className="mt-8">
             <div className="h-[84px]" />
             <Form {...loginForm}>
-              <form className="space-y-6" onSubmit={loginForm.handleSubmit(onLoginSubmit)}>
+              <form
+                className="space-y-6"
+                onSubmit={loginForm.handleSubmit(
+                  onLoginSubmit,
+                  (errors) => toast.error(firstValidationMessage(errors, '请检查登录信息')),
+                )}
+              >
                 {/* 邮箱 */}
                 <FormField
                   control={loginForm.control as any}
@@ -195,7 +230,13 @@ const AuthForm = () => {
               <p className="mt-2 text-muted-foreground">{String(t('auth:subtitle.register'))}</p>
             </div>
             <Form {...registerForm}>
-              <form className="space-y-6" onSubmit={registerForm.handleSubmit(onRegisterSubmit)}>
+              <form
+                className="space-y-6"
+                onSubmit={registerForm.handleSubmit(
+                  onRegisterSubmit,
+                  (errors) => toast.error(firstValidationMessage(errors, '请检查注册信息')),
+                )}
+              >
                 {/* 用户名 */}
                 <FormField
                   control={registerForm.control as any}
