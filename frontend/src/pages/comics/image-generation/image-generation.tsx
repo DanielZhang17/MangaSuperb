@@ -1,11 +1,11 @@
- 
-import { useAtom } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { ChevronDown, ChevronUp, Image as ImageIcon, Plus } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 
 import ComicsApi from '@/apis/comics'
 import PanelsApi from '@/apis/panels'
+import { type ActiveJobEntry, activeJobsAtom } from '@/atoms'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
@@ -24,9 +24,10 @@ import { AI_PROVIDER_LABELS, useAiProviders } from '@/hooks/use-ai-providers'
 import { usePreferences } from '@/hooks/use-preferences'
 import { resolveAvailablePreferenceValue, resolvePreferenceValue } from '@/lib/auto-preferences'
 import { cn, proxiedStatic } from '@/lib/utils'
-import type { AiProviderId, AutoPreference, ColorMode } from '@/service/types'
+import type { AiProviderId, AutoPreference, ColorMode, RenderRun } from '@/service/types'
 
 import {
+  activeRenderRunAtom,
   activeTabAtom,
   aspectRatioAtom,
   currentComicDetailAtom,
@@ -108,6 +109,116 @@ const DEFAULT_FONT_FAMILY = DEFAULT_FONT_FAMILIES[0] ?? 'source-han-sans'
 const DEFAULT_FONT_SIZE = DEFAULT_FONT_SIZES[1] ?? DEFAULT_FONT_SIZES[0] ?? '20'
 const DEFAULT_BUBBLE_SHAPE = DEFAULT_BUBBLE_SHAPES[0] ?? 'rect'
 const DEFAULT_COLOR_MODE = DEFAULT_COLOR_MODES[0] ?? 'black-white'
+
+type RenderRunMode = RenderRun['mode']
+
+const RENDER_RUN_ACTIONS: { mode: RenderRunMode; label: string }[] = [
+  { mode: 'first_page', label: 'Generate first page' },
+  { mode: 'remaining_pages', label: 'Generate remaining pages' },
+  { mode: 'all_pages', label: 'Generate all pages' },
+]
+
+const RENDER_RUN_MODE_LABELS: Record<RenderRunMode, string> = {
+  first_page: 'first page',
+  remaining_pages: 'remaining pages',
+  all_pages: 'all pages',
+}
+
+function isActiveRenderRun(renderRun: RenderRun | null) {
+  return Boolean(
+    renderRun
+      && (renderRun.status === 'queued' || renderRun.status === 'running'),
+  )
+}
+
+function isActiveRenderJobStatus(status: string | null | undefined) {
+  return status === 'queued' || status === 'started' || status === 'running'
+}
+
+function renderRunProgressStatus(renderRun: RenderRun): RenderProgressState['status'] {
+  if (renderRun.status === 'aborted') return 'idle'
+  if (renderRun.status === 'queued') return 'submitting'
+  if (renderRun.status === 'running') return 'rendering'
+  if (renderRun.status === 'completed') return 'completed'
+  if (renderRun.status === 'failed') return 'failed'
+
+  return 'idle'
+}
+
+function renderRunStatusMessage(renderRun: RenderRun) {
+  const modeLabel = RENDER_RUN_MODE_LABELS[renderRun.mode]
+
+  if (renderRun.status === 'aborted') {
+    return 'Render run aborted.'
+  }
+
+  if (renderRun.abort_requested) {
+    return 'Abort requested. Waiting for the render run to stop.'
+  }
+
+  if (renderRun.status === 'queued') {
+    return `Generate ${modeLabel} queued in the background.`
+  }
+
+  if (renderRun.status === 'running') {
+    return `Generate ${modeLabel} is running in the background.`
+  }
+
+  if (renderRun.status === 'completed') {
+    return `Generate ${modeLabel} completed.`
+  }
+
+  if (renderRun.status === 'failed') {
+    return renderRun.error_message
+      ? `Generate ${modeLabel} failed: ${renderRun.error_message}`
+      : `Generate ${modeLabel} failed.`
+  }
+
+  return 'Render run aborted.'
+}
+
+function renderRunHelperText(renderRun: RenderRun | null) {
+  if (!renderRun) return undefined
+
+  if (renderRun.status === 'aborted') {
+    return 'This render run was aborted. You can start another run when ready.'
+  }
+
+  if (renderRun.abort_requested) {
+    return 'The abort request is pending. Keep generation paused until the run stops.'
+  }
+
+  if (renderRun.status === 'completed') {
+    return 'The background render run has completed.'
+  }
+
+  if (renderRun.status === 'failed') {
+    return 'The background render run failed. You can retry after reviewing the error.'
+  }
+
+  return 'This render run continues in the background. You can leave this page.'
+}
+
+function createActiveRenderJob(renderRun: RenderRun, title?: string | null): ActiveJobEntry {
+  return {
+    job_id: renderRun.job_id ?? `render-run-${renderRun.id}`,
+    render_run_id: renderRun.id,
+    comic_id: renderRun.comic_id,
+    stage: 'render',
+    status: renderRun.status,
+    title: title ?? 'Render run',
+    started_at: renderRun.started_at,
+    rq_status: renderRun.status,
+    workflow_stages: [{ stage: 'render', status: renderRun.status }],
+    render_progress: {
+      completed: renderRun.completed_pages.length,
+      total: renderRun.requested_pages.length,
+    },
+    render_run: renderRun,
+    reconnecting: false,
+    warning: null,
+  }
+}
 
 function renderFailureMessage(comic: any): string | null {
   const stages = Array.isArray(comic?.workflow_stages) ? comic.workflow_stages : []
@@ -489,6 +600,8 @@ export function ImageGeneration() {
   const [hasTail, setHasTail] = useState(true)
   const [colorMode, setColorMode] = useState<ColorMode>(DEFAULT_COLOR_MODE)
   const [isRendering, setIsRendering] = useState(false)
+  const [isStartingRenderRun, setIsStartingRenderRun] = useState(false)
+  const [isAbortingRenderRun, setIsAbortingRenderRun] = useState(false)
   const [isPublishing, setIsPublishing] = useState(false)
   const [publishOpen, setPublishOpen] = useState(false)
   const [makePublic, setMakePublic] = useState(true)
@@ -505,6 +618,8 @@ export function ImageGeneration() {
   const pdfTriesRef = useRef<number>(0)
   const [comicId] = useAtom(currentComicIdAtom)
   const [, setComicDetail] = useAtom(currentComicDetailAtom)
+  const [activeRenderRun, setActiveRenderRun] = useAtom(activeRenderRunAtom)
+  const setActiveJobs = useSetAtom(activeJobsAtom)
   const [style, setStyle] = useAtom(styleAtom)
   const [aspectRatio, setAspectRatio] = useAtom(aspectRatioAtom)
   const [overrides, setOverrides] = useAtom(currentComicOverridesAtom)
@@ -614,6 +729,80 @@ export function ImageGeneration() {
     overrides.bubble_tail ?? preferenceBubbleTail ?? { mode: 'auto' }
   ) as AutoPreference<boolean>
   const resolvedBubbleTail = resolvePreferenceValue(bubbleTailPreference, defaultBubbleTail)
+  const renderOptions = useMemo(() => ({
+    image_provider: resolvedImageProvider,
+    text_provider: resolvedTextProvider,
+    style_description: resolvedStyle,
+    color_mode: resolvedColorMode,
+    aspect_ratio: resolvedAspectRatio,
+    font_family: resolvedFontFamily,
+    font_size: resolvedFontSize,
+    bubble_shape: resolvedBubbleShape,
+    bubble_tail: resolvedBubbleTail,
+  }), [
+    resolvedAspectRatio,
+    resolvedBubbleShape,
+    resolvedBubbleTail,
+    resolvedColorMode,
+    resolvedFontFamily,
+    resolvedFontSize,
+    resolvedImageProvider,
+    resolvedStyle,
+    resolvedTextProvider,
+  ])
+  const activeJobs = useAtomValue(activeJobsAtom)
+  const lightweightActiveRenderJobForComic = useMemo(() => {
+    if (comicId === null) return null
+
+    return activeJobs.find((job) => (
+      job.comic_id === comicId
+      && Boolean(job.render_run_id)
+      && !job.render_run
+      && (isActiveRenderJobStatus(job.status) || isActiveRenderJobStatus(job.rq_status))
+    )) ?? null
+  }, [activeJobs, comicId])
+  const activeJobRenderRunForComic = useMemo(() => {
+    if (comicId === null) return null
+
+    const renderRuns = activeJobs
+      .map((job) => job.render_run)
+      .filter((renderRun): renderRun is RenderRun => Boolean(renderRun && renderRun.comic_id === comicId))
+
+    const activeJobRun = renderRuns.find((renderRun) => isActiveRenderRun(renderRun))
+    if (activeJobRun) return activeJobRun
+
+    const trackedRenderRunId = activeRenderRun?.comic_id === comicId ? activeRenderRun.id : null
+    for (const job of activeJobs) {
+      const renderRun = job.render_run
+      if (!renderRun || renderRun.comic_id !== comicId) continue
+      if (trackedRenderRunId === null || renderRun.id === trackedRenderRunId) return renderRun
+    }
+
+    return null
+  }, [activeJobs, activeRenderRun?.comic_id, activeRenderRun?.id, comicId])
+  const activeRenderRunForComic = activeJobRenderRunForComic
+    ?? (comicId !== null && activeRenderRun?.comic_id === comicId ? activeRenderRun : null)
+  const hasActiveRenderRun = isActiveRenderRun(activeRenderRunForComic) || Boolean(lightweightActiveRenderJobForComic)
+  const canAbortActiveRenderRun = Boolean(
+    (isActiveRenderRun(activeRenderRunForComic) && !activeRenderRunForComic?.abort_requested)
+      || lightweightActiveRenderJobForComic,
+  )
+  const disableRenderRunActions = !comicId || isRendering || isStartingRenderRun || hasActiveRenderRun
+
+  useEffect(() => {
+    if (!activeJobRenderRunForComic) return
+    setActiveRenderRun((current) => {
+      if (
+        current?.id === activeJobRenderRunForComic.id
+        && current.status === activeJobRenderRunForComic.status
+        && current.abort_requested === activeJobRenderRunForComic.abort_requested
+      ) {
+        return current
+      }
+
+      return activeJobRenderRunForComic
+    })
+  }, [activeJobRenderRunForComic, setActiveRenderRun])
 
   useEffect(() => {
     if (providersLoading) return
@@ -800,17 +989,7 @@ export function ImageGeneration() {
       )))
 
       // A) 触发该页渲染（布局已在“分镜”步骤完成）
-      await PanelsApi.renderPage(comicId, targetPageNumber, {
-        image_provider: resolvedImageProvider,
-        text_provider: resolvedTextProvider,
-        style_description: resolvedStyle,
-        color_mode: resolvedColorMode,
-        aspect_ratio: resolvedAspectRatio,
-        font_family: resolvedFontFamily,
-        font_size: resolvedFontSize,
-        bubble_shape: resolvedBubbleShape,
-        bubble_tail: resolvedBubbleTail,
-      })
+      await PanelsApi.renderPage(comicId, targetPageNumber, renderOptions)
       updateRenderProgress({
         status: 'rendering',
         message: '正在生成漫画页',
@@ -958,6 +1137,118 @@ export function ImageGeneration() {
     }
   }
 
+  const handleStartRenderRun = async (mode: RenderRunMode) => {
+    if (!comicId) {
+      toast.error('请先完成“分镜”步骤后再来生图')
+
+      return
+    }
+
+    try {
+      setIsStartingRenderRun(true)
+      clearPoll()
+      setIsRendering(false)
+      setPollTries(0)
+      renderTargetRef.current = null
+      renderStartedAtRef.current = Date.now()
+      updateRenderProgress({
+        status: 'submitting',
+        message: `Submitting ${RENDER_RUN_ACTIONS.find((action) => action.mode === mode)?.label ?? 'render run'}...`,
+        elapsedMs: 0,
+        pollTries: 0,
+        error: null,
+      })
+
+      const response = await PanelsApi.startRenderRun(comicId, {
+        mode,
+        ...renderOptions,
+      })
+      const renderRun = response.render_run
+      setActiveRenderRun(renderRun)
+      setActiveJobs((current) => {
+        const nextById = new Map(current.map((job) => [job.job_id, job]))
+        const job = createActiveRenderJob(renderRun, response.comic?.title)
+        nextById.set(job.job_id, {
+          ...nextById.get(job.job_id),
+          ...job,
+        })
+
+        return [...nextById.values()]
+      })
+
+      if (response.comic) {
+        setComicDetail(response.comic)
+      }
+
+      updateRenderProgress({
+        status: renderRunProgressStatus(renderRun),
+        message: renderRunStatusMessage(renderRun),
+        pollTries: 0,
+        error: renderRun.status === 'failed' ? renderRun.error_message : null,
+      })
+    } catch (err: any) {
+      const message = err?.message || 'Render run creation failed'
+      updateRenderProgress({
+        status: 'failed',
+        message,
+        error: message,
+      })
+      toast.error(message)
+    } finally {
+      setIsStartingRenderRun(false)
+    }
+  }
+
+  const handleAbortRenderRun = async () => {
+    const fullRenderRunAbortId = activeRenderRunForComic
+      && isActiveRenderRun(activeRenderRunForComic)
+      && !activeRenderRunForComic.abort_requested
+      ? activeRenderRunForComic.id
+      : null
+    const renderRunId = fullRenderRunAbortId ?? lightweightActiveRenderJobForComic?.render_run_id
+    if (!renderRunId || !canAbortActiveRenderRun) return
+
+    try {
+      setIsAbortingRenderRun(true)
+      const response = await PanelsApi.abortRenderRun(renderRunId)
+      const renderRun = response.render_run
+      setActiveRenderRun(renderRun)
+      setActiveJobs((current) => {
+        const job = createActiveRenderJob(renderRun)
+        const existingJob = current.find((activeJob) => (
+          activeJob.render_run_id === renderRun.id || activeJob.render_run?.id === renderRun.id
+        ))
+        const jobId = existingJob?.job_id ?? job.job_id
+        const nextById = new Map(current.map((activeJob) => [activeJob.job_id, activeJob]))
+        nextById.set(jobId, {
+          ...existingJob,
+          ...job,
+          job_id: jobId,
+          title: existingJob?.title ?? job.title,
+        })
+
+        return [...nextById.values()]
+      })
+      clearPoll()
+      setIsRendering(false)
+      setPollTries(0)
+      renderTargetRef.current = null
+      renderStartedAtRef.current = null
+      updateRenderProgress({
+        status: renderRunProgressStatus(renderRun),
+        message: renderRunStatusMessage(renderRun),
+        elapsedMs: 0,
+        pollTries: 0,
+        error: renderRun.status === 'failed' ? renderRun.error_message : null,
+      })
+    } catch (err: any) {
+      const message = err?.message || 'Render run abort failed'
+      toast.error(message)
+    } finally {
+      setIsAbortingRenderRun(false)
+    }
+  }
+
   const handleImageProviderPreferenceChange = (nextPreference: AutoPreference<AiProviderId>) => {
     setOverrides((prev) => ({
       ...prev,
@@ -1034,6 +1325,7 @@ export function ImageGeneration() {
     () => proxiedStatic(pages.find((p) => p.page_number === selectedScene)?.image_url),
     [pages, selectedScene],
   )
+  const renderProgressHelperText = renderRunHelperText(activeRenderRunForComic)
 
   return (
     <ComicsWorkflowShell>
@@ -1048,11 +1340,32 @@ export function ImageGeneration() {
           }}
         />
         <section className="flex min-w-0 flex-col gap-4 rounded-lg border border-border/60 bg-card p-4 shadow-sm sm:p-5">
-          <GenerationStatusPanel progress={renderProgress} />
+          <GenerationStatusPanel progress={renderProgress} helperText={renderProgressHelperText} />
           <WorkflowActionBar>
-            <Button size="lg" onClick={handleGenerate} disabled={isRendering || !comicId}>
+            <Button size="lg" onClick={handleGenerate} disabled={isRendering || isStartingRenderRun || hasActiveRenderRun || !comicId}>
               {isRendering ? `渲染中... (${pollTries}/${MAX_POLL_TRIES})` : '生图'}
             </Button>
+            {RENDER_RUN_ACTIONS.map((action) => (
+              <Button
+                key={action.mode}
+                size="lg"
+                variant="outline"
+                onClick={() => void handleStartRenderRun(action.mode)}
+                disabled={disableRenderRunActions}
+              >
+                {action.label}
+              </Button>
+            ))}
+            {canAbortActiveRenderRun && (
+              <Button
+                size="lg"
+                variant="destructive"
+                onClick={() => void handleAbortRenderRun()}
+                disabled={isAbortingRenderRun}
+              >
+                Abort
+              </Button>
+            )}
           </WorkflowActionBar>
           <StoryboardCanvas
             onPreview={previewHandler}

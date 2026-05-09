@@ -1,23 +1,43 @@
 import request from '@/service'
-import type { AiProviderId } from '@/service/types'
+import type { AiProviderId, IComic, RenderRun } from '@/service/types'
 
 // Lightweight job domain types to match backend behavior
-export type JobStatus = 'queued' | 'started' | 'finished' | 'failed' | 'deferred'
+export type JobStatus =
+  | 'queued'
+  | 'started'
+  | 'running'
+  | 'finished'
+  | 'completed'
+  | 'failed'
+  | 'deferred'
+  | 'aborted'
+  | 'unknown'
+
+export interface ActiveJobRenderProgress {
+  completed: number
+  total: number
+}
 
 export interface JobDetail {
-  id: string
+  id?: string
+  job_id?: string
   rq_status: JobStatus
+  comic?: IComic | null
+  render_run?: RenderRun | null
+  warning?: string | null
   // Additional metadata returned by backend
   [k: string]: any
 }
 
 export interface ActiveJob {
   job_id: string
-  comic_id: number
+  render_run_id?: number | null
+  comic_id?: number | null
   stage: string
   status: string
-  title: string
-  started_at: string | null
+  title?: string | null
+  started_at?: string | null
+  render_progress?: ActiveJobRenderProgress | null
 }
 
 export interface ActiveJobsResponse {

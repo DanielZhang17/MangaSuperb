@@ -28,7 +28,13 @@ function statusIndex(status: RenderProgressStatus) {
   return index === -1 ? 0 : index
 }
 
-export function GenerationStatusPanel({ progress }: { progress: RenderProgressState }) {
+export function GenerationStatusPanel({
+  progress,
+  helperText = '图像生成可能需要几分钟，请保持页面打开。',
+}: {
+  progress: RenderProgressState
+  helperText?: string
+}) {
   const idle = progress.status === 'idle'
   const failed = progress.status === 'failed' || progress.status === 'timeout'
   const completed = progress.status === 'completed'
@@ -50,7 +56,7 @@ export function GenerationStatusPanel({ progress }: { progress: RenderProgressSt
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="font-medium text-foreground">{progress.message}</p>
-          <p className="mt-1 text-sm text-muted-foreground">图像生成可能需要几分钟，请保持页面打开。</p>
+          <p className="mt-1 text-sm text-muted-foreground">{helperText}</p>
         </div>
         {!idle && (
           <div className="inline-flex items-center gap-2 rounded-md bg-muted px-2.5 py-1 text-xs text-muted-foreground">

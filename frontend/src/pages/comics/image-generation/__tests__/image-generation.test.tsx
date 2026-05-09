@@ -6,8 +6,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ComicsApi from '@/apis/comics'
 import PanelsApi from '@/apis/panels'
+import { activeJobsAtom } from '@/atoms'
+import type { RenderRun } from '@/service/types'
 
-import { currentComicIdAtom, currentComicOverridesAtom, imageProviderAtom } from '../../atoms'
+import { activeRenderRunAtom, currentComicIdAtom, currentComicOverridesAtom, imageProviderAtom } from '../../atoms'
 import { ImageGeneration } from '../image-generation'
 
 vi.mock('react-hot-toast', () => ({
@@ -25,6 +27,8 @@ vi.mock('@/apis/comics', () => ({
 vi.mock('@/apis/panels', () => ({
   default: {
     renderPage: vi.fn(),
+    startRenderRun: vi.fn(),
+    abortRenderRun: vi.fn(),
   },
 }))
 
@@ -39,16 +43,41 @@ vi.mock('@/hooks/use-preferences', () => ({
 const listImagesMock = vi.mocked(ComicsApi.listImages)
 const getComicMock = vi.mocked(ComicsApi.get)
 const renderPageMock = vi.mocked(PanelsApi.renderPage)
+const startRenderRunMock = vi.mocked(PanelsApi.startRenderRun)
+const abortRenderRunMock = vi.mocked(PanelsApi.abortRenderRun)
+
+function makeRenderRun(overrides: Partial<RenderRun> = {}): RenderRun {
+  return {
+    id: 101,
+    comic_id: 7,
+    user_id: 22,
+    mode: 'all_pages' as const,
+    status: 'queued' as const,
+    current_page_number: null,
+    requested_pages: [],
+    completed_pages: [],
+    failed_pages: [],
+    abort_requested: false,
+    job_id: null,
+    error_message: null,
+    created_at: '2026-05-10T00:00:00Z',
+    started_at: null,
+    completed_at: null,
+    ...overrides,
+  }
+}
 
 function renderImageGeneration() {
   const store = createStore()
   store.set(currentComicIdAtom, 7)
 
-  return render(
+  const result = render(
     <Provider store={store}>
       <ImageGeneration />
     </Provider>,
   )
+
+  return { ...result, store }
 }
 
 function renderImageGenerationWithProvider(provider: 'gemini' | 'third_party') {
@@ -59,11 +88,13 @@ function renderImageGenerationWithProvider(provider: 'gemini' | 'third_party') {
     image_provider: { mode: 'manual', value: provider },
   })
 
-  return render(
+  const result = render(
     <Provider store={store}>
       <ImageGeneration />
     </Provider>,
   )
+
+  return { ...result, store }
 }
 
 describe('ImageGeneration render polling', () => {
@@ -74,10 +105,318 @@ describe('ImageGeneration render polling', () => {
     listImagesMock.mockReset()
     getComicMock.mockReset()
     renderPageMock.mockReset()
+    startRenderRunMock.mockReset()
+    abortRenderRunMock.mockReset()
     ;(globalThis as any).__mockPreferences = undefined
     listImagesMock.mockResolvedValue({ pages: [] } as any)
     getComicMock.mockResolvedValue({ id: 7 } as any)
     renderPageMock.mockResolvedValue({ job_id: 'render-job-1' })
+    startRenderRunMock.mockResolvedValue({ render_run: makeRenderRun(), comic: { id: 7 } } as any)
+    abortRenderRunMock.mockResolvedValue({
+      render_run: makeRenderRun({
+        status: 'aborted',
+        abort_requested: true,
+        completed_at: '2026-05-10T00:01:00Z',
+      }),
+    } as any)
+  })
+
+  it('starts an all-pages render run with resolved render preferences', async () => {
+    ;(globalThis as any).__mockPreferences = {
+      version: 2,
+      style_presets: [
+        {
+          value: 'Saved render style',
+          label: 'Saved render style',
+          is_custom: true,
+        },
+      ],
+      fields: {
+        style: { mode: 'manual', value: 'Saved render style' },
+        image_provider: { mode: 'manual', value: 'third_party' },
+        text_provider: { mode: 'manual', value: 'third_party' },
+        color_mode: { mode: 'manual', value: 'color' },
+        aspect_ratio: { mode: 'manual', value: '3:4' },
+        font_family: { mode: 'manual', value: 'songti' },
+        font_size: { mode: 'manual', value: '24' },
+        bubble_shape: { mode: 'manual', value: 'round' },
+        bubble_tail: { mode: 'manual', value: false },
+      },
+    }
+    const renderRun = makeRenderRun({
+      mode: 'all_pages',
+      status: 'queued',
+      job_id: 'render-job-101',
+      requested_pages: [1, 2, 3],
+    })
+    startRenderRunMock.mockResolvedValueOnce({ render_run: renderRun, comic: { id: 7 } } as any)
+    const { store } = renderImageGeneration()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generate all pages' }))
+
+    await waitFor(() => {
+      expect(startRenderRunMock).toHaveBeenCalledWith(7, {
+        mode: 'all_pages',
+        image_provider: 'third_party',
+        text_provider: 'third_party',
+        style_description: 'Saved render style',
+        color_mode: 'color',
+        aspect_ratio: '3:4',
+        font_family: 'songti',
+        font_size: '24',
+        bubble_shape: 'round',
+        bubble_tail: false,
+      })
+    })
+    expect(store.get(activeRenderRunAtom)).toEqual(renderRun)
+    expect(store.get(activeJobsAtom)).toEqual([
+      expect.objectContaining({
+        job_id: 'render-job-101',
+        render_run_id: 101,
+        comic_id: 7,
+        stage: 'render',
+        status: 'queued',
+        render_progress: { completed: 0, total: 3 },
+        render_run: renderRun,
+      }),
+    ])
+    expect(screen.getByText('Generate all pages queued in the background.')).toBeInTheDocument()
+  })
+
+  it('starts a remaining-pages render run', async () => {
+    const renderRun = makeRenderRun({ mode: 'remaining_pages', status: 'running' })
+    startRenderRunMock.mockResolvedValueOnce({ render_run: renderRun, comic: { id: 7 } } as any)
+    renderImageGeneration()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generate remaining pages' }))
+
+    await waitFor(() => {
+      expect(startRenderRunMock).toHaveBeenCalledWith(7, expect.objectContaining({
+        mode: 'remaining_pages',
+      }))
+    })
+    expect(screen.getByText('Generate remaining pages is running in the background.')).toBeInTheDocument()
+  })
+
+  it('aborts the active render run and disables the active run UI', async () => {
+    const runningRun = makeRenderRun({ id: 202, status: 'running', mode: 'all_pages' })
+    const abortedRun = makeRenderRun({
+      id: 202,
+      status: 'aborted',
+      mode: 'all_pages',
+      abort_requested: true,
+      completed_at: '2026-05-10T00:01:00Z',
+    })
+    startRenderRunMock.mockResolvedValueOnce({ render_run: runningRun, comic: { id: 7 } } as any)
+    abortRenderRunMock.mockResolvedValueOnce({ render_run: abortedRun } as any)
+    const { store } = renderImageGeneration()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generate all pages' }))
+
+    const abortButton = await screen.findByRole('button', { name: 'Abort' })
+    fireEvent.click(abortButton)
+
+    await waitFor(() => expect(abortRenderRunMock).toHaveBeenCalledWith(202))
+    expect(store.get(activeRenderRunAtom)).toEqual(abortedRun)
+    expect(screen.getByText('Render run aborted.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Abort' })).not.toBeInTheDocument()
+  })
+
+  it('does not block render actions for a different comic active render run', async () => {
+    const runningDifferentComicRun = makeRenderRun({
+      id: 303,
+      comic_id: 99,
+      status: 'running',
+      mode: 'all_pages',
+    })
+    const renderRun = makeRenderRun({ mode: 'all_pages', status: 'queued' })
+    startRenderRunMock.mockResolvedValueOnce({ render_run: renderRun, comic: { id: 7 } } as any)
+    const store = createStore()
+    store.set(currentComicIdAtom, 7)
+    store.set(activeRenderRunAtom, runningDifferentComicRun)
+
+    render(
+      <Provider store={store}>
+        <ImageGeneration />
+      </Provider>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generate all pages' }))
+
+    await waitFor(() => {
+      expect(startRenderRunMock).toHaveBeenCalledWith(7, expect.objectContaining({
+        mode: 'all_pages',
+      }))
+    })
+  })
+
+  it('re-enables render actions when the status shelf hydrates a terminal render run', async () => {
+    const runningRun = makeRenderRun({
+      id: 404,
+      comic_id: 7,
+      status: 'running',
+      mode: 'all_pages',
+      requested_pages: [1, 2],
+    })
+    const completedRun = makeRenderRun({
+      ...runningRun,
+      status: 'completed',
+      completed_pages: [1, 2],
+      completed_at: '2026-05-10T00:02:00Z',
+    })
+    const store = createStore()
+    store.set(currentComicIdAtom, 7)
+    store.set(activeRenderRunAtom, runningRun)
+    store.set(activeJobsAtom, [{
+      job_id: 'render-job-404',
+      render_run_id: 404,
+      comic_id: 7,
+      stage: 'render',
+      status: 'completed',
+      title: 'Completed Run',
+      render_run: completedRun,
+      render_progress: { completed: 2, total: 2 },
+    }])
+
+    render(
+      <Provider store={store}>
+        <ImageGeneration />
+      </Provider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Generate all pages' })).toBeEnabled()
+    })
+    expect(store.get(activeRenderRunAtom)).toEqual(completedRun)
+  })
+
+  it('keeps render actions disabled while a render run abort request is pending', async () => {
+    const abortRequestedRun = makeRenderRun({
+      id: 505,
+      comic_id: 7,
+      status: 'running',
+      mode: 'all_pages',
+      abort_requested: true,
+    })
+    const store = createStore()
+    store.set(currentComicIdAtom, 7)
+    store.set(activeRenderRunAtom, abortRequestedRun)
+
+    render(
+      <Provider store={store}>
+        <ImageGeneration />
+      </Provider>,
+    )
+
+    expect(screen.getByRole('button', { name: 'Generate all pages' })).toBeDisabled()
+  })
+
+  it('prefers a newer active shelf render run over a stale terminal atom run', async () => {
+    const staleCompletedRun = makeRenderRun({
+      id: 606,
+      comic_id: 7,
+      status: 'completed',
+      mode: 'all_pages',
+      completed_at: '2026-05-10T00:02:00Z',
+    })
+    const newerRunningRun = makeRenderRun({
+      id: 607,
+      comic_id: 7,
+      status: 'running',
+      mode: 'all_pages',
+      job_id: 'render-job-607',
+      requested_pages: [1, 2],
+    })
+    const store = createStore()
+    store.set(currentComicIdAtom, 7)
+    store.set(activeRenderRunAtom, staleCompletedRun)
+    store.set(activeJobsAtom, [{
+      job_id: 'render-job-607',
+      render_run_id: 607,
+      comic_id: 7,
+      stage: 'render',
+      status: 'running',
+      title: 'Newer Run',
+      render_run: newerRunningRun,
+      render_progress: { completed: 0, total: 2 },
+    }])
+
+    render(
+      <Provider store={store}>
+        <ImageGeneration />
+      </Provider>,
+    )
+
+    expect(screen.getByRole('button', { name: 'Generate all pages' })).toBeDisabled()
+    expect(await screen.findByRole('button', { name: 'Abort' })).toBeInTheDocument()
+    await waitFor(() => {
+      expect(store.get(activeRenderRunAtom)).toEqual(newerRunningRun)
+    })
+  })
+
+  it('keeps render actions disabled for a lightweight active render-run job before hydration', () => {
+    const store = createStore()
+    store.set(currentComicIdAtom, 7)
+    store.set(activeJobsAtom, [{
+      job_id: 'render-job-lightweight',
+      render_run_id: 707,
+      comic_id: 7,
+      stage: 'render',
+      status: 'running',
+      title: 'Hydrating Run',
+      render_progress: { completed: 0, total: 3 },
+    }])
+
+    render(
+      <Provider store={store}>
+        <ImageGeneration />
+      </Provider>,
+    )
+
+    expect(screen.getByRole('button', { name: 'Generate all pages' })).toBeDisabled()
+  })
+
+  it('aborts the lightweight active render-run id when the atom has a stale terminal run', async () => {
+    const staleCompletedRun = makeRenderRun({
+      id: 808,
+      comic_id: 7,
+      status: 'completed',
+      mode: 'all_pages',
+      completed_at: '2026-05-10T00:02:00Z',
+    })
+    const abortedRun = makeRenderRun({
+      id: 809,
+      comic_id: 7,
+      status: 'aborted',
+      mode: 'all_pages',
+      abort_requested: true,
+      completed_at: '2026-05-10T00:03:00Z',
+    })
+    abortRenderRunMock.mockResolvedValueOnce({ render_run: abortedRun } as any)
+    const store = createStore()
+    store.set(currentComicIdAtom, 7)
+    store.set(activeRenderRunAtom, staleCompletedRun)
+    store.set(activeJobsAtom, [{
+      job_id: 'render-job-lightweight-active',
+      render_run_id: 809,
+      comic_id: 7,
+      stage: 'render',
+      status: 'running',
+      title: 'Hydrating Run',
+      render_progress: { completed: 0, total: 3 },
+    }])
+
+    render(
+      <Provider store={store}>
+        <ImageGeneration />
+      </Provider>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Abort' }))
+
+    await waitFor(() => {
+      expect(abortRenderRunMock).toHaveBeenCalledWith(809)
+    })
   })
 
   it('keeps polling beyond 30 seconds while the backend render can still be running', async () => {

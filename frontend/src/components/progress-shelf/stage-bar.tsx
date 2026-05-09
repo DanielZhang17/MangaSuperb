@@ -9,7 +9,8 @@ interface StageBarProps {
 function segmentTone(status: string, isCurrent: boolean): string {
   if (status === 'completed') return 'bg-emerald-500/90'
   if (status === 'failed') return 'bg-rose-500/90'
-  if (status === 'in_progress' || isCurrent) return 'bg-sky-500/90'
+  if (status === 'aborted') return 'bg-amber-500/90'
+  if (status === 'running' || status === 'in_progress' || isCurrent) return 'bg-sky-500/90'
 
   return 'bg-border'
 }
