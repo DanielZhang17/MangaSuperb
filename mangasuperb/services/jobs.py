@@ -59,15 +59,15 @@ logger = logging.getLogger(__name__)
 def _application_context():
     """Ensure a Flask application context is available."""
     try:
-        _ = current_app.name
-        yield current_app
-        return
+        app = current_app._get_current_object()
     except RuntimeError:
         from mangasuperb import create_app
 
         app = create_app()
         with app.app_context():
             yield app
+    else:
+        yield app
 
 
 def _get_storage():
@@ -697,6 +697,8 @@ def enqueue_comic_workflow(
     comic: Comic,
     *,
     image_model: str | None = None,
+    image_provider: str | None = None,
+    text_provider: str | None = None,
 ) -> dict[str, str]:
     """Schedule outline, shot refinement, and first render jobs for a comic."""
 
@@ -709,6 +711,7 @@ def enqueue_comic_workflow(
     outline_job = queue.enqueue(
         process_outline_stage,
         comic_id=comic.id,
+        text_provider=text_provider,
         job_timeout=timeout,
         result_ttl=result_ttl,
         description=f"Outline draft for comic {comic.id}",
@@ -718,6 +721,7 @@ def enqueue_comic_workflow(
     shots_job = queue.enqueue(
         process_shot_stage,
         comic_id=comic.id,
+        text_provider=text_provider,
         depends_on=outline_job,
         job_timeout=timeout,
         result_ttl=result_ttl,
@@ -730,6 +734,8 @@ def enqueue_comic_workflow(
         comic_id=comic.id,
         page_number=1,
         image_model=image_model,
+        image_provider=image_provider,
+        text_provider=text_provider,
         chain_remaining=True,
         aspect_ratio=comic.aspect_ratio,
         depends_on=shots_job,
@@ -755,6 +761,8 @@ def enqueue_page_render(
     page_number: int,
     *,
     image_model: str | None = None,
+    image_provider: str | None = None,
+    text_provider: str | None = None,
     chain_remaining: bool = False,
     font_family: str | None = None,
     font_size: str | None = None,
@@ -776,6 +784,8 @@ def enqueue_page_render(
         comic_id=comic.id,
         page_number=page_number,
         image_model=image_model,
+        image_provider=image_provider,
+        text_provider=text_provider,
         chain_remaining=chain_remaining,
         font_family=font_family,
         font_size=font_size,
@@ -798,7 +808,12 @@ def enqueue_page_render(
     return job
 
 
-def enqueue_story_optimization(queue, comic: Comic) -> dict[str, str]:
+def enqueue_story_optimization(
+    queue,
+    comic: Comic,
+    *,
+    text_provider: str | None = None,
+) -> dict[str, str]:
     """Queue outline and shot refinement jobs without triggering renders."""
 
     bootstrap_comic_workflow(comic)
@@ -810,6 +825,7 @@ def enqueue_story_optimization(queue, comic: Comic) -> dict[str, str]:
     outline_job = queue.enqueue(
         process_outline_stage,
         comic_id=comic.id,
+        text_provider=text_provider,
         job_timeout=timeout,
         result_ttl=result_ttl,
         description=f"Outline optimisation for comic {comic.id}",
@@ -819,6 +835,7 @@ def enqueue_story_optimization(queue, comic: Comic) -> dict[str, str]:
     shots_job = queue.enqueue(
         process_shot_stage,
         comic_id=comic.id,
+        text_provider=text_provider,
         depends_on=outline_job,
         job_timeout=timeout,
         result_ttl=result_ttl,
@@ -896,7 +913,11 @@ def enqueue_publish_workflow(
     }
 
 
-def process_outline_stage(comic_id: int) -> dict[str, Any]:
+def process_outline_stage(
+    comic_id: int,
+    *,
+    text_provider: str | None = None,
+) -> dict[str, Any]:
     """Derive outline sections from a comic's script."""
 
     with _application_context():
@@ -962,7 +983,11 @@ def process_outline_stage(comic_id: int) -> dict[str, Any]:
             return {"status": "failed", "comic_id": comic_id, "error": str(exc)}
 
 
-def process_shot_stage(comic_id: int) -> dict[str, Any]:
+def process_shot_stage(
+    comic_id: int,
+    *,
+    text_provider: str | None = None,
+) -> dict[str, Any]:
     """Convert outline sections into panel shots and layout suggestions."""
 
     with _application_context():
@@ -1085,6 +1110,7 @@ def process_shot_stage(comic_id: int) -> dict[str, Any]:
             shot_drafts, shot_metadata = resolve_shot_drafts(
                 shot_context,
                 panels_per_page=PANELS_PER_PAGE,
+                text_provider=text_provider,
             )
             logger.info(
                 "Generation skills task_type=shot_split skills=%s "
@@ -1220,6 +1246,8 @@ def process_page_render_stage(
     page_number: int,
     *,
     image_model: str | None = None,
+    image_provider: str | None = None,
+    text_provider: str | None = None,
     chain_remaining: bool = False,
     font_family: str | None = None,
     font_size: str | None = None,
@@ -1329,6 +1357,11 @@ def process_page_render_stage(
                 required_phrases=tuple(
                     f"Panel {panel.panel_number or panel.sequence_index}" for panel in panels
                 ),
+                provider_factory=(
+                    (lambda: get_text_provider(text_provider))
+                    if text_provider
+                    else None
+                ),
             )
             prompt = optimization.text
             logger.info(
@@ -1343,7 +1376,7 @@ def process_page_render_stage(
                 ",".join(prompt_metadata.get("skipped_skills", [])),
             )
 
-            img_data = get_image_provider().generate_image(
+            img_data = get_image_provider(image_provider).generate_image(
                 prompt, ref_parts, normalized_aspect_ratio
             )
 
@@ -1413,6 +1446,8 @@ def process_page_render_stage(
                                 comic_id=comic_id,
                                 page_number=next_panel.page_number,
                                 image_model=image_model,
+                                image_provider=image_provider,
+                                text_provider=text_provider,
                                 chain_remaining=True,
                                 color_mode=normalized_color,
                                 aspect_ratio=normalized_aspect_ratio,
@@ -1833,8 +1868,9 @@ def process_character_image_generation(
     character_id: int,
     description: str | None = None,
     reference_images: Iterable[dict[str, str]] | None = None,
+    image_provider: str | None = None,
 ) -> dict[str, Any]:
-    """Generate a character concept illustration using Gemini."""
+    """Generate a character concept illustration using the selected image provider."""
     with _application_context():
         job_id = _current_job_id()
         logger.info(
@@ -1890,7 +1926,7 @@ def process_character_image_generation(
                 len(ref_image_parts),
             )
 
-            img_data = get_image_provider().generate_image(
+            img_data = get_image_provider(image_provider).generate_image(
                 prompt, ref_image_parts, DEFAULT_ASPECT_RATIO
             )
             if not img_data:

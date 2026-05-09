@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 from mangasuperb.extensions import bcrypt, db, login_manager
 from mangasuperb.routes import register_blueprints
 from models import User
+from storage import detect_image_upload_type, with_image_extension
 
 
 class DummyJob:
@@ -73,6 +74,10 @@ class DummyStorage:
         *,
         content_type: str = "image/png",
     ) -> str:
+        detected = detect_image_upload_type(image_data)
+        if detected:
+            content_type, extension = detected
+            filename = with_image_extension(filename, extension)
         return self._store(filename, image_data, content_type)
 
     def upload_file(

@@ -1,0 +1,120 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB-manga}
+      POSTGRES_USER: ${POSTGRES_USER-manga}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD-mangaSuperb666}
+    volumes:
+      - ${MANGASUPERB_DB_DATA-./docker-data/postgres}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: mangasuperb:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${MANGASUPERB_ENV_FILE-./.env}
+    environment:
+      MANGASUPERB_DOCKER: "true"
+      HOST: 0.0.0.0
+      PORT: ${PORT-5000}
+      POSTGRES_DB: ${POSTGRES_DB-manga}
+      POSTGRES_USER: ${POSTGRES_USER-manga}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD-mangaSuperb666}
+      REDIS_DB: ${REDIS_DB-0}
+      RQ_QUEUE_NAME: ${RQ_QUEUE_NAME-manga_generation}
+      LOG_FILE: /app/logs/mangasuperb.log
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${APP_PORT-5000}:${PORT-5000}"
+    volumes:
+      - ${MANGASUPERB_ENV_FILE-./.env}:/app/.env:ro
+      - ${MANGASUPERB_LOG_DIR-./logs}:/app/logs
+    depends_on:
+      - postgres
+      - redis
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ.get('PORT', '5000'), timeout=5).read()\"",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  worker:
+    image: mangasuperb:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["worker"]
+    env_file:
+      - ${MANGASUPERB_ENV_FILE-./.env}
+    environment:
+      MANGASUPERB_DOCKER: "true"
+      POSTGRES_DB: ${POSTGRES_DB-manga}
+      POSTGRES_USER: ${POSTGRES_USER-manga}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD-mangaSuperb666}
+      REDIS_DB: ${REDIS_DB-0}
+      RQ_QUEUE_NAME: ${RQ_QUEUE_NAME-manga_generation}
+      LOG_FILE: /app/logs/mangasuperb.log
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${MANGASUPERB_ENV_FILE-./.env}:/app/.env:ro
+      - ${MANGASUPERB_LOG_DIR-./logs}:/app/logs
+    depends_on:
+      - postgres
+      - redis
+
+  init-db:
+    image: mangasuperb:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: ["tools"]
+    command: ["init-db"]
+    env_file:
+      - ${MANGASUPERB_ENV_FILE-./.env}
+    environment:
+      MANGASUPERB_DOCKER: "true"
+      POSTGRES_DB: ${POSTGRES_DB-manga}
+      POSTGRES_USER: ${POSTGRES_USER-manga}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD-mangaSuperb666}
+      REDIS_DB: ${REDIS_DB-0}
+      RQ_QUEUE_NAME: ${RQ_QUEUE_NAME-manga_generation}
+      LOG_FILE: /app/logs/mangasuperb.log
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${MANGASUPERB_ENV_FILE-./.env}:/app/.env:ro
+      - ${MANGASUPERB_LOG_DIR-./logs}:/app/logs
+    depends_on:
+      - postgres
+      - redis
+
+volumes:
+  redis-data:

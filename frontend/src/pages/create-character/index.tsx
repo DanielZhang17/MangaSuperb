@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Dropzone,
   DropzoneContent,
@@ -11,9 +12,11 @@ import {
 } from '@/components/ui/shadcn-io/dropzone'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { AI_PROVIDER_LABELS, useAiProviders } from '@/hooks/use-ai-providers'
 import { useCreateCharacter } from '@/hooks/use-characters'
 import { useI18n } from '@/hooks/use-i18n'
 import usePollCharacter from '@/hooks/use-poll-character'
+import type { AiProviderId } from '@/service/types'
 
 import { LoadingModal } from './loading-modal'
 import { CreationSuccessModal } from './success-modal'
@@ -24,6 +27,8 @@ export default function CharacterCreatorPage() {
   const [loadingOpen, setLoadingOpen] = useState(false)
   const [files, setFiles] = useState<File[] | undefined>(undefined)
   const [optimize, setOptimize] = useState(false)
+  const { providers, imageProviders } = useAiProviders()
+  const [imageProvider, setImageProvider] = useState<AiProviderId>('gemini')
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | undefined>(undefined)
   const [createdCharacter, setCreatedCharacter] = useState<import('@/service/types').ICharacter | undefined>(
     undefined,
@@ -37,6 +42,12 @@ export default function CharacterCreatorPage() {
   const placeholderImage = 'https://placehold.co/400x600/334155/e2e8f0?text=AI+Character'
 
   const VITE_API_KEY = import.meta.env.VITE_API_KEY as string | undefined
+
+  useEffect(() => {
+    const preferred = providers.defaults.image
+    if (imageProviders.includes(imageProvider)) return
+    setImageProvider(imageProviders.includes(preferred) ? preferred : imageProviders[0])
+  }, [imageProvider, imageProviders, providers.defaults.image])
 
   const fileToDataUrl = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -99,6 +110,8 @@ export default function CharacterCreatorPage() {
         optimize,
         reference_images: referenceImages,
         api_key: needApiKey ? VITE_API_KEY : undefined,
+        image_provider: imageProvider,
+        text_provider: providers.providers[imageProvider]?.text ? imageProvider : providers.defaults.text,
       })
 
       setCreatedCharacter(res.character)
@@ -133,6 +146,21 @@ export default function CharacterCreatorPage() {
         </header>
         <div>
           <Button variant="secondary">{String(t('createCharacter:random'))}</Button>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="create-character-provider">生图模型</Label>
+          <Select value={imageProvider} onValueChange={(value) => setImageProvider(value as AiProviderId)}>
+            <SelectTrigger id="create-character-provider" className="w-56">
+              <SelectValue placeholder="选择模型" />
+            </SelectTrigger>
+            <SelectContent>
+              {imageProviders.map((provider) => (
+                <SelectItem key={provider} value={provider}>
+                  {AI_PROVIDER_LABELS[provider]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <Textarea
           value={characterDescription}

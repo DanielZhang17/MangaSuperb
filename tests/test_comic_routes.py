@@ -7,7 +7,7 @@ from datetime import datetime
 from flask import Flask
 
 from mangasuperb.extensions import db
-from models import Comic, ComicLike, Script, User
+from models import Character, Comic, ComicCharacter, ComicLike, Script, User
 
 
 def _create_comic_with_script(user_id: int, title: str = "Test Comic") -> Comic:
@@ -102,6 +102,50 @@ def test_update_comic_style_description(app: Flask, auth_client, user) -> None:
         persisted = db.session.get(Comic, comic_id)
         assert persisted is not None
         assert persisted.style_description == "Dark cyberpunk aesthetic"
+
+
+def test_create_comic_allows_public_character_from_another_user(app: Flask, auth_client) -> None:
+    with app.app_context():
+        public_owner = User(
+            username="public-owner",
+            email="public-owner@example.com",
+            password_hash="hashed-password",
+        )
+        db.session.add(public_owner)
+        db.session.flush()
+        shared_character = Character(
+            user_id=public_owner.id,
+            name="Shared Hero",
+            description="A public character available for reuse.",
+            sex="female",
+            is_public=True,
+            style_prompt="Public visual style.",
+            image_status="completed",
+        )
+        db.session.add(shared_character)
+        db.session.commit()
+        character_id = shared_character.id
+
+    response = auth_client.post(
+        "/api/comics",
+        json={
+            "title": "Shared Cast",
+            "story": "A public hero joins a new adventure.",
+            "style_description": "Modern manga",
+            "aspect_ratio": "16:9",
+            "characters": [{"id": character_id, "role": "supporting"}],
+        },
+    )
+
+    assert response.status_code == 201
+    comic_id = response.get_json()["comic"]["id"]
+    with app.app_context():
+        link = ComicCharacter.query.filter_by(
+            comic_id=comic_id,
+            character_id=character_id,
+        ).one_or_none()
+        assert link is not None
+        assert link.role == "supporting"
 
 
 def test_update_comic_ignores_is_public(app: Flask, auth_client, user) -> None:

@@ -3,11 +3,92 @@ Configuration module for MangaSuperb
 Loads settings from environment variables
 """
 import os
+from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
+
+
+def _env(name: str, default: str = '') -> str:
+    return os.getenv(name, default) or ''
+
+
+def _valid_explicit_url(value: str) -> bool:
+    return bool(value and '${' not in value)
+
+
+def _any_env_set(names: tuple[str, ...]) -> bool:
+    return any(os.getenv(name) not in (None, '') for name in names)
+
+
+def _is_truthy(name: str) -> bool:
+    return _env(name).strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _build_database_uri() -> str:
+    user = quote_plus(_env('POSTGRES_USER', 'manga'))
+    password = quote_plus(_env('POSTGRES_PASSWORD', 'mangaSuperb@666'))
+    default_host = 'postgres' if _is_truthy('MANGASUPERB_DOCKER') else 'localhost'
+    host = _env('POSTGRES_HOST', default_host)
+    port = _env('POSTGRES_PORT', '5432')
+    database = _env('POSTGRES_DB', 'manga')
+    auth = f'{user}:{password}' if password else user
+    return f'postgresql://{auth}@{host}:{port}/{database}'
+
+
+def resolve_database_uri() -> str:
+    """Resolve the database URI from env with POSTGRES_* as the default source."""
+
+    raw_url = _env('DATABASE_URL').strip()
+    mode = _env('DATABASE_URL_MODE', 'auto').strip().lower()
+
+    if mode in {'url', 'database_url', 'explicit'} and _valid_explicit_url(raw_url):
+        return raw_url
+    if mode in {'components', 'postgres', 'postgresql'}:
+        return _build_database_uri()
+    if _valid_explicit_url(raw_url) and not _any_env_set(
+        (
+            'POSTGRES_USER',
+            'POSTGRES_PASSWORD',
+            'POSTGRES_HOST',
+            'POSTGRES_PORT',
+            'POSTGRES_DB',
+        )
+    ):
+        return raw_url
+
+    return _build_database_uri()
+
+
+def _build_redis_url() -> str:
+    password = quote_plus(_env('REDIS_PASSWORD'))
+    default_host = 'redis' if _is_truthy('MANGASUPERB_DOCKER') else 'localhost'
+    host = _env('REDIS_HOST', default_host)
+    port = _env('REDIS_PORT', '6379')
+    database = _env('REDIS_DB', '0')
+    auth = f':{password}@' if password else ''
+    return f'redis://{auth}{host}:{port}/{database}'
+
+
+def resolve_redis_url() -> str:
+    """Resolve Redis URL from env with REDIS_* as the default source."""
+
+    raw_url = _env('REDIS_URL').strip()
+    mode = _env('REDIS_URL_MODE', 'auto').strip().lower()
+
+    if mode in {'url', 'redis_url', 'explicit'} and _valid_explicit_url(raw_url):
+        return raw_url
+    if mode in {'components', 'redis'}:
+        return _build_redis_url()
+    if _valid_explicit_url(raw_url) and not _any_env_set(
+        ('REDIS_HOST', 'REDIS_PORT', 'REDIS_DB', 'REDIS_PASSWORD')
+    ):
+        return raw_url
+
+    return _build_redis_url()
+
 
 class Config:
     """Application configuration"""
@@ -22,17 +103,7 @@ class Config:
     SESSION_PROTECTION = os.getenv('SESSION_PROTECTION', 'basic') or None
 
     # Database
-    _raw_db_url = os.getenv('DATABASE_URL')
-    if _raw_db_url and '${' not in _raw_db_url:
-        SQLALCHEMY_DATABASE_URI = _raw_db_url
-    else:
-        SQLALCHEMY_DATABASE_URI = (
-            f"postgresql://{os.getenv('POSTGRES_USER', 'manga')}:"
-            f"{os.getenv('POSTGRES_PASSWORD', 'mangaSuperb@666')}@"
-            f"{os.getenv('POSTGRES_HOST', 'localhost')}:"
-            f"{os.getenv('POSTGRES_PORT', '5432')}/"
-            f"{os.getenv('POSTGRES_DB', 'manga')}"
-        )
+    SQLALCHEMY_DATABASE_URI = resolve_database_uri()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
         'pool_size': 10,
@@ -41,12 +112,7 @@ class Config:
     }
 
     # Redis
-    REDIS_URL = os.getenv(
-        'REDIS_URL',
-        f"redis://{os.getenv('REDIS_HOST', 'localhost')}:"
-        f"{os.getenv('REDIS_PORT', '6379')}/"
-        f"{os.getenv('REDIS_DB', '0')}"
-    )
+    REDIS_URL = resolve_redis_url()
 
     # RQ (Redis Queue)
     RQ_QUEUE_NAME = os.getenv('RQ_QUEUE_NAME', 'manga_generation')
@@ -75,15 +141,19 @@ class Config:
     THIRD_PARTY_API_KEY = os.getenv('THIRD_PARTY_API_KEY', '')
     THIRD_PARTY_IMAGE_MODEL = os.getenv('THIRD_PARTY_IMAGE_MODEL', '')
     THIRD_PARTY_TEXT_MODEL = os.getenv('THIRD_PARTY_TEXT_MODEL', '')
+    THIRD_PARTY_IMAGE_TIMEOUT_SECONDS = int(
+        os.getenv('THIRD_PARTY_IMAGE_TIMEOUT_SECONDS', '300')
+    )
 
     # Cloudflare R2
     R2_ACCOUNT_ID = os.getenv('R2_ACCOUNT_ID', '')
     R2_ACCESS_KEY_ID = os.getenv('R2_ACCESS_KEY_ID', '')
     R2_SECRET_ACCESS_KEY = os.getenv('R2_SECRET_ACCESS_KEY', '')
     R2_BUCKET_NAME = os.getenv('R2_BUCKET_NAME', 'manga')
-    R2_ENDPOINT_URL = os.getenv(
-        'R2_ENDPOINT_URL',
-        f"https://{os.getenv('R2_ACCOUNT_ID', '')}.r2.cloudflarestorage.com"
+    _r2_endpoint_url = os.getenv('R2_ENDPOINT_URL', '')
+    R2_ENDPOINT_URL = (
+        _r2_endpoint_url
+        or (f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com" if R2_ACCOUNT_ID else '')
     )
     R2_PUBLIC_URL = os.getenv('R2_PUBLIC_URL', '')
 

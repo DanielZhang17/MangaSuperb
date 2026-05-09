@@ -12,6 +12,7 @@ from mangasuperb.services.generation_skills.context import (
 from mangasuperb.services.generation_skills.pipeline import SkillPipeline
 from mangasuperb.services.generation_skills.prompt_optimizer import optimize_text_if_enabled
 from mangasuperb.services.generation_skills.registry import get_builtin_skills
+from mangasuperb.services.ai_provider import get_text_provider
 
 
 def _drafts_to_json_text(context: GenerationContext) -> str:
@@ -73,6 +74,7 @@ def resolve_shot_drafts(
     context: GenerationContext,
     *,
     panels_per_page: int,
+    text_provider: str | None = None,
 ) -> tuple[tuple[ShotDraft, ...], dict]:
     context = replace(
         context,
@@ -83,6 +85,7 @@ def resolve_shot_drafts(
         source_text=_drafts_to_json_text(context),
         metadata={"comic_id": context.comic_id, "panel_count": len(context.panels)},
         required_phrases=('"sequence_index"',),
+        provider_factory=((lambda: get_text_provider(text_provider)) if text_provider else None),
     )
     metadata_prefix = {
         "prompt_optimizer_enabled": optimization.enabled,

@@ -1,5 +1,6 @@
 import { atom } from 'jotai'
 
+import type { AiProviderId } from '@/service/types'
 import type { IComic } from '@/service/types'
 
 export type StoryStep = 'input' | 'panels' | 'generate'
@@ -83,3 +84,7 @@ export const aspectRatioAtom = atom<string>('16:9')
 export const selectedCharacterRolesAtom = atom<Record<number, string>>({})
 
 export const pageLayoutSelectionAtom = atom<Record<number, string>>({})
+
+export const textProviderAtom = atom<AiProviderId>('gemini')
+
+export const imageProviderAtom = atom<AiProviderId>('gemini')

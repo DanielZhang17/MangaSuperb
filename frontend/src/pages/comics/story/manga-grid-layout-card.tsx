@@ -67,22 +67,22 @@ export function MangaGridLayoutCard() {
   ]
 
   return (
-    <Card>
-      <CardHeader className="p-4">
-        <CardTitle className="text-center text-lg">{String(t('grid.title'))}</CardTitle>
+    <Card className="rounded-lg">
+      <CardHeader className="p-4 pb-3">
+        <CardTitle className="text-base">{String(t('grid.title'))}</CardTitle>
       </CardHeader>
       <CardContent className="p-4 pt-0">
         <ToggleGroup
           type="single"
           defaultValue={String(t('grid.4panel'))}
-          className="grid grid-cols-2 xl:grid-cols-4 gap-2 w-fit mx-auto"
+          className="grid w-full grid-cols-2 gap-2"
         >
           {layouts.map((layout) => (
-            <ToggleGroupItem key={layout.key} value={layout.label} className="flex flex-col h-auto p-1">
-              <div className="w-30 h-20 bg-gray-200 rounded-md mb-2 p-2">
+            <ToggleGroupItem key={layout.key} value={layout.label} className="flex h-auto min-w-0 flex-col p-1.5">
+              <div className="mb-2 aspect-[5/3] w-full rounded-md bg-gray-200 p-2">
                 <LayoutVisual type={layout.label} />
               </div>
-              <span>{layout.label}</span>
+              <span className="text-xs leading-snug">{layout.label}</span>
             </ToggleGroupItem>
           ))}
         </ToggleGroup>

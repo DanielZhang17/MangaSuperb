@@ -63,6 +63,30 @@ def test_create_story_optimization_job(app: Flask, auth_client, user: SimpleName
     assert dummy_queue.jobs[1].func is job_services.process_shot_stage
 
 
+def test_create_story_optimization_job_passes_text_provider(
+    app: Flask,
+    auth_client,
+    user: SimpleNamespace,
+    dummy_queue,
+):
+    with app.app_context():
+        comic = _create_comic(app, user.id)
+        comic_id = comic.id
+
+    response = auth_client.post(
+        "/api/jobs",
+        json={
+            "job_type": "story_optimization",
+            "comic_id": comic_id,
+            "text_provider": "third_party",
+        },
+    )
+
+    assert response.status_code == 202
+    assert dummy_queue.jobs[0].kwargs["text_provider"] == "third_party"
+    assert dummy_queue.jobs[1].kwargs["text_provider"] == "third_party"
+
+
 def test_create_character_optimization_job(
     app: Flask,
     auth_client,

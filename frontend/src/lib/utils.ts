@@ -17,13 +17,17 @@ export function getAvatarUrl(index?: number | null) {
   return proxiedStatic(url)
 }
 
-// In dev, storage host has hotlink protection; route via Vite proxy '/static'
+// In dev, storage hosts can be blocked by browser/client policy; route via Vite proxy.
 export function proxiedStatic(url?: string | null): string {
   if (!url) return ''
-  const storageOrigin = 'https://storage.mangasuperb.anranz.xyz'
+  const storageOrigins = [
+    'https://storage.mangasuperb.anranz.xyz',
+    'https://magastorage.anranz.xyz',
+  ]
   const isDev = Boolean((import.meta as any).env?.DEV)
 
-  if (isDev && url.startsWith(storageOrigin)) {
+  const storageOrigin = storageOrigins.find((origin) => url.startsWith(origin))
+  if (isDev && storageOrigin) {
     // Convert absolute storage URL to path-only so dev proxy '/static' can forward correctly
     const path = url.slice(storageOrigin.length)
     // Ensure leading slash

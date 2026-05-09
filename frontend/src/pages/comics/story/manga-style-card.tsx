@@ -21,44 +21,43 @@ export function MangaStyleCard() {
   }
 
   return (
-    <Card>
-      <CardHeader className="p-4">
-        <CardTitle className="text-center text-lg">{String(t('style.title'))}</CardTitle>
+    <Card className="rounded-lg">
+      <CardHeader className="p-4 pb-3">
+        <CardTitle className="text-base">{String(t('style.title'))}</CardTitle>
       </CardHeader>
       <CardContent className="p-4 pt-0">
-        {/* 在超大屏下让选项区域自适应宽度并水平居中 */}
         <ToggleGroup
           type="single"
           defaultValue={String(t('home:category.jp'))}
-          className="grid grid-cols-2 xl:grid-cols-4 gap-2 w-fit mx-auto"
+          className="grid w-full grid-cols-2 gap-2"
         >
-          <ToggleGroupItem value={String(t('home:category.jp'))} className="flex flex-col h-auto p-1">
+          <ToggleGroupItem value={String(t('home:category.jp'))} className="flex h-auto min-w-0 flex-col p-1.5">
             <div
-              className="w-30 h-16 rounded-md mb-2 bg-center bg-cover"
+              className="mb-2 aspect-[5/3] w-full rounded-md bg-cover bg-center"
               style={{ backgroundImage: `url(${styleImages.jp})` }}
             />
-            <span>{String(t('home:category.jp'))}</span>
+            <span className="text-xs">{String(t('home:category.jp'))}</span>
           </ToggleGroupItem>
-          <ToggleGroupItem value={String(t('home:category.us'))} className="flex flex-col h-auto p-1">
+          <ToggleGroupItem value={String(t('home:category.us'))} className="flex h-auto min-w-0 flex-col p-1.5">
             <div
-              className="w-30 h-16 rounded-md mb-2 bg-center bg-cover"
+              className="mb-2 aspect-[5/3] w-full rounded-md bg-cover bg-center"
               style={{ backgroundImage: `url(${styleImages.us})` }}
             />
-            <span>{String(t('home:category.us'))}</span>
+            <span className="text-xs">{String(t('home:category.us'))}</span>
           </ToggleGroupItem>
-          <ToggleGroupItem value="CN" className="flex flex-col h-auto p-1">
+          <ToggleGroupItem value="CN" className="flex h-auto min-w-0 flex-col p-1.5">
             <div
-              className="w-30 h-16 rounded-md mb-2 bg-center bg-cover"
+              className="mb-2 aspect-[5/3] w-full rounded-md bg-cover bg-center"
               style={{ backgroundImage: `url(${styleImages.cn})` }}
             />
-            <span>CN</span>
+            <span className="text-xs">CN</span>
           </ToggleGroupItem>
-          <ToggleGroupItem value="KR" className="flex flex-col h-auto p-1">
+          <ToggleGroupItem value="KR" className="flex h-auto min-w-0 flex-col p-1.5">
             <div
-              className="w-30 h-16 rounded-md mb-2 bg-center bg-cover"
+              className="mb-2 aspect-[5/3] w-full rounded-md bg-cover bg-center"
               style={{ backgroundImage: `url(${styleImages.kr})` }}
             />
-            <span>KR</span>
+            <span className="text-xs">KR</span>
           </ToggleGroupItem>
         </ToggleGroup>
       </CardContent>

@@ -25,6 +25,21 @@ from swagger import STORY_ENHANCE_DOC, STORY_GET_DOC, STORY_OPTIMIZE_DOC, STORY_
 
 bp = Blueprint("stories", __name__, url_prefix="/api/stories")
 
+ALLOWED_AI_PROVIDER_VALUES = {"gemini", "third_party", "openai"}
+
+
+def _normalise_ai_provider(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a string")
+    provider = value.strip().lower()
+    if not provider:
+        return None
+    if provider not in ALLOWED_AI_PROVIDER_VALUES:
+        raise ValueError(f"{field} must be 'gemini' or 'third_party'")
+    return "third_party" if provider == "openai" else provider
+
 
 def _load_comic_for_user(comic_id: int) -> Comic | None:
     comic = db.session.get(Comic, comic_id)
@@ -41,6 +56,10 @@ def enhance_story_inline() -> Any:
     story_text = (payload.get("story") or "").strip()
     if not story_text:
         return jsonify({"error": "Story text is required"}), 400
+    try:
+        text_provider = _normalise_ai_provider(payload.get("text_provider"), "text_provider")
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     comic_payload: dict[str, Any] | None = None
     comic_id_raw = payload.get("comic_id")
@@ -57,7 +76,10 @@ def enhance_story_inline() -> Any:
             return jsonify({"error": "Comic not found"}), 404
 
     try:
-        enhanced_story = enhance_story_text(story_text)
+        if text_provider:
+            enhanced_story = enhance_story_text(story_text, text_provider=text_provider)
+        else:
+            enhanced_story = enhance_story_text(story_text)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:  # pragma: no cover - external failure
@@ -208,7 +230,16 @@ def optimize_story(comic_id: int) -> Any:
     if not queue:
         return jsonify({"error": "Background queue is not configured"}), 503
 
-    jobs = enqueue_story_optimization(queue, comic)
+    payload = request.get_json(silent=True) or {}
+    try:
+        text_provider = _normalise_ai_provider(payload.get("text_provider"), "text_provider")
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    if text_provider:
+        jobs = enqueue_story_optimization(queue, comic, text_provider=text_provider)
+    else:
+        jobs = enqueue_story_optimization(queue, comic)
     db.session.refresh(comic)
 
     return jsonify({"stage_jobs": jobs, "comic": comic.to_dict()}), 202

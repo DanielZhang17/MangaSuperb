@@ -64,6 +64,8 @@ export interface ICharacter {
   user_id: number
   name: string
   description: string
+  sex: string
+  is_public: boolean
   style_prompt: string | null
   optimized_description: string | null
   image_status: string
@@ -81,6 +83,9 @@ export interface CreateCharacterRequest {
   reference_images?: string[] // base64-encoded data URLs
   style_prompt?: string
   api_key?: string // required when optimization or reference images are used
+  sex?: string
+  image_provider?: AiProviderId
+  text_provider?: AiProviderId
 }
 
 export interface CreateCharacterResponse {
@@ -104,6 +109,37 @@ export interface UpdateCharacterNameRequest {
 
 export interface UpdateCharacterNameResponse {
   character: ICharacter
+}
+
+export type AiProviderId = 'gemini' | 'third_party'
+
+export interface AiProviderCapabilities {
+  image: boolean
+  text: boolean
+}
+
+export interface AiProvidersResponse {
+  defaults: {
+    image: AiProviderId
+    text: AiProviderId
+  }
+  providers: Record<AiProviderId, AiProviderCapabilities>
+}
+
+export interface UpdateCharacterRequest {
+  name: string
+  description: string
+  sex?: string
+  style_prompt?: string
+  optimize?: boolean
+  reference_images?: string[]
+  image_provider?: AiProviderId
+  text_provider?: AiProviderId
+}
+
+export interface UpdateCharacterResponse {
+  character: ICharacter
+  job_id: string | null
 }
 
 export interface DeleteCharacterResponse {

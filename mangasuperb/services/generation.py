@@ -151,13 +151,14 @@ def generate_script_from_prompt(
     model_name: str | None = None,
     *,
     api_key: str | None = None,
+    text_provider: str | None = None,
 ) -> Dict[str, Any]:
     """Call Gemini to create a manga script from the supplied prompt."""
     if not prompt:
         raise ValueError("Prompt is required")
 
     prompt_text = build_script_prompt(prompt)
-    raw_text = get_text_provider().generate_text(prompt_text)
+    raw_text = get_text_provider(text_provider).generate_text(prompt_text)
     cleaned = _strip_code_fences(raw_text)
 
     try:
@@ -178,13 +179,14 @@ def optimize_character_description(
     model_name: str = Config.GEMINI_SCRIPT_MODEL,
     *,
     api_key: str | None = None,
+    text_provider: str | None = None,
 ) -> str:
     """Use Gemini to enhance a character description."""
     if not description:
         raise ValueError("Description is required")
 
     prompt_text = CHARACTER_OPTIMIZE_PROMPT.format(description=description)
-    optimized = get_text_provider().generate_text(prompt_text).strip()
+    optimized = get_text_provider(text_provider).generate_text(prompt_text).strip()
     if not optimized:
         raise ValueError("Optimization returned empty text")
     return optimized
@@ -238,12 +240,13 @@ def enhance_story_text(
     model_name: Optional[str] = None,
     *,
     api_key: Optional[str] = None,
+    text_provider: str | None = None,
 ) -> str:
     """Enhance a story draft using Gemini."""
     if not story:
         raise ValueError("Story text is required")
 
-    enhanced = get_text_provider().generate_text(
+    enhanced = get_text_provider(text_provider).generate_text(
         STORY_ENHANCE_PROMPT.format(story=story)
     ).strip()
     if not enhanced:

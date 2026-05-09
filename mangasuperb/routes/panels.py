@@ -16,6 +16,21 @@ from swagger import PANEL_LAYOUT_DOC, PANEL_RENDER_DOC, PANEL_UPDATE_DOC
 
 bp = Blueprint("panels", __name__, url_prefix="/api/panels")
 
+ALLOWED_AI_PROVIDER_VALUES = {"gemini", "third_party", "openai"}
+
+
+def _normalise_ai_provider(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("image_provider must be a string")
+    provider = value.strip().lower()
+    if not provider:
+        return None
+    if provider not in ALLOWED_AI_PROVIDER_VALUES:
+        raise ValueError("image_provider must be 'gemini' or 'third_party'")
+    return "third_party" if provider == "openai" else provider
+
 
 def _load_comic_for_user(comic_id: int) -> Comic | None:
     comic = db.session.get(Comic, comic_id)
@@ -187,6 +202,11 @@ def render_page(comic_id: int, page_number: int) -> Any:
     bubble_tail = payload.get("bubble_tail")
     color_mode_raw = payload.get("color_mode")
     aspect_ratio_raw = payload.get("aspect_ratio")
+    try:
+        image_provider = _normalise_ai_provider(payload.get("image_provider"))
+        text_provider = _normalise_ai_provider(payload.get("text_provider"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     color_mode = None
     if isinstance(color_mode_raw, str) and color_mode_raw.strip():
@@ -211,6 +231,8 @@ def render_page(comic_id: int, page_number: int) -> Any:
         comic,
         page_number,
         image_model=image_model,
+        image_provider=image_provider,
+        text_provider=text_provider,
         font_family=font_family,
         font_size=font_size,
         bubble_shape=bubble_shape,

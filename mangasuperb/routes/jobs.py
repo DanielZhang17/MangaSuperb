@@ -42,6 +42,20 @@ JOB_TYPE_COMIC_GENERATION = "comic_generation"
 JOB_TYPE_STORY_OPTIMIZATION = "story_optimization"
 JOB_TYPE_CHARACTER_OPTIMIZATION = "character_optimization"
 JOB_TYPE_PAGE_RENDER = "page_render"
+ALLOWED_AI_PROVIDER_VALUES = {"gemini", "third_party", "openai"}
+
+
+def _normalise_ai_provider(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a string")
+    provider = value.strip().lower()
+    if not provider:
+        return None
+    if provider not in ALLOWED_AI_PROVIDER_VALUES:
+        raise ValueError(f"{field} must be 'gemini' or 'third_party'")
+    return "third_party" if provider == "openai" else provider
 
 
 def _require_queue():
@@ -108,6 +122,11 @@ def _handle_comic_generation(data: dict[str, Any]) -> tuple[dict[str, Any], int]
 
     requested_style = (data.get("style") or data.get("style_description") or "").strip()
     aspect_ratio = data.get("aspect_ratio")
+    try:
+        image_provider = _normalise_ai_provider(data.get("image_provider"), "image_provider")
+        text_provider = _normalise_ai_provider(data.get("text_provider"), "text_provider")
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
 
     try:
         character_assignments = resolve_character_assignments(data)
@@ -126,7 +145,10 @@ def _handle_comic_generation(data: dict[str, Any]) -> tuple[dict[str, Any], int]
     )
 
     try:
-        manga_script = generate_script_from_prompt(prompt_payload)
+        manga_script = generate_script_from_prompt(
+            prompt_payload,
+            text_provider=text_provider,
+        )
     except ValueError as exc:
         return {"error": str(exc)}, 400
 
@@ -161,7 +183,12 @@ def _handle_comic_generation(data: dict[str, Any]) -> tuple[dict[str, Any], int]
             apply_character_assignments(comic, character_assignments)
 
         queue = _require_queue()
-        pipeline_jobs = enqueue_comic_workflow(queue, comic)
+        pipeline_jobs = enqueue_comic_workflow(
+            queue,
+            comic,
+            image_provider=image_provider,
+            text_provider=text_provider,
+        )
         job_id = pipeline_jobs["render_job_id"]
         db.session.refresh(comic)
         db.session.refresh(script)
@@ -204,8 +231,17 @@ def _handle_story_optimization(data: dict[str, Any]) -> tuple[dict[str, Any], in
         return {"error": "Comic not found"}, 404
 
     try:
+        text_provider = _normalise_ai_provider(data.get("text_provider"), "text_provider")
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+
+    try:
         queue = _require_queue()
-        stage_jobs = enqueue_story_optimization(queue, comic)
+        stage_jobs = enqueue_story_optimization(
+            queue,
+            comic,
+            text_provider=text_provider,
+        )
         db.session.refresh(comic)
         _log_queue_snapshot(queue, "story_optimization_enqueued")
         return {"stage_jobs": stage_jobs, "comic": comic.to_dict()}, 202
@@ -275,6 +311,12 @@ def _handle_page_render(data: dict[str, Any]) -> tuple[dict[str, Any], int]:
     if not comic or comic.user_id != current_user.id:
         return {"error": "Comic not found"}, 404
 
+    try:
+        image_provider = _normalise_ai_provider(data.get("image_provider"), "image_provider")
+        text_provider = _normalise_ai_provider(data.get("text_provider"), "text_provider")
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+
     aspect_ratio = None
     if data.get("aspect_ratio") is not None:
         try:
@@ -284,7 +326,14 @@ def _handle_page_render(data: dict[str, Any]) -> tuple[dict[str, Any], int]:
 
     try:
         queue = _require_queue()
-        job = enqueue_page_render(queue, comic, page_number, aspect_ratio=aspect_ratio)
+        job = enqueue_page_render(
+            queue,
+            comic,
+            page_number,
+            aspect_ratio=aspect_ratio,
+            image_provider=image_provider,
+            text_provider=text_provider,
+        )
         db.session.refresh(comic)
         _log_queue_snapshot(queue, "page_render_enqueued")
         return {"job_id": job.id, "comic": comic.to_dict()}, 202

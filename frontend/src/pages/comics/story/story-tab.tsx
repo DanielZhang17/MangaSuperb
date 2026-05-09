@@ -1,10 +1,23 @@
 import { useAtom } from 'jotai'
+import { useState } from 'react'
+import toast from 'react-hot-toast'
 
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { useI18n } from '@/hooks/use-i18n'
 
 import { LoadingView } from '../../../components/common/loading-view'
-import { activeTabAtom, storyCompletedAtom, storyStepAtom } from '../atoms'
+import { activeTabAtom, mangaTitleAtom, storyCompletedAtom, storyStepAtom } from '../atoms'
+import { ComicsWorkflowShell, WorkflowActionBar, WorkflowContent, WorkflowPanel } from '../components/workflow-layout'
 import { AIModelCard } from './ai-model-card'
 import { MangaGridLayoutCard } from './manga-grid-layout-card'
 import { MangaStyleCard } from './manga-style-card'
@@ -14,32 +27,85 @@ function InputView() {
   const { t } = useI18n('comics')
   const [, setActiveTab] = useAtom(activeTabAtom)
   const [, setStoryCompleted] = useAtom(storyCompletedAtom)
+  const [title, setTitle] = useAtom(mangaTitleAtom)
+  const [titleDialogOpen, setTitleDialogOpen] = useState(false)
+  const [titleDraft, setTitleDraft] = useState(title)
+
+  const openTitleDialog = () => {
+    setTitleDraft(title)
+    setTitleDialogOpen(true)
+  }
+
+  const confirmTitleAndContinue = () => {
+    const cleanTitle = titleDraft.trim()
+    if (!cleanTitle) {
+      toast.error('请输入漫画名称')
+
+      return
+    }
+
+    setTitle(cleanTitle)
+    setStoryCompleted(true)
+    setActiveTab('characters')
+    setTitleDialogOpen(false)
+  }
 
   return (
-    <div className="flex flex-col gap-4 p-4">
-      <div className="grid grid-cols-2 gap-8 mb-10">
-        <div>
+    <ComicsWorkflowShell>
+      <WorkflowContent>
+        <WorkflowPanel className="min-w-0 p-4 sm:p-5">
           <StoryEditor />
-        </div>
+        </WorkflowPanel>
 
-        <div className="space-y-4 h-full overflow-auto flex flex-col justify-between">
-          <div className='h-4'></div>
+        <aside className="flex min-w-0 flex-col gap-4">
           <AIModelCard />
           <MangaStyleCard />
           <MangaGridLayoutCard />
-        </div>
-      </div>
-      <Button
-        size="lg"
-        onClick={() => {
-          setStoryCompleted(true)
-          setActiveTab('characters')
-        }}
-        className="self-center"
-      >
-        {String(t('common.next'))}
-      </Button>
-    </div>
+        </aside>
+      </WorkflowContent>
+      <WorkflowActionBar>
+        <Button
+          size="lg"
+          onClick={openTitleDialog}
+        >
+          {String(t('common.next'))}
+        </Button>
+      </WorkflowActionBar>
+      <Dialog open={titleDialogOpen} onOpenChange={setTitleDialogOpen}>
+        <DialogContent
+          className="sm:max-w-md"
+          onPointerDownOutside={(event) => event.preventDefault()}
+          onInteractOutside={(event) => event.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>确认漫画名称</DialogTitle>
+            <DialogDescription>
+              这个名称会用于后续分镜、生图和发布展示。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="manga-title-confirm">漫画名称</Label>
+            <Input
+              id="manga-title-confirm"
+              value={titleDraft}
+              onChange={(event) => setTitleDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  confirmTitleAndContinue()
+                }
+              }}
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" onClick={confirmTitleAndContinue}>
+              继续选择人物
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </ComicsWorkflowShell>
   )
 }
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Type
 
 from flask import Flask, current_app, jsonify, request
@@ -53,11 +54,41 @@ def _configure_logging(app: Flask) -> None:
     """Configure structured logging for the application."""
     level_name = str(app.config.get("LOG_LEVEL", "INFO")).upper()
     level = getattr(logging, level_name, logging.INFO)
+    log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     logging.basicConfig(
         level=level,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        format=log_format,
     )
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
     app.logger.setLevel(level)
+
+    log_file = app.config.get("LOG_FILE")
+    if log_file:
+        _add_file_handler(root_logger, os.fspath(log_file), level, log_format)
+
+
+def _add_file_handler(
+    logger: logging.Logger,
+    log_file: str,
+    level: int,
+    log_format: str,
+) -> None:
+    """Attach a file handler once for an absolute log path."""
+    log_path = os.path.abspath(log_file)
+    for handler in logger.handlers:
+        if (
+            isinstance(handler, logging.FileHandler)
+            and getattr(handler, "baseFilename", None) == log_path
+        ):
+            handler.setLevel(level)
+            return
+
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setLevel(level)
+    file_handler.setFormatter(logging.Formatter(log_format))
+    logger.addHandler(file_handler)
 
 
 def _register_login_handlers() -> None:

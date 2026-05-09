@@ -6,11 +6,41 @@ import boto3
 from botocore.client import Config as BotoConfig
 from botocore.exceptions import ClientError
 import logging
+import os
 from typing import Optional
 from datetime import datetime
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+
+IMAGE_TYPE_SIGNATURES = (
+    (b'\x89PNG\r\n\x1a\n', 'image/png', '.png'),
+    (b'\xff\xd8\xff', 'image/jpeg', '.jpg'),
+    (b'GIF87a', 'image/gif', '.gif'),
+    (b'GIF89a', 'image/gif', '.gif'),
+)
+
+
+def detect_image_upload_type(image_data: bytes) -> tuple[str, str] | None:
+    """Return the MIME type and filename extension implied by image bytes."""
+
+    if image_data[0:4] == b'RIFF' and image_data[8:12] == b'WEBP':
+        return 'image/webp', '.webp'
+
+    for signature, content_type, extension in IMAGE_TYPE_SIGNATURES:
+        if image_data.startswith(signature):
+            return content_type, extension
+
+    return None
+
+
+def with_image_extension(filename: str, extension: str) -> str:
+    """Return filename with an image extension that matches its bytes."""
+
+    stem, _ = os.path.splitext(filename)
+    return f'{stem}{extension}'
+
 
 class R2Storage:
     """Cloudflare R2 storage handler using S3-compatible API"""
@@ -25,13 +55,28 @@ class R2Storage:
         self.bucket_name = config.R2_BUCKET_NAME
         base_url = getattr(config, 'R2_PUBLIC_URL', '') or ''
         self.public_url = base_url.rstrip('/')
+        self.endpoint_url = getattr(config, 'R2_ENDPOINT_URL', '') or ''
+        self.access_key_id = getattr(config, 'R2_ACCESS_KEY_ID', '') or ''
+        self.secret_access_key = getattr(config, 'R2_SECRET_ACCESS_KEY', '') or ''
+        self.s3_client = None
+
+        if not all(
+            [
+                self.bucket_name,
+                self.endpoint_url,
+                self.access_key_id,
+                self.secret_access_key,
+            ]
+        ):
+            logger.warning("R2 Storage disabled; missing bucket, endpoint, or credentials")
+            return
 
         # Create S3 client configured for R2
         self.s3_client = boto3.client(
             's3',
-            endpoint_url=config.R2_ENDPOINT_URL,
-            aws_access_key_id=config.R2_ACCESS_KEY_ID,
-            aws_secret_access_key=config.R2_SECRET_ACCESS_KEY,
+            endpoint_url=self.endpoint_url,
+            aws_access_key_id=self.access_key_id,
+            aws_secret_access_key=self.secret_access_key,
             config=BotoConfig(
                 signature_version='s3v4',
                 region_name='auto'
@@ -55,6 +100,10 @@ class R2Storage:
         cache_control: str = 'public, max-age=31536000',
     ) -> Optional[str]:
         """Upload arbitrary binary data to R2 and return the public URL."""
+        if not self.s3_client:
+            logger.error("Cannot upload to R2; storage is not configured")
+            return None
+
         try:
             key = self._build_object_key(filename, prefix=prefix)
 
@@ -92,6 +141,10 @@ class R2Storage:
         content_type: str = 'image/png'
     ) -> Optional[str]:
         """Upload image to R2"""
+        detected = detect_image_upload_type(image_data)
+        if detected:
+            content_type, extension = detected
+            filename = with_image_extension(filename, extension)
 
         return self.upload_file(
             file_data=image_data,
@@ -110,6 +163,10 @@ class R2Storage:
         Returns:
             True if successful, False otherwise
         """
+        if not self.s3_client:
+            logger.error("Cannot delete from R2; storage is not configured")
+            return False
+
         try:
             self.s3_client.delete_object(
                 Bucket=self.bucket_name,
@@ -129,6 +186,9 @@ class R2Storage:
         Returns:
             True if bucket exists, False otherwise
         """
+        if not self.s3_client:
+            return False
+
         try:
             self.s3_client.head_bucket(Bucket=self.bucket_name)
             return True
@@ -156,6 +216,9 @@ class R2Storage:
         key = self._resolve_key(url_or_key)
         if not key:
             logger.error("Cannot resolve object key for download: %s", url_or_key)
+            return None
+        if not self.s3_client:
+            logger.error("Cannot download from R2; storage is not configured")
             return None
 
         try:

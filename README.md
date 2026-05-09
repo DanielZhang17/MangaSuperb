@@ -45,8 +45,8 @@ pnpm dev
 
 ```
 
-- 数据库默认使用 PostgreSQL（`.env` 中配置 `POSTGRES_*`）。
-- 队列依赖 Redis（`REDIS_URL`）。
+- 数据库默认使用 PostgreSQL（`.env` 中配置 `POSTGRES_*`）。如果同时配置了 `DATABASE_URL`，默认仍以 `POSTGRES_*` 为准；设置 `DATABASE_URL_MODE=url` 才会强制使用完整 URL。
+- 队列依赖 Redis（`.env` 中配置 `REDIS_*`）。如果同时配置了 `REDIS_URL`，默认仍以 `REDIS_*` 为准；设置 `REDIS_URL_MODE=url` 才会强制使用完整 URL。
 - R2/Gemini 等外部服务需要在 `.env` 提供凭证。
 - AI 提供商可通过 `IMAGE_PROVIDER` 和 `TEXT_PROVIDER` 独立切换：
   - `gemini`（默认）：使用 Google Gemini SDK，需配置 `GEMINI_API_KEY`。
@@ -69,6 +69,37 @@ pnpm dev
 | 前端代码检查     | `pnpm lint` |
 | 检查实时健康状态 | `curl http://localhost:5000/health`（含 database / redis / r2 / rq_workers） |
 
+### Docker / Compose
+
+项目提供一个多阶段 Docker 镜像：构建阶段编译 `frontend/dist`，运行阶段用 Flask/Gunicorn 直接服务 API 与前端静态文件。同一个镜像通过不同命令运行 API、RQ worker 和数据库初始化任务。
+
+```bash
+# 使用宿主机已有 .env、数据库目录和日志目录
+MANGASUPERB_ENV_FILE=/path/to/.env \
+MANGASUPERB_DB_DATA=/path/to/postgres-data \
+MANGASUPERB_LOG_DIR=/path/to/logs \
+docker compose --env-file /path/to/.env up --build -d postgres redis
+
+# 首次部署或空库时初始化表结构
+MANGASUPERB_ENV_FILE=/path/to/.env \
+MANGASUPERB_DB_DATA=/path/to/postgres-data \
+MANGASUPERB_LOG_DIR=/path/to/logs \
+docker compose --env-file /path/to/.env --profile tools run --rm init-db
+
+# 启动 Web 与 Worker
+MANGASUPERB_ENV_FILE=/path/to/.env \
+MANGASUPERB_DB_DATA=/path/to/postgres-data \
+MANGASUPERB_LOG_DIR=/path/to/logs \
+docker compose --env-file /path/to/.env up -d api worker
+```
+
+- `.env` 不会被打进镜像；Compose 通过 `env_file` 加载，并只读挂载到 `/app/.env`。
+- 真实凭据可以直接放在外部 `.env` 中使用。默认优先读取 `POSTGRES_*` / `REDIS_*`；如果你只想使用完整连接串，设置 `DATABASE_URL_MODE=url` / `REDIS_URL_MODE=url`。
+- 为了复用本机开发 `.env`，Docker entrypoint 默认会把 `DATABASE_URL` / `REDIS_URL` 以及 `POSTGRES_HOST` / `REDIS_HOST` 中的 `localhost` 或 `127.0.0.1` 改写成 `host.docker.internal`；如需关闭，设置 `DOCKER_REWRITE_LOCALHOST_URLS=false`。
+- 日志目录挂载到 `/app/logs`，`LOG_FILE` 默认写入 `/app/logs/mangasuperb.log`，也包括 `logs/gemini_prompts.log` 这类运行时文件。
+- PostgreSQL 数据目录默认挂载到 `./docker-data/postgres`，也可通过 `MANGASUPERB_DB_DATA` 指向已有数据目录。
+- 对外端口默认是 `5000`，可通过 `APP_PORT` 覆盖；容器内部端口读取 `.env` 中的 `PORT`，默认 5000。
+
 ---
 
 ## 4. 关键设计说明
@@ -80,4 +111,3 @@ pnpm dev
 - **日志与排查**：`services/jobs.py` 中每个阶段都会记录 `job_id` 与执行情况；`/health` 增加 `rq_workers` 字段，帮助观察活跃 worker。
 
 ---
-

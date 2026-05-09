@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from flask_login import current_user
+from sqlalchemy import or_
 
 from mangasuperb.extensions import db
 from models import Character, Comic, ComicCharacter
@@ -86,14 +87,14 @@ def resolve_character_assignments(data: Mapping[str, Any]) -> list[CharacterAssi
     characters = (
         Character.query.filter(
             Character.id.in_(character_ids),
-            Character.user_id == current_user.id,
+            or_(Character.user_id == current_user.id, Character.is_public.is_(True)),
         ).all()
     )
     characters_by_id = {character.id: character for character in characters}
 
     missing = [cid for cid in character_ids if cid not in characters_by_id]
     if missing:
-        raise ValueError("One or more characters were not found or do not belong to the user")
+        raise ValueError("One or more characters were not found or are not public")
 
     assignments: list[CharacterAssignment] = []
     for entry in sorted(normalized, key=lambda item: (item["order_index"], item["position"])):

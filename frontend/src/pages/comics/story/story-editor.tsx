@@ -1,9 +1,10 @@
 import { useAtom } from 'jotai'
-import { Trash2, Upload } from 'lucide-react'
+import { Sparkles, Trash2, Upload } from 'lucide-react'
 import type { ChangeEvent } from 'react'
 import { useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 
+import StoriesApi from '@/apis/stories'
 import InlineInput from '@/components/common/inline-input'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -18,18 +19,25 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { useI18n } from '@/hooks/use-i18n'
 
-import { fullStoryAtom, mangaTitleAtom, storyPanelsAtom, storyStepAtom } from '../atoms'
+import { currentComicDetailAtom, currentComicIdAtom, fullStoryAtom, mangaTitleAtom, storyPanelsAtom, storyStepAtom, textProviderAtom } from '../atoms'
 
 export function StoryEditor(){
   const { t } = useI18n('comics')
   const [title, setTitle] = useAtom(mangaTitleAtom)
   const [content, setContent] = useAtom(fullStoryAtom)
+  const [comicId] = useAtom(currentComicIdAtom)
+  const [textProvider] = useAtom(textProviderAtom)
+  const [, setComicDetail] = useAtom(currentComicDetailAtom)
   const [pendingImport, setPendingImport] = useState<string | null>(null)
+  const [enhancing, setEnhancing] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // 创建漫画逻辑已移动到“生图”阶段，这里仅编辑文本与标题
 
   const charCount = content.replace(/\s/g, '').length
   const hasContent = content.trim().length > 0
+  const storyEnhanceEnabled = ['1', 'true', 'yes', 'on'].includes(
+    String((import.meta as any).env?.VITE_STORY_ENHANCE_ENABLED ?? '').toLowerCase(),
+  )
 
   const resetFileInput = () => {
     if (fileInputRef.current) {
@@ -95,15 +103,51 @@ export function StoryEditor(){
     reader.readAsText(file)
   }
 
+  const handleEnhance = async () => {
+    if (!storyEnhanceEnabled) {
+      toast.error('AI 增强剧情未启用')
+
+      return
+    }
+
+    if (!hasContent) {
+      toast.error('请先输入故事内容')
+
+      return
+    }
+
+    try {
+      setEnhancing(true)
+      const response = await StoriesApi.enhance({
+        story: content,
+        comic_id: comicId || undefined,
+        text_provider: textProvider,
+      })
+      if (response?.story) {
+        setContent(response.story)
+      }
+
+      if (response?.comic) {
+        setComicDetail(response.comic)
+      }
+
+      toast.success('剧情已增强')
+    } catch (error: any) {
+      toast.error(error?.message || 'AI 增强剧情失败')
+    } finally {
+      setEnhancing(false)
+    }
+  }
+
   return (
-    <div className="md:col-span-2 space-y-4">
-      <div className="flex items-center justify-between gap-3">
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <InlineInput
           initialValue={title}
           onSubmit={(val) => setTitle(val)}
           placeholder={String(t('editor.placeholderTitle'))}
           renderDisplay={(val) => (
-            <div className="text-2xl font-semibold tracking-tight w-fit">{val || String(t('editor.untitled'))}</div>
+            <div className="max-w-full break-words text-2xl font-semibold tracking-normal">{val || String(t('editor.untitled'))}</div>
           )}
           submitLabel={String(t('editor.save'))}
         />
@@ -114,21 +158,36 @@ export function StoryEditor(){
           className="sr-only"
           onChange={handleFileChange}
         />
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="shrink-0"
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <Upload className="size-4" />
-          导入 TXT
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload className="size-4" />
+            导入 TXT
+          </Button>
+          {storyEnhanceEnabled && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              onClick={handleEnhance}
+              disabled={enhancing || !hasContent}
+            >
+              <Sparkles className="size-4" />
+              {enhancing ? '增强中…' : 'AI 增强剧情'}
+            </Button>
+          )}
+        </div>
       </div>
       <div className="relative">
         <Textarea
           placeholder="..."
-          className="resize-none text-xl md:text-xl h-[800px]"
+          className="min-h-[360px] resize-none text-base leading-7 md:min-h-[520px] md:text-lg xl:min-h-[620px]"
           value={content}
           onChange={(e) => setContent(e.target.value)}
         />

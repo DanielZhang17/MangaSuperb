@@ -1,5 +1,5 @@
 import request from '@/service'
-import type { SetPanelLayoutRequest } from '@/service/types'
+import type { AiProviderId, SetPanelLayoutRequest } from '@/service/types'
 
 export const PanelsApi = {
   // Set a manual layout for a specific page within a comic
@@ -12,11 +12,11 @@ export const PanelsApi = {
   },
 
   // Trigger a render job for a particular page
-  renderPage(comicId: number, pageNumber: number) {
-    return request<object, { job_id: string }>({
+  renderPage(comicId: number, pageNumber: number, body: { image_provider?: AiProviderId; text_provider?: AiProviderId } = {}) {
+    return request<typeof body, { job_id: string }>({
       url: `/api/panels/${comicId}/pages/${pageNumber}/render`,
       method: 'POST',
-      data: {},
+      data: body,
     })
   },
 

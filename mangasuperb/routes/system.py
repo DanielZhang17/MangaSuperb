@@ -11,6 +11,7 @@ from sqlalchemy import text
 from rq import Worker
 
 from mangasuperb.extensions import db
+from mangasuperb.services.ai_provider import available_ai_providers
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,13 @@ def health() -> Any:
             },
         }
     )
+
+
+@bp.route("/api/ai/providers")
+def ai_providers() -> Any:
+    """Return configured AI providers for frontend selection."""
+
+    return jsonify(available_ai_providers())
 
 
 def _check_database() -> str:

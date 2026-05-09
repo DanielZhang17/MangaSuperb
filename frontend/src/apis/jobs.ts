@@ -1,4 +1,5 @@
 import request from '@/service'
+import type { AiProviderId } from '@/service/types'
 
 // Lightweight job domain types to match backend behavior
 export type JobStatus = 'queued' | 'started' | 'finished' | 'failed' | 'deferred'
@@ -27,6 +28,7 @@ export type CreateComicJobRequest =
   | {
       job_type: 'story_optimization'
       comic_id: number
+      text_provider?: AiProviderId
     }
   | {
       job_type: 'comic_generation'
@@ -36,6 +38,8 @@ export type CreateComicJobRequest =
       description?: string
       style?: string
       aspect_ratio?: string
+      image_provider?: AiProviderId
+      text_provider?: AiProviderId
       characters: { id: number }[]
     }
 
