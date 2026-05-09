@@ -11,20 +11,26 @@ import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { DEFAULT_ASPECT_RATIOS, DEFAULT_SELECTED_STYLE } from '@/config/preferences'
+import { useAiProviders } from '@/hooks/use-ai-providers'
 import { useI18n } from '@/hooks/use-i18n'
+import { usePreferences } from '@/hooks/use-preferences'
+import { resolveAvailablePreferenceValue, resolvePreferenceValue } from '@/lib/auto-preferences'
+import type { AutoPreference } from '@/service/types'
 
 import {
   activeTabAtom,
   aspectRatioAtom,
   currentComicDetailAtom,
   currentComicIdAtom,
+  currentComicOverridesAtom,
   fullStoryAtom,
   mangaTitleAtom,
   selectedCharacterIdsAtom,
   selectedCharacterRolesAtom,
   styleAtom,
-  textProviderAtom,
 } from '../atoms'
+import { AutoSelectControl } from '../components/auto-select-control'
 import { ComicsWorkflowShell, WorkflowActionBar, WorkflowContent } from '../components/workflow-layout'
 
 const LAYOUT_OPTIONS = [
@@ -33,6 +39,8 @@ const LAYOUT_OPTIONS = [
   { value: 'vertical', label: '竖版长条 (vertical)' },
   { value: 'cinematic', label: '宽银幕 (cinematic)' },
 ]
+
+const DEFAULT_ASPECT_RATIO = DEFAULT_ASPECT_RATIOS[0] ?? '16:9'
 
 interface Scene { id: number; label: string }
 
@@ -72,14 +80,26 @@ function LabelRow({ label, children }: { label: string; children: React.ReactNod
 export function PanelsTab() {
   const { t } = useI18n('comics')
   const [comicId, setComicId] = useAtom(currentComicIdAtom)
-  const [selectedLayout, setSelectedLayout] = useState<string>(LAYOUT_OPTIONS[0].value)
+  const { layoutOptions, preferences } = usePreferences()
+  const { providers, textProviders } = useAiProviders()
+  const [overrides, setOverrides] = useAtom(currentComicOverridesAtom)
+  const layoutSelectOptions = useMemo(() => (
+    layoutOptions.map((value) => ({
+      value,
+      label: LAYOUT_OPTIONS.find((option) => option.value === value)?.label ?? value,
+    }))
+  ), [layoutOptions])
+  const preferenceLayout = preferences?.fields?.page_layout
+  const fallbackLayout = resolvePreferenceValue(preferenceLayout, layoutSelectOptions[0]?.value ?? LAYOUT_OPTIONS[0].value)
+  const pageLayoutPreference = (overrides.page_layout ?? preferenceLayout ?? { mode: 'auto' }) as AutoPreference<string>
+  const resolvedLayout = resolvePreferenceValue(pageLayoutPreference, fallbackLayout)
+  const [selectedLayout, setSelectedLayout] = useState<string>(resolvedLayout)
   // 直接使用当前详情
   const [comicDetail, setComicDetail] = useAtom(currentComicDetailAtom)
   const [, setActiveTab] = useAtom(activeTabAtom)
   const [title] = useAtom(mangaTitleAtom)
   const [story] = useAtom(fullStoryAtom)
   const [style] = useAtom(styleAtom)
-  const [textProvider] = useAtom(textProviderAtom)
   const [aspect] = useAtom(aspectRatioAtom)
   const [selectedIds] = useAtom(selectedCharacterIdsAtom)
   const [rolesMap] = useAtom(selectedCharacterRolesAtom)
@@ -91,6 +111,39 @@ export function PanelsTab() {
   const [editingPanelId, setEditingPanelId] = useState<number | null>(null)
   const [editingDialogue, setEditingDialogue] = useState<string>('')
   const [savingId, setSavingId] = useState<number | null>(null)
+  const stylePreference = overrides.style ?? preferences?.fields?.style
+  const resolvedStyleForCreate = resolvePreferenceValue(
+    stylePreference,
+    style || DEFAULT_SELECTED_STYLE,
+  )
+  const aspectRatioPreference = overrides.aspect_ratio ?? preferences?.fields?.aspect_ratio
+  const resolvedAspectRatioForCreate = resolvePreferenceValue(
+    aspectRatioPreference,
+    aspect || DEFAULT_ASPECT_RATIO,
+  )
+  const textProviderPreference = overrides.text_provider ?? preferences?.fields?.text_provider
+  const textProviderFallback = textProviders.includes(providers.defaults.text)
+    ? providers.defaults.text
+    : (textProviders[0] ?? providers.defaults.text)
+  const resolvedTextProviderForPanels = resolveAvailablePreferenceValue(
+    textProviderPreference,
+    textProviders,
+    textProviderFallback,
+  )
+
+  useEffect(() => {
+    if (selectedLayout !== resolvedLayout) {
+      setSelectedLayout(resolvedLayout)
+    }
+  }, [resolvedLayout, selectedLayout])
+
+  const handleLayoutPreferenceChange = (nextPreference: AutoPreference<string>) => {
+    setOverrides((prev: any) => ({
+      ...prev,
+      page_layout: nextPreference,
+    }))
+    setSelectedLayout(resolvePreferenceValue(nextPreference, fallbackLayout))
+  }
 
   const shots = useMemo<any[]>(() => (comicDetail)?.panel_shots ?? [], [comicDetail])
   const pageNumbers = useMemo<number[]>(() => {
@@ -141,8 +194,8 @@ export function PanelsTab() {
         const createRes = await ComicsApi.create({
           title: title || '未命名',
           story,
-          style: style || '',
-          aspect_ratio: aspect || '16:9',
+          style: resolvedStyleForCreate || '',
+          aspect_ratio: resolvedAspectRatioForCreate || DEFAULT_ASPECT_RATIO,
           characters,
         })
         const created = (createRes as any)?.comic
@@ -160,7 +213,7 @@ export function PanelsTab() {
           await JobsApi.createComic({
             job_type: 'story_optimization',
             comic_id: cid as number,
-            text_provider: textProvider,
+            text_provider: resolvedTextProviderForPanels,
           })
           toast.success('已提交分镜生成任务')
         } catch {}
@@ -380,20 +433,12 @@ export function PanelsTab() {
                 </SelectContent>
               </Select>
             </LabelRow>
-            <LabelRow label="页面布局">
-              <Select value={selectedLayout} onValueChange={setSelectedLayout}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="选择布局" />
-                </SelectTrigger>
-                <SelectContent>
-                  {LAYOUT_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </LabelRow>
+            <AutoSelectControl
+              label="页面布局"
+              value={pageLayoutPreference}
+              options={layoutSelectOptions}
+              onChange={handleLayoutPreferenceChange}
+            />
           </PanelCard>
         </aside>
       </WorkflowContent>

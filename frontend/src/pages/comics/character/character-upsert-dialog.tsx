@@ -56,6 +56,7 @@ export function CharacterUpsertDialog({
   mode,
   open,
   character,
+  initialValues,
   providers = FALLBACK_PROVIDERS,
   defaultProvider,
   onOpenChange,
@@ -64,6 +65,7 @@ export function CharacterUpsertDialog({
   mode: 'create' | 'edit'
   open: boolean
   character?: ICharacter
+  initialValues?: Partial<Pick<ICharacter, 'name' | 'description' | 'sex' | 'style_prompt'>>
   providers?: AiProvidersResponse
   defaultProvider?: AiProviderId
   onOpenChange: (open: boolean) => void
@@ -87,13 +89,13 @@ export function CharacterUpsertDialog({
 
   useEffect(() => {
     if (!open) return
-    setName(mode === 'edit' ? character?.name ?? '' : '')
-    setDescription(mode === 'edit' ? character?.description ?? '' : '')
-    setSex(mode === 'edit' ? character?.sex ?? 'unspecified' : 'unspecified')
-    setStylePrompt(mode === 'edit' ? character?.style_prompt ?? '' : '')
+    setName(mode === 'edit' ? character?.name ?? '' : initialValues?.name ?? '')
+    setDescription(mode === 'edit' ? character?.description ?? '' : initialValues?.description ?? '')
+    setSex(mode === 'edit' ? character?.sex ?? 'unspecified' : initialValues?.sex ?? 'unspecified')
+    setStylePrompt(mode === 'edit' ? character?.style_prompt ?? '' : initialValues?.style_prompt ?? '')
     setOptimize(false)
     setProvider(firstAvailableProvider(providers, 'image', defaultProvider))
-  }, [character, defaultProvider, mode, open, providers])
+  }, [character, defaultProvider, initialValues, mode, open, providers])
 
   const selectedTextProvider = firstAvailableProvider(providers, 'text', provider)
   const title = mode === 'edit' ? '编辑人物' : '新建人物'

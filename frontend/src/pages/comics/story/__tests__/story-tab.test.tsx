@@ -19,6 +19,10 @@ vi.mock('../manga-style-card', () => ({
   MangaStyleCard: () => <div>Manga style card</div>,
 }))
 
+vi.mock('../manga-format-card', () => ({
+  MangaFormatCard: () => <div>Manga format card</div>,
+}))
+
 vi.mock('../manga-grid-layout-card', () => ({
   MangaGridLayoutCard: () => <div>Manga grid card</div>,
 }))

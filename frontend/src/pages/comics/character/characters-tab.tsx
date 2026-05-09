@@ -35,6 +35,7 @@ function SelectionView() {
   // 多选：存入全局 atom（只存 id）
   const [selectedIds, setSelectedIds] = useAtom(selectedCharacterIdsAtom)
   const [rolesMap, setRolesMap] = useAtom(selectedCharacterRolesAtom)
+  const seenSelectedIdsRef = useRef<Set<number>>(new Set())
 
   const totalRecognized = useMemo(() => characters.length, [characters])
 
@@ -81,9 +82,17 @@ function SelectionView() {
 
   // 同步选择集与当前列表：当列表变化时，移除已不存在的 id
   useEffect(() => {
+    if (loading) return
+
     const idSet = new Set(characters.map((c) => c.id))
+    for (const id of selectedIds) {
+      if (idSet.has(id)) {
+        seenSelectedIdsRef.current.add(id)
+      }
+    }
+
     setSelectedIds((prev) => {
-      const next = prev.filter((id) => idSet.has(id))
+      const next = prev.filter((id) => idSet.has(id) || !seenSelectedIdsRef.current.has(id))
 
       return next.length === prev.length ? prev : next
     })
@@ -91,7 +100,7 @@ function SelectionView() {
     setRolesMap((prev) => {
       const next: Record<number, string> = {}
       for (const id of selectedIds) {
-        if (idSet.has(id) && prev[id]) next[id] = prev[id]
+        if ((idSet.has(id) || !seenSelectedIdsRef.current.has(id)) && prev[id]) next[id] = prev[id]
       }
 
       const prevKeys = Object.keys(prev)
@@ -103,8 +112,7 @@ function SelectionView() {
 
       return next
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [characters])
+  }, [characters, loading, selectedIds, setRolesMap, setSelectedIds])
 
   const updateRole = (id: number, role: string) => {
     setRolesMap((prev) => ({ ...prev, [id]: role }))

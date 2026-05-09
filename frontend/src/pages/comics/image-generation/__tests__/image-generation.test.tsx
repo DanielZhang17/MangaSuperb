@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ComicsApi from '@/apis/comics'
 import PanelsApi from '@/apis/panels'
 
-import { currentComicIdAtom, imageProviderAtom } from '../../atoms'
+import { currentComicIdAtom, currentComicOverridesAtom, imageProviderAtom } from '../../atoms'
 import { ImageGeneration } from '../image-generation'
 
 vi.mock('react-hot-toast', () => ({
@@ -26,6 +26,14 @@ vi.mock('@/apis/panels', () => ({
   default: {
     renderPage: vi.fn(),
   },
+}))
+
+vi.mock('@/hooks/use-preferences', () => ({
+  usePreferences: () => ({
+    preferences: (globalThis as any).__mockPreferences,
+    colorModes: ['black-white', 'color'],
+    loading: false,
+  }),
 }))
 
 const listImagesMock = vi.mocked(ComicsApi.listImages)
@@ -47,6 +55,9 @@ function renderImageGenerationWithProvider(provider: 'gemini' | 'third_party') {
   const store = createStore()
   store.set(currentComicIdAtom, 7)
   store.set(imageProviderAtom, provider)
+  store.set(currentComicOverridesAtom, {
+    image_provider: { mode: 'manual', value: provider },
+  })
 
   return render(
     <Provider store={store}>
@@ -63,6 +74,7 @@ describe('ImageGeneration render polling', () => {
     listImagesMock.mockReset()
     getComicMock.mockReset()
     renderPageMock.mockReset()
+    ;(globalThis as any).__mockPreferences = undefined
     listImagesMock.mockResolvedValue({ pages: [] } as any)
     getComicMock.mockResolvedValue({ id: 7 } as any)
     renderPageMock.mockResolvedValue({ job_id: 'render-job-1' })
@@ -75,10 +87,10 @@ describe('ImageGeneration render polling', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '生图' }))
 
-    await waitFor(() => expect(renderPageMock).toHaveBeenCalledWith(7, 1, {
+    await waitFor(() => expect(renderPageMock).toHaveBeenCalledWith(7, 1, expect.objectContaining({
       image_provider: 'gemini',
       text_provider: 'gemini',
-    }))
+    })))
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000)
@@ -108,10 +120,10 @@ describe('ImageGeneration render polling', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '生图' }))
 
-    await waitFor(() => expect(renderPageMock).toHaveBeenCalledWith(7, 1, {
+    await waitFor(() => expect(renderPageMock).toHaveBeenCalledWith(7, 1, expect.objectContaining({
       image_provider: 'gemini',
       text_provider: 'gemini',
-    }))
+    })))
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2_000)
@@ -128,9 +140,51 @@ describe('ImageGeneration render polling', () => {
     fireEvent.click(screen.getByRole('button', { name: '生图' }))
 
     await waitFor(() => {
-      expect(renderPageMock).toHaveBeenCalledWith(7, 1, {
+      expect(renderPageMock).toHaveBeenCalledWith(7, 1, expect.objectContaining({
         image_provider: 'third_party',
         text_provider: 'gemini',
+      }))
+    })
+  })
+
+  it('uses saved manual render preferences for rendering', async () => {
+    ;(globalThis as any).__mockPreferences = {
+      version: 2,
+      style_presets: [
+        {
+          value: 'Saved render style',
+          label: 'Saved render style',
+          is_custom: true,
+        },
+      ],
+      fields: {
+        style: { mode: 'manual', value: 'Saved render style' },
+        image_provider: { mode: 'manual', value: 'third_party' },
+        text_provider: { mode: 'manual', value: 'third_party' },
+        color_mode: { mode: 'manual', value: 'color' },
+        aspect_ratio: { mode: 'manual', value: '3:4' },
+        font_family: { mode: 'manual', value: 'songti' },
+        font_size: { mode: 'manual', value: '24' },
+        bubble_shape: { mode: 'manual', value: 'round' },
+        bubble_tail: { mode: 'manual', value: false },
+      },
+    }
+
+    renderImageGeneration()
+
+    fireEvent.click(screen.getByRole('button', { name: '生图' }))
+
+    await waitFor(() => {
+      expect(renderPageMock).toHaveBeenCalledWith(7, 1, {
+        image_provider: 'third_party',
+        text_provider: 'third_party',
+        style_description: 'Saved render style',
+        color_mode: 'color',
+        aspect_ratio: '3:4',
+        font_family: 'songti',
+        font_size: '24',
+        bubble_shape: 'round',
+        bubble_tail: false,
       })
     })
   })
@@ -159,10 +213,10 @@ describe('ImageGeneration render polling', () => {
     fireEvent.click(screen.getByRole('button', { name: '生图' }))
 
     await waitFor(() => {
-      expect(renderPageMock).toHaveBeenCalledWith(7, 1, {
+      expect(renderPageMock).toHaveBeenCalledWith(7, 1, expect.objectContaining({
         image_provider: 'third_party',
         text_provider: 'gemini',
-      })
+      }))
     })
 
     await act(async () => {

@@ -7,16 +7,37 @@ import toast from 'react-hot-toast'
 import ComicsApi from '@/apis/comics'
 import PanelsApi from '@/apis/panels'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import {
+  DEFAULT_ASPECT_RATIOS,
+  DEFAULT_BUBBLE_SHAPES,
+  DEFAULT_COLOR_MODES,
+  DEFAULT_FONT_FAMILIES,
+  DEFAULT_FONT_SIZES,
+  DEFAULT_SELECTED_STYLE,
+  DEFAULT_STYLE_PRESETS,
+} from '@/config/preferences'
 import { AI_PROVIDER_LABELS, useAiProviders } from '@/hooks/use-ai-providers'
+import { usePreferences } from '@/hooks/use-preferences'
+import { resolveAvailablePreferenceValue, resolvePreferenceValue } from '@/lib/auto-preferences'
 import { cn, proxiedStatic } from '@/lib/utils'
-import type { AiProviderId } from '@/service/types'
+import type { AiProviderId, AutoPreference, ColorMode } from '@/service/types'
 
-import { activeTabAtom, currentComicDetailAtom, currentComicIdAtom, imageProviderAtom, storyStepAtom, styleAtom, textProviderAtom } from '../atoms'
+import {
+  activeTabAtom,
+  aspectRatioAtom,
+  currentComicDetailAtom,
+  currentComicIdAtom,
+  currentComicOverridesAtom,
+  imageProviderAtom,
+  storyStepAtom,
+  styleAtom,
+  textProviderAtom,
+} from '../atoms'
+import { AutoSelectControl, type AutoSelectOption } from '../components/auto-select-control'
 import { ComicsWorkflowShell, WorkflowActionBar } from '../components/workflow-layout'
 import type { RenderProgressState } from '../workflow-types'
 import { GeneratedImage } from './generated-image'
@@ -40,26 +61,53 @@ const INITIAL_SCENES: Scene[] = [
   { id: 2, label: '02' },
 ]
 
-const FONT_OPTIONS = [
-  { value: 'source-han-sans', label: '思源黑体' },
-  { value: 'yahei', label: '微软雅黑' },
-  { value: 'heiti', label: '黑体' },
-  { value: 'songti', label: '宋体' },
-]
+const FONT_LABELS: Record<string, string> = {
+  'source-han-sans': '思源黑体',
+  yahei: '微软雅黑',
+  heiti: '黑体',
+  songti: '宋体',
+}
 
-const FONT_SIZE_OPTIONS = ['18', '20', '22', '24', '28']
+const FONT_OPTIONS = DEFAULT_FONT_FAMILIES.map((value) => ({
+  value,
+  label: FONT_LABELS[value] ?? value,
+}))
 
-const BUBBLE_SHAPES = [
-  { value: 'rect', label: '矩形' },
-  { value: 'round', label: '圆角' },
-]
+const FONT_SIZE_OPTIONS = DEFAULT_FONT_SIZES.map((value) => ({
+  value,
+  label: value,
+}))
 
-const STYLE_PRESETS = [
-  { value: 'Classic manga black and white linework.', label: '经典黑白漫画线稿' },
-  { value: 'High-contrast ink with splashy gradients', label: '高对比墨线 + 渐变' },
-  { value: 'Moebius-inspired clean lines, minimal shading', label: '莫比乌斯风·干净线条' },
-  { value: 'Gritty seinen style with textured shading', label: '青年向质感阴影' },
-]
+const BUBBLE_SHAPE_LABELS: Record<string, string> = {
+  rect: '矩形',
+  round: '圆角',
+}
+
+const BUBBLE_SHAPES = DEFAULT_BUBBLE_SHAPES.map((value) => ({
+  value,
+  label: BUBBLE_SHAPE_LABELS[value] ?? value,
+}))
+
+const COLOR_MODE_LABELS: Record<ColorMode, string> = {
+  'black-white': '黑白',
+  color: '彩色',
+}
+
+const COLOR_MODE_OPTIONS = DEFAULT_COLOR_MODES.map((value) => ({
+  value,
+  label: COLOR_MODE_LABELS[value] ?? value,
+}))
+
+const ASPECT_RATIO_OPTIONS = DEFAULT_ASPECT_RATIOS.map((value) => ({
+  value,
+  label: value,
+}))
+
+const DEFAULT_ASPECT_RATIO = DEFAULT_ASPECT_RATIOS[0] ?? '16:9'
+const DEFAULT_FONT_FAMILY = DEFAULT_FONT_FAMILIES[0] ?? 'source-han-sans'
+const DEFAULT_FONT_SIZE = DEFAULT_FONT_SIZES[1] ?? DEFAULT_FONT_SIZES[0] ?? '20'
+const DEFAULT_BUBBLE_SHAPE = DEFAULT_BUBBLE_SHAPES[0] ?? 'rect'
+const DEFAULT_COLOR_MODE = DEFAULT_COLOR_MODES[0] ?? 'black-white'
 
 function renderFailureMessage(comic: any): string | null {
   const stages = Array.isArray(comic?.workflow_stages) ? comic.workflow_stages : []
@@ -151,6 +199,48 @@ function ShapePreview({ shape }: { shape: string }) {
   )
 }
 
+function AutoBooleanSelectControl({
+  label,
+  value,
+  trueLabel,
+  falseLabel,
+  onChange,
+}: {
+  label: string
+  value: AutoPreference<boolean>
+  trueLabel: string
+  falseLabel: string
+  onChange: (value: AutoPreference<boolean>) => void
+}) {
+  const selectValue = value.mode === 'manual' ? String(value.value) : 'auto'
+
+  return (
+    <LabelRow label={label}>
+      <Select
+        value={selectValue}
+        onValueChange={(nextValue) => {
+          if (nextValue === 'auto') {
+            onChange({ mode: 'auto' })
+
+            return
+          }
+
+          onChange({ mode: 'manual', value: nextValue === 'true' })
+        }}
+      >
+        <SelectTrigger className="w-44 max-w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="auto">Auto</SelectItem>
+          <SelectItem value="true">{trueLabel}</SelectItem>
+          <SelectItem value="false">{falseLabel}</SelectItem>
+        </SelectContent>
+      </Select>
+    </LabelRow>
+  )
+}
+
 function SceneThumbnail({
   label,
   isActive,
@@ -203,37 +293,53 @@ function StoryboardCanvas({ onPreview, imageUrl }: { onPreview: () => void; imag
 // 去除本地实现，统一使用全局 proxiedStatic
 
 function PropertyPanel({
-  imageProvider,
-  onImageProviderChange,
+  imageProviderPreference,
+  onImageProviderPreferenceChange,
   imageProviderOptions,
-  styleValue,
-  onStyleChange,
-  fontFamily,
-  onFontFamilyChange,
-  fontSize,
-  onFontSizeChange,
-  bubbleShape,
-  onBubbleShapeChange,
-  hasTail,
-  onToggleTail,
+  textProviderPreference,
+  onTextProviderPreferenceChange,
+  textProviderOptions,
+  stylePreference,
+  onStylePreferenceChange,
+  styleOptions,
+  colorModePreference,
+  onColorModePreferenceChange,
+  aspectRatioPreference,
+  onAspectRatioPreferenceChange,
+  fontFamilyPreference,
+  onFontFamilyPreferenceChange,
+  fontSizePreference,
+  onFontSizePreferenceChange,
+  bubbleShapePreference,
+  onBubbleShapePreferenceChange,
+  bubbleTailPreference,
+  onBubbleTailPreferenceChange,
   onOpenPublish,
   onExportImage,
   canExport,
   isPublishing,
 }: {
-  imageProvider: AiProviderId
-  onImageProviderChange: (value: AiProviderId) => void
-  imageProviderOptions: AiProviderId[]
-  styleValue: string
-  onStyleChange: (value: string) => void
-  fontFamily: string
-  onFontFamilyChange: (value: string) => void
-  fontSize: string
-  onFontSizeChange: (value: string) => void
-  bubbleShape: string
-  onBubbleShapeChange: (shape: string) => void
-  hasTail: boolean
-  onToggleTail: () => void
+  imageProviderPreference: AutoPreference<AiProviderId>
+  onImageProviderPreferenceChange: (value: AutoPreference<AiProviderId>) => void
+  imageProviderOptions: AutoSelectOption<AiProviderId>[]
+  textProviderPreference: AutoPreference<AiProviderId>
+  onTextProviderPreferenceChange: (value: AutoPreference<AiProviderId>) => void
+  textProviderOptions: AutoSelectOption<AiProviderId>[]
+  stylePreference: AutoPreference<string>
+  onStylePreferenceChange: (value: AutoPreference<string>) => void
+  styleOptions: AutoSelectOption<string>[]
+  colorModePreference: AutoPreference<ColorMode>
+  onColorModePreferenceChange: (value: AutoPreference<ColorMode>) => void
+  aspectRatioPreference: AutoPreference<string>
+  onAspectRatioPreferenceChange: (value: AutoPreference<string>) => void
+  fontFamilyPreference: AutoPreference<string>
+  onFontFamilyPreferenceChange: (value: AutoPreference<string>) => void
+  fontSizePreference: AutoPreference<string>
+  onFontSizePreferenceChange: (value: AutoPreference<string>) => void
+  bubbleShapePreference: AutoPreference<string>
+  onBubbleShapePreferenceChange: (value: AutoPreference<string>) => void
+  bubbleTailPreference: AutoPreference<boolean>
+  onBubbleTailPreferenceChange: (value: AutoPreference<boolean>) => void
   onOpenPublish: () => void
   onExportImage: () => void
   canExport: boolean
@@ -242,92 +348,77 @@ function PropertyPanel({
   return (
     <aside className="flex min-w-0 flex-col gap-4 xl:w-80">
       <PanelCard title="AI模型">
-        <LabelRow label="生图模型">
-          <Select value={imageProvider} onValueChange={(value) => onImageProviderChange(value as AiProviderId)}>
-            <SelectTrigger className="w-44 max-w-full">
-              <SelectValue placeholder="选择模型" />
-            </SelectTrigger>
-            <SelectContent>
-              {imageProviderOptions.map((provider) => (
-                <SelectItem key={provider} value={provider}>
-                  {AI_PROVIDER_LABELS[provider]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </LabelRow>
+        <AutoSelectControl
+          label="生图模型"
+          value={imageProviderPreference}
+          options={imageProviderOptions}
+          onChange={onImageProviderPreferenceChange}
+        />
+        <AutoSelectControl
+          label="文本模型"
+          value={textProviderPreference}
+          options={textProviderOptions}
+          onChange={onTextProviderPreferenceChange}
+        />
       </PanelCard>
 
       <PanelCard title="风格">
-        <LabelRow label="渲染风格">
-          <Select value={styleValue} onValueChange={onStyleChange}>
-            <SelectTrigger className="w-44 max-w-full">
-              <SelectValue placeholder="选择风格" />
-            </SelectTrigger>
-            <SelectContent>
-              {STYLE_PRESETS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </LabelRow>
+        <AutoSelectControl
+          label="渲染风格"
+          value={stylePreference}
+          options={styleOptions}
+          onChange={onStylePreferenceChange}
+        />
+        <AutoSelectControl
+          label="颜色"
+          value={colorModePreference}
+          options={COLOR_MODE_OPTIONS}
+          onChange={onColorModePreferenceChange}
+        />
+        <AutoSelectControl
+          label="画幅"
+          value={aspectRatioPreference}
+          options={ASPECT_RATIO_OPTIONS}
+          onChange={onAspectRatioPreferenceChange}
+        />
       </PanelCard>
 
       <PanelCard title="文本">
-        <LabelRow label="字体">
-          <Select value={fontFamily} onValueChange={onFontFamilyChange}>
-            <SelectTrigger className="w-44 max-w-full">
-              <SelectValue placeholder="选择字体" />
-            </SelectTrigger>
-            <SelectContent>
-              {FONT_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </LabelRow>
-        <LabelRow label="字体大小">
-          <Select value={fontSize} onValueChange={onFontSizeChange}>
-            <SelectTrigger className="w-40">
-              <SelectValue placeholder="选择大小" />
-            </SelectTrigger>
-            <SelectContent>
-              {FONT_SIZE_OPTIONS.map((size) => (
-                <SelectItem key={size} value={size}>
-                  {size}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </LabelRow>
+        <AutoSelectControl
+          label="字体"
+          value={fontFamilyPreference}
+          options={FONT_OPTIONS}
+          onChange={onFontFamilyPreferenceChange}
+        />
+        <AutoSelectControl
+          label="字体大小"
+          value={fontSizePreference}
+          options={FONT_SIZE_OPTIONS}
+          onChange={onFontSizePreferenceChange}
+        />
       </PanelCard>
 
       <PanelCard title="会话框">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <Select value={bubbleShape} onValueChange={onBubbleShapeChange}>
-            <SelectTrigger className="w-36">
-              <SelectValue placeholder="选择类型" />
-            </SelectTrigger>
-            <SelectContent>
-              {BUBBLE_SHAPES.map((shape) => (
-                <SelectItem key={shape.value} value={shape.value}>
-                  <div className="flex items-center gap-2">
-                    <ShapePreview shape={shape.value} />
-                    <span>{shape.label}</span>
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <div className="flex items-center gap-2">
-            <Checkbox id="bubble-tail" checked={hasTail} onCheckedChange={onToggleTail} />
-            <Label htmlFor="bubble-tail">{hasTail ? '有' : '无'}尾巴</Label>
-          </div>
+        <AutoSelectControl
+          label="类型"
+          value={bubbleShapePreference}
+          options={BUBBLE_SHAPES}
+          onChange={onBubbleShapePreferenceChange}
+        />
+        <div className="flex justify-end">
+          <ShapePreview
+            shape={bubbleShapePreference.mode === 'manual'
+              ? bubbleShapePreference.value
+              : DEFAULT_BUBBLE_SHAPE}
+          />
         </div>
+        <AutoBooleanSelectControl
+          label="尾巴"
+          value={bubbleTailPreference}
+          trueLabel="有"
+          falseLabel="无"
+          onChange={onBubbleTailPreferenceChange}
+        />
       </PanelCard>
 
       <PanelCard title="导出">
@@ -392,10 +483,11 @@ export function ImageGeneration() {
   const [selectedScene, setSelectedScene] = useState(INITIAL_SCENES[0]?.id ?? 1)
   // Pages data from images API
   const [pages, setPages] = useState<PageImage[]>([])
-  const [fontFamily, setFontFamily] = useState(FONT_OPTIONS[0].value)
-  const [fontSize, setFontSize] = useState(FONT_SIZE_OPTIONS[1])
-  const [bubbleShape, setBubbleShape] = useState(BUBBLE_SHAPES[0].value)
+  const [fontFamily, setFontFamily] = useState(DEFAULT_FONT_FAMILY)
+  const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE)
+  const [bubbleShape, setBubbleShape] = useState(DEFAULT_BUBBLE_SHAPE)
   const [hasTail, setHasTail] = useState(true)
+  const [colorMode, setColorMode] = useState<ColorMode>(DEFAULT_COLOR_MODE)
   const [isRendering, setIsRendering] = useState(false)
   const [isPublishing, setIsPublishing] = useState(false)
   const [publishOpen, setPublishOpen] = useState(false)
@@ -414,31 +506,161 @@ export function ImageGeneration() {
   const [comicId] = useAtom(currentComicIdAtom)
   const [, setComicDetail] = useAtom(currentComicDetailAtom)
   const [style, setStyle] = useAtom(styleAtom)
+  const [aspectRatio, setAspectRatio] = useAtom(aspectRatioAtom)
+  const [overrides, setOverrides] = useAtom(currentComicOverridesAtom)
   const [imageProvider, setImageProvider] = useAtom(imageProviderAtom)
-  const [textProvider] = useAtom(textProviderAtom)
-  const { providers, imageProviders, loading: providersLoading } = useAiProviders()
-  const imageProviderInitializedRef = useRef(false)
-  const imageProviderChangedRef = useRef(false)
+  const [textProvider, setTextProvider] = useAtom(textProviderAtom)
+  const { providers, imageProviders, textProviders, loading: providersLoading } = useAiProviders()
+  const { preferences } = usePreferences()
+  const imageProviderOptions = useMemo(() => (
+    imageProviders.map((provider) => ({
+      value: provider,
+      label: AI_PROVIDER_LABELS[provider],
+    }))
+  ), [imageProviders])
+  const textProviderOptions = useMemo(() => (
+    textProviders.map((provider) => ({
+      value: provider,
+      label: AI_PROVIDER_LABELS[provider],
+    }))
+  ), [textProviders])
+  const styleOptions = useMemo(() => {
+    const preferencePresets = preferences?.style_presets
+    const presets = Array.isArray(preferencePresets) && preferencePresets.length > 0
+      ? preferencePresets
+      : DEFAULT_STYLE_PRESETS
+
+    return presets.map((preset) => ({
+      value: preset.value,
+      label: preset.label,
+    }))
+  }, [preferences?.style_presets])
+
+  const imageProviderFallback = imageProviders.includes(providers.defaults.image)
+    ? providers.defaults.image
+    : (imageProviders[0] ?? providers.defaults.image)
+  const textProviderFallback = textProviders.includes(providers.defaults.text)
+    ? providers.defaults.text
+    : (textProviders[0] ?? providers.defaults.text)
+  const preferenceImageProvider = preferences?.fields?.image_provider
+  const preferenceTextProvider = preferences?.fields?.text_provider
+  const defaultImageProvider = resolveAvailablePreferenceValue(
+    preferenceImageProvider,
+    imageProviders,
+    imageProviderFallback,
+  )
+  const defaultTextProvider = resolveAvailablePreferenceValue(
+    preferenceTextProvider,
+    textProviders,
+    textProviderFallback,
+  )
+  const imageProviderPreference = (
+    overrides.image_provider ?? preferenceImageProvider ?? { mode: 'auto' }
+  ) as AutoPreference<AiProviderId>
+  const textProviderPreference = (
+    overrides.text_provider ?? preferenceTextProvider ?? { mode: 'auto' }
+  ) as AutoPreference<AiProviderId>
+  const resolvedImageProvider = resolveAvailablePreferenceValue(
+    imageProviderPreference,
+    imageProviders,
+    defaultImageProvider,
+  )
+  const resolvedTextProvider = resolveAvailablePreferenceValue(
+    textProviderPreference,
+    textProviders,
+    defaultTextProvider,
+  )
+
+  const preferenceStyle = preferences?.fields?.style
+  const defaultStyle = resolvePreferenceValue(
+    preferenceStyle,
+    styleOptions[0]?.value ?? DEFAULT_SELECTED_STYLE,
+  )
+  const stylePreference = (overrides.style ?? preferenceStyle ?? { mode: 'auto' }) as AutoPreference<string>
+  const resolvedStyle = resolvePreferenceValue(stylePreference, defaultStyle)
+  const preferenceColorMode = preferences?.fields?.color_mode
+  const defaultColorMode = resolvePreferenceValue(preferenceColorMode, DEFAULT_COLOR_MODE)
+  const colorModePreference = (
+    overrides.color_mode ?? preferenceColorMode ?? { mode: 'auto' }
+  ) as AutoPreference<ColorMode>
+  const resolvedColorMode = resolvePreferenceValue(colorModePreference, defaultColorMode)
+  const preferenceAspectRatio = preferences?.fields?.aspect_ratio
+  const defaultAspectRatio = resolvePreferenceValue(preferenceAspectRatio, DEFAULT_ASPECT_RATIO)
+  const aspectRatioPreference = (
+    overrides.aspect_ratio ?? preferenceAspectRatio ?? { mode: 'auto' }
+  ) as AutoPreference<string>
+  const resolvedAspectRatio = resolvePreferenceValue(aspectRatioPreference, defaultAspectRatio)
+  const preferenceFontFamily = preferences?.fields?.font_family
+  const defaultFontFamily = resolvePreferenceValue(preferenceFontFamily, DEFAULT_FONT_FAMILY)
+  const fontFamilyPreference = (
+    overrides.font_family ?? preferenceFontFamily ?? { mode: 'auto' }
+  ) as AutoPreference<string>
+  const resolvedFontFamily = resolvePreferenceValue(fontFamilyPreference, defaultFontFamily)
+  const preferenceFontSize = preferences?.fields?.font_size
+  const defaultFontSize = resolvePreferenceValue(preferenceFontSize, DEFAULT_FONT_SIZE)
+  const fontSizePreference = (
+    overrides.font_size ?? preferenceFontSize ?? { mode: 'auto' }
+  ) as AutoPreference<string>
+  const resolvedFontSize = resolvePreferenceValue(fontSizePreference, defaultFontSize)
+  const preferenceBubbleShape = preferences?.fields?.bubble_shape
+  const defaultBubbleShape = resolvePreferenceValue(preferenceBubbleShape, DEFAULT_BUBBLE_SHAPE)
+  const bubbleShapePreference = (
+    overrides.bubble_shape ?? preferenceBubbleShape ?? { mode: 'auto' }
+  ) as AutoPreference<string>
+  const resolvedBubbleShape = resolvePreferenceValue(bubbleShapePreference, defaultBubbleShape)
+  const preferenceBubbleTail = preferences?.fields?.bubble_tail
+  const defaultBubbleTail = resolvePreferenceValue(preferenceBubbleTail, true)
+  const bubbleTailPreference = (
+    overrides.bubble_tail ?? preferenceBubbleTail ?? { mode: 'auto' }
+  ) as AutoPreference<boolean>
+  const resolvedBubbleTail = resolvePreferenceValue(bubbleTailPreference, defaultBubbleTail)
 
   useEffect(() => {
-    if (providersLoading || !imageProviders.length) return
+    if (providersLoading) return
 
-    if (!imageProviderInitializedRef.current) {
-      imageProviderInitializedRef.current = true
-      if (!imageProviderChangedRef.current && imageProvider === 'gemini') {
-        const defaultProvider = imageProviders.includes(providers.defaults.image)
-          ? providers.defaults.image
-          : imageProviders[0]
-        setImageProvider(defaultProvider)
-
-        return
-      }
+    if (imageProvider !== resolvedImageProvider) {
+      setImageProvider(resolvedImageProvider)
     }
 
-    if (!imageProviders.includes(imageProvider) && imageProviders[0]) {
-      setImageProvider(imageProviders[0])
+    if (textProvider !== resolvedTextProvider) {
+      setTextProvider(resolvedTextProvider)
     }
-  }, [imageProvider, imageProviders, providers.defaults.image, providersLoading, setImageProvider])
+  }, [
+    imageProvider,
+    providersLoading,
+    resolvedImageProvider,
+    resolvedTextProvider,
+    setImageProvider,
+    setTextProvider,
+    textProvider,
+  ])
+
+  useEffect(() => {
+    if (style !== resolvedStyle) setStyle(resolvedStyle)
+    if (aspectRatio !== resolvedAspectRatio) setAspectRatio(resolvedAspectRatio)
+    if (fontFamily !== resolvedFontFamily) setFontFamily(resolvedFontFamily)
+    if (fontSize !== resolvedFontSize) setFontSize(resolvedFontSize)
+    if (bubbleShape !== resolvedBubbleShape) setBubbleShape(resolvedBubbleShape)
+    if (hasTail !== resolvedBubbleTail) setHasTail(resolvedBubbleTail)
+    if (colorMode !== resolvedColorMode) setColorMode(resolvedColorMode)
+  }, [
+    aspectRatio,
+    bubbleShape,
+    colorMode,
+    fontFamily,
+    fontSize,
+    hasTail,
+    resolvedAspectRatio,
+    resolvedBubbleShape,
+    resolvedBubbleTail,
+    resolvedColorMode,
+    resolvedFontFamily,
+    resolvedFontSize,
+    resolvedStyle,
+    setAspectRatio,
+    setStyle,
+    style,
+  ])
   const [, setActiveTab] = useAtom(activeTabAtom)
   const [, setStoryStep] = useAtom(storyStepAtom)
 
@@ -579,8 +801,15 @@ export function ImageGeneration() {
 
       // A) 触发该页渲染（布局已在“分镜”步骤完成）
       await PanelsApi.renderPage(comicId, targetPageNumber, {
-        image_provider: imageProvider,
-        text_provider: textProvider,
+        image_provider: resolvedImageProvider,
+        text_provider: resolvedTextProvider,
+        style_description: resolvedStyle,
+        color_mode: resolvedColorMode,
+        aspect_ratio: resolvedAspectRatio,
+        font_family: resolvedFontFamily,
+        font_size: resolvedFontSize,
+        bubble_shape: resolvedBubbleShape,
+        bubble_tail: resolvedBubbleTail,
       })
       updateRenderProgress({
         status: 'rendering',
@@ -729,6 +958,78 @@ export function ImageGeneration() {
     }
   }
 
+  const handleImageProviderPreferenceChange = (nextPreference: AutoPreference<AiProviderId>) => {
+    setOverrides((prev) => ({
+      ...prev,
+      image_provider: nextPreference,
+    }))
+    setImageProvider(resolveAvailablePreferenceValue(nextPreference, imageProviders, defaultImageProvider))
+  }
+
+  const handleTextProviderPreferenceChange = (nextPreference: AutoPreference<AiProviderId>) => {
+    setOverrides((prev) => ({
+      ...prev,
+      text_provider: nextPreference,
+    }))
+    setTextProvider(resolveAvailablePreferenceValue(nextPreference, textProviders, defaultTextProvider))
+  }
+
+  const handleStylePreferenceChange = (nextPreference: AutoPreference<string>) => {
+    setOverrides((prev) => ({
+      ...prev,
+      style: nextPreference,
+    }))
+    setStyle(resolvePreferenceValue(nextPreference, defaultStyle))
+  }
+
+  const handleColorModePreferenceChange = (nextPreference: AutoPreference<ColorMode>) => {
+    setOverrides((prev) => ({
+      ...prev,
+      color_mode: nextPreference,
+    }))
+    setColorMode(resolvePreferenceValue(nextPreference, defaultColorMode))
+  }
+
+  const handleAspectRatioPreferenceChange = (nextPreference: AutoPreference<string>) => {
+    setOverrides((prev) => ({
+      ...prev,
+      aspect_ratio: nextPreference,
+    }))
+    setAspectRatio(resolvePreferenceValue(nextPreference, defaultAspectRatio))
+  }
+
+  const handleFontFamilyPreferenceChange = (nextPreference: AutoPreference<string>) => {
+    setOverrides((prev) => ({
+      ...prev,
+      font_family: nextPreference,
+    }))
+    setFontFamily(resolvePreferenceValue(nextPreference, defaultFontFamily))
+  }
+
+  const handleFontSizePreferenceChange = (nextPreference: AutoPreference<string>) => {
+    setOverrides((prev) => ({
+      ...prev,
+      font_size: nextPreference,
+    }))
+    setFontSize(resolvePreferenceValue(nextPreference, defaultFontSize))
+  }
+
+  const handleBubbleShapePreferenceChange = (nextPreference: AutoPreference<string>) => {
+    setOverrides((prev) => ({
+      ...prev,
+      bubble_shape: nextPreference,
+    }))
+    setBubbleShape(resolvePreferenceValue(nextPreference, defaultBubbleShape))
+  }
+
+  const handleBubbleTailPreferenceChange = (nextPreference: AutoPreference<boolean>) => {
+    setOverrides((prev) => ({
+      ...prev,
+      bubble_tail: nextPreference,
+    }))
+    setHasTail(resolvePreferenceValue(nextPreference, defaultBubbleTail))
+  }
+
   const selectedImageUrl = useMemo(
     () => proxiedStatic(pages.find((p) => p.page_number === selectedScene)?.image_url),
     [pages, selectedScene],
@@ -759,22 +1060,27 @@ export function ImageGeneration() {
           />
         </section>
         <PropertyPanel
-          imageProvider={imageProvider}
-          onImageProviderChange={(provider) => {
-            imageProviderChangedRef.current = true
-            setImageProvider(provider)
-          }}
-          imageProviderOptions={imageProviders}
-          styleValue={style}
-          onStyleChange={setStyle}
-          fontFamily={fontFamily}
-          onFontFamilyChange={setFontFamily}
-          fontSize={fontSize}
-          onFontSizeChange={setFontSize}
-          bubbleShape={bubbleShape}
-          onBubbleShapeChange={setBubbleShape}
-          hasTail={hasTail}
-          onToggleTail={() => setHasTail((prev) => !prev)}
+          imageProviderPreference={imageProviderPreference}
+          onImageProviderPreferenceChange={handleImageProviderPreferenceChange}
+          imageProviderOptions={imageProviderOptions}
+          textProviderPreference={textProviderPreference}
+          onTextProviderPreferenceChange={handleTextProviderPreferenceChange}
+          textProviderOptions={textProviderOptions}
+          stylePreference={stylePreference}
+          onStylePreferenceChange={handleStylePreferenceChange}
+          styleOptions={styleOptions}
+          colorModePreference={colorModePreference}
+          onColorModePreferenceChange={handleColorModePreferenceChange}
+          aspectRatioPreference={aspectRatioPreference}
+          onAspectRatioPreferenceChange={handleAspectRatioPreferenceChange}
+          fontFamilyPreference={fontFamilyPreference}
+          onFontFamilyPreferenceChange={handleFontFamilyPreferenceChange}
+          fontSizePreference={fontSizePreference}
+          onFontSizePreferenceChange={handleFontSizePreferenceChange}
+          bubbleShapePreference={bubbleShapePreference}
+          onBubbleShapePreferenceChange={handleBubbleShapePreferenceChange}
+          bubbleTailPreference={bubbleTailPreference}
+          onBubbleTailPreferenceChange={handleBubbleTailPreferenceChange}
           onOpenPublish={() => setPublishOpen(true)}
           onExportImage={() => {
             const p = pages.find((x) => x.page_number === selectedScene)

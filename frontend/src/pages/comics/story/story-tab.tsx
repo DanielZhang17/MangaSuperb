@@ -19,6 +19,7 @@ import { LoadingView } from '../../../components/common/loading-view'
 import { activeTabAtom, mangaTitleAtom, storyCompletedAtom, storyStepAtom } from '../atoms'
 import { ComicsWorkflowShell, WorkflowActionBar, WorkflowContent, WorkflowPanel } from '../components/workflow-layout'
 import { AIModelCard } from './ai-model-card'
+import { MangaFormatCard } from './manga-format-card'
 import { MangaGridLayoutCard } from './manga-grid-layout-card'
 import { MangaStyleCard } from './manga-style-card'
 import { StoryEditor } from './story-editor'
@@ -60,6 +61,7 @@ function InputView() {
         <aside className="flex min-w-0 flex-col gap-4">
           <AIModelCard />
           <MangaStyleCard />
+          <MangaFormatCard />
           <MangaGridLayoutCard />
         </aside>
       </WorkflowContent>

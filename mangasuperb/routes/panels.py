@@ -60,6 +60,16 @@ def _load_panel_for_user(panel_id: int) -> ComicPanelShot | None:
     return panel
 
 
+def _normalise_style_description(value: Any) -> str | None:
+    if value is None:
+        return None
+    style_description = str(value).strip()
+    if not style_description:
+        raise ValueError("style_description cannot be empty")
+
+    return style_description
+
+
 @bp.patch("/<int:panel_id>")
 @login_required
 @swag_from(PANEL_UPDATE_DOC)
@@ -228,6 +238,7 @@ def start_render_run(comic_id: int) -> Any:
     try:
         image_provider = _normalise_ai_provider(payload.get("image_provider"))
         text_provider = _normalise_ai_provider(payload.get("text_provider"))
+        style_description = _normalise_style_description(payload.get("style_description"))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -250,6 +261,9 @@ def start_render_run(comic_id: int) -> Any:
     queue = current_app.extensions.get("rq_queue")
     if not queue:
         return jsonify({"error": "Background queue is not configured"}), 503
+
+    if style_description:
+        comic.style_description = style_description
 
     try:
         render_run = enqueue_render_run(
@@ -309,6 +323,7 @@ def render_page(comic_id: int, page_number: int) -> Any:
     try:
         image_provider = _normalise_ai_provider(payload.get("image_provider"))
         text_provider = _normalise_ai_provider(payload.get("text_provider"))
+        style_description = _normalise_style_description(payload.get("style_description"))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -329,6 +344,9 @@ def render_page(comic_id: int, page_number: int) -> Any:
     queue = current_app.extensions.get("rq_queue")
     if not queue:
         return jsonify({"error": "Background queue is not configured"}), 503
+
+    if style_description:
+        comic.style_description = style_description
 
     job = enqueue_page_render(
         queue,

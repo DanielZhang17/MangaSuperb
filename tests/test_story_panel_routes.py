@@ -352,6 +352,20 @@ def test_render_page_endpoint_passes_image_provider(app, auth_client, user: User
     assert dummy_queue.jobs[-1].kwargs["image_provider"] == "third_party"
 
 
+def test_render_page_endpoint_updates_style_description(app, auth_client, user: User, dummy_queue):
+    comic_id = _create_comic(app, user)
+
+    response = auth_client.post(
+        f"/api/panels/{comic_id}/pages/1/render",
+        json={"style_description": "Painterly monochrome manga"},
+    )
+
+    assert response.status_code == 202
+    with app.app_context():
+        comic = db.session.get(Comic, comic_id)
+        assert comic.style_description == "Painterly monochrome manga"
+
+
 def test_get_comic_images_returns_urls(app, auth_client, user: User):
     comic_id = _create_comic(app, user)
 
