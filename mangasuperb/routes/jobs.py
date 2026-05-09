@@ -31,7 +31,7 @@ from mangasuperb.services.jobs import (
     enqueue_story_optimization,
     process_character_optimization,
 )
-from models import Character, Comic, ComicWorkflowStage, Script
+from models import Character, Comic, ComicRenderRun, ComicWorkflowStage, Script
 from swagger import JOB_CREATE_DOC, JOB_STATUS_DOC
 
 logger = logging.getLogger(__name__)
@@ -377,7 +377,26 @@ def create_job() -> Any:
 @swag_from(JOB_STATUS_DOC)
 def get_job_status(job_id: str) -> Any:
     try:
-        comic = Comic.query.filter_by(job_id=job_id, user_id=current_user.id).first()
+        render_run = None
+        if job_id.startswith("render-run-"):
+            try:
+                render_run_id = int(job_id.removeprefix("render-run-"))
+            except ValueError:
+                render_run_id = None
+            if render_run_id is not None:
+                render_run = ComicRenderRun.query.filter_by(
+                    id=render_run_id,
+                    user_id=current_user.id,
+                ).first()
+        if not render_run:
+            render_run = ComicRenderRun.query.filter_by(
+                job_id=job_id,
+                user_id=current_user.id,
+            ).first()
+
+        comic = render_run.comic if render_run else None
+        if not comic:
+            comic = Comic.query.filter_by(job_id=job_id, user_id=current_user.id).first()
         if not comic:
             stage_match = (
                 db.session.query(ComicWorkflowStage, Comic)
@@ -392,7 +411,7 @@ def get_job_status(job_id: str) -> Any:
                 _, comic = stage_match
 
         character = None
-        if not comic:
+        if not comic and not render_run:
             character = Character.query.filter(
                 Character.user_id == current_user.id,
                 or_(
@@ -401,12 +420,15 @@ def get_job_status(job_id: str) -> Any:
                 ),
             ).first()
 
-        if not comic and not character:
+        if not comic and not character and not render_run:
             return jsonify({"error": "Job not found"}), 404
 
         try:
-            job = Job.fetch(job_id, connection=current_app.extensions["redis_conn"])
-            rq_status = job.get_status()
+            if render_run and job_id.startswith("render-run-"):
+                rq_status = render_run.status
+            else:
+                job = Job.fetch(job_id, connection=current_app.extensions["redis_conn"])
+                rq_status = job.get_status()
         except Exception as exc:
             logger.error("Failed to fetch RQ job: %s", exc)
             rq_status = "unknown"
@@ -419,6 +441,8 @@ def get_job_status(job_id: str) -> Any:
         }
         if comic:
             response["comic"] = comic.to_dict()
+        if render_run:
+            response["render_run"] = render_run.to_dict()
         if worker_snapshot.get("active", 0) == 0:
             response["warning"] = "No active RQ workers detected; job will remain queued."
 
@@ -443,6 +467,16 @@ def list_active_jobs() -> Any:
         .all()
     )
 
+    render_runs = (
+        ComicRenderRun.query.filter_by(user_id=current_user.id)
+        .filter(ComicRenderRun.status.in_(("queued", "running")))
+        .order_by(ComicRenderRun.created_at.asc())
+        .all()
+    )
+    active_render_job_ids = {
+        render_run.job_id for render_run in render_runs if render_run.job_id
+    }
+
     active = [
         {
             "job_id": stage.job_id,
@@ -453,5 +487,30 @@ def list_active_jobs() -> Any:
             "started_at": stage.started_at.isoformat() if stage.started_at else None,
         }
         for stage, comic in rows
+        if stage.job_id not in active_render_job_ids
     ]
+
+    for render_run in render_runs:
+        comic = render_run.comic
+        if not comic:
+            continue
+        active.append(
+            {
+                "job_id": render_run.job_id or f"render-run-{render_run.id}",
+                "render_run_id": render_run.id,
+                "comic_id": comic.id,
+                "stage": "render",
+                "status": render_run.status,
+                "title": comic.title,
+                "started_at": (
+                    render_run.started_at.isoformat()
+                    if render_run.started_at
+                    else render_run.created_at.isoformat()
+                ),
+                "render_progress": {
+                    "completed": len(render_run.completed_pages),
+                    "total": len(render_run.requested_pages),
+                },
+            }
+        )
     return jsonify({"active": active}), 200

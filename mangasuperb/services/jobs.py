@@ -48,6 +48,7 @@ from models import (
     ComicPageLayout,
     ComicPagePanel,
     ComicPanelShot,
+    ComicRenderRun,
     ComicWorkflowStage,
     Script,
 )
@@ -460,6 +461,14 @@ def _set_stage_status(comic: Comic, stage: str, status: str, *, error: str | Non
         comic.status = "failed"
         comic.error_message = error
         comic.completed_at = now
+    elif status == "aborted":
+        stage_row.completed_at = now
+        stage_row.error_message = error
+        comic.workflow_stage = stage
+        comic.workflow_status = status
+        comic.status = "aborted"
+        comic.error_message = error
+        comic.completed_at = now
     else:
         comic.workflow_stage = stage
         comic.workflow_status = status
@@ -770,6 +779,7 @@ def enqueue_page_render(
     bubble_tail: bool | None = None,
     color_mode: str | None = None,
     aspect_ratio: str | None = None,
+    render_run_id: int | None = None,
 ):
     """Schedule a render job for a specific comic page."""
 
@@ -793,6 +803,7 @@ def enqueue_page_render(
         bubble_tail=bubble_tail,
         color_mode=color_mode,
         aspect_ratio=aspect_ratio or comic.aspect_ratio,
+        render_run_id=render_run_id,
         job_timeout=timeout,
         result_ttl=result_ttl,
         description=f"Render page {page_number} for comic {comic.id}",
@@ -806,6 +817,82 @@ def enqueue_page_render(
     db.session.commit()
 
     return job
+
+
+def _renderable_page_numbers(comic: Comic) -> list[int]:
+    numbers = {
+        int(layout.page_number)
+        for layout in comic.page_layouts
+        if layout.page_number and int(layout.page_number) > 0
+    }
+    numbers.update(
+        int(panel.page_number)
+        for panel in comic.panel_shots
+        if panel.page_number and int(panel.page_number) > 0
+    )
+    return sorted(numbers)
+
+
+def _rendered_page_numbers(comic: Comic) -> set[int]:
+    return {int(page.page_number) for page in comic.pages if page.image_url}
+
+
+def resolve_render_run_pages(comic: Comic, mode: str) -> list[int]:
+    all_pages = _renderable_page_numbers(comic)
+    if mode == "first_page":
+        return [1] if 1 in all_pages else all_pages[:1]
+    if mode == "all_pages":
+        return all_pages
+    if mode == "remaining_pages":
+        rendered = _rendered_page_numbers(comic)
+        return [page for page in all_pages if page not in rendered]
+    raise ValueError("mode must be first_page, all_pages, or remaining_pages")
+
+
+def enqueue_render_run(
+    queue,
+    comic: Comic,
+    *,
+    mode: str,
+    user_id: int,
+    image_provider: str | None = None,
+    text_provider: str | None = None,
+    color_mode: str | None = None,
+    aspect_ratio: str | None = None,
+    font_family: str | None = None,
+    font_size: str | None = None,
+    bubble_shape: str | None = None,
+    bubble_tail: bool | None = None,
+) -> ComicRenderRun:
+    requested_pages = resolve_render_run_pages(comic, mode)
+    if not requested_pages:
+        raise ValueError("No pages are available for rendering")
+    render_run = ComicRenderRun.create(
+        comic_id=comic.id,
+        user_id=user_id,
+        mode=mode,
+        requested_pages=requested_pages,
+    )
+    render_run.status = "queued"
+    db.session.add(render_run)
+    db.session.flush()
+    job = enqueue_page_render(
+        queue,
+        comic,
+        requested_pages[0],
+        image_provider=image_provider,
+        text_provider=text_provider,
+        color_mode=color_mode,
+        aspect_ratio=aspect_ratio,
+        font_family=font_family,
+        font_size=font_size,
+        bubble_shape=bubble_shape,
+        bubble_tail=bubble_tail,
+        render_run_id=render_run.id,
+    )
+    render_run.job_id = job.id
+    db.session.commit()
+    return render_run
 
 
 def enqueue_story_optimization(
@@ -1255,6 +1342,7 @@ def process_page_render_stage(
     bubble_tail: bool | None = None,
     color_mode: str | None = None,
     aspect_ratio: str | None = None,
+    render_run_id: int | None = None,
 ) -> dict[str, Any]:
     """Render a comic page using existing panel shots and layout assignments."""
 
@@ -1271,6 +1359,19 @@ def process_page_render_stage(
         if not comic:
             raise ValueError(f"Comic {comic_id} not found")
 
+        render_run = db.session.get(ComicRenderRun, render_run_id) if render_run_id else None
+        if render_run and render_run.abort_requested:
+            render_run.status = "aborted"
+            render_run.completed_at = datetime.utcnow()
+            _set_stage_status(comic, "render", "aborted")
+            db.session.commit()
+            return {
+                "status": "aborted",
+                "comic_id": comic_id,
+                "page_number": page_number,
+                "render_run_id": render_run.id,
+            }
+
         script: Script | None = db.session.get(Script, comic.script_id)
         if not script:
             raise ValueError(f"Script for comic {comic_id} not found")
@@ -1285,6 +1386,10 @@ def process_page_render_stage(
 
         try:
             _set_stage_status(comic, "render", "in_progress")
+            if render_run:
+                render_run.status = "running"
+                render_run.current_page_number = page_number
+                render_run.started_at = render_run.started_at or datetime.utcnow()
             layout.status = "rendering"
             db.session.commit()
 
@@ -1426,7 +1531,7 @@ def process_page_render_stage(
                 _set_stage_status(comic, "render", "completed")
             else:
                 comic.error_message = None
-                if chain_remaining:
+                if chain_remaining and not render_run:
                     next_panel = (
                         ComicPanelShot.query.filter(
                             ComicPanelShot.comic_id == comic_id,
@@ -1460,6 +1565,53 @@ def process_page_render_stage(
                             )
                             _assign_stage_job(comic, "render", next_job.id)
 
+            if render_run:
+                render_run.status = "running"
+                render_run.current_page_number = page_number
+                render_run.started_at = render_run.started_at or datetime.utcnow()
+                render_run.mark_completed_page(page_number)
+                remaining_pages = [
+                    page
+                    for page in render_run.requested_pages
+                    if page not in render_run.completed_pages
+                    and page not in render_run.failed_pages
+                    and page > page_number
+                ]
+                if render_run.abort_requested:
+                    render_run.status = "aborted"
+                    render_run.completed_at = datetime.utcnow()
+                    _set_stage_status(comic, "render", "aborted")
+                elif remaining_pages:
+                    queue = current_app.extensions.get("rq_queue")
+                    if queue:
+                        timeout = current_app.config["RQ_JOB_TIMEOUT"]
+                        result_ttl = current_app.config["RQ_RESULT_TTL"]
+                        next_page = remaining_pages[0]
+                        next_job = queue.enqueue(
+                            process_page_render_stage,
+                            comic_id=comic_id,
+                            page_number=next_page,
+                            image_model=image_model,
+                            image_provider=image_provider,
+                            text_provider=text_provider,
+                            chain_remaining=False,
+                            font_family=font_family,
+                            font_size=font_size,
+                            bubble_shape=bubble_shape,
+                            bubble_tail=bubble_tail,
+                            color_mode=normalized_color,
+                            aspect_ratio=normalized_aspect_ratio,
+                            render_run_id=render_run.id,
+                            job_timeout=timeout,
+                            result_ttl=result_ttl,
+                            description=f"Render page {next_page} for comic {comic_id}",
+                        )
+                        render_run.job_id = next_job.id
+                        _assign_stage_job(comic, "render", next_job.id)
+                else:
+                    render_run.status = "completed"
+                    render_run.completed_at = datetime.utcnow()
+
             db.session.commit()
 
             status_label = "completed" if comic.workflow_status == "completed" else "processing"
@@ -1489,6 +1641,16 @@ def process_page_render_stage(
             comic = db.session.get(Comic, comic_id)
             if comic:
                 _set_stage_status(comic, "render", "failed", error=str(exc))
+                render_run = (
+                    db.session.get(ComicRenderRun, render_run_id)
+                    if render_run_id
+                    else None
+                )
+                if render_run:
+                    render_run.status = "failed"
+                    render_run.error_message = str(exc)
+                    render_run.mark_failed_page(page_number)
+                    render_run.completed_at = datetime.utcnow()
                 db.session.commit()
 
             return {

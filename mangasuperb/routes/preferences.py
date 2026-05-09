@@ -8,11 +8,7 @@ from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
 
 from mangasuperb.extensions import db
-from models import (
-    DEFAULT_COLOR_MODES,
-    DEFAULT_LAYOUT_OPTIONS,
-    User,
-)
+from mangasuperb.services.auto_preferences import available_options
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +16,13 @@ bp = Blueprint("preferences", __name__, url_prefix="/api/preferences")
 
 
 def _preference_response(preferences: dict[str, Any]) -> Any:
+    options = available_options()
     return jsonify(
         {
             "preferences": preferences,
-            "layout_options": list(DEFAULT_LAYOUT_OPTIONS),
-            "color_modes": list(DEFAULT_COLOR_MODES),
+            "available_options": options,
+            "layout_options": options["layout_options"],
+            "color_modes": options["color_modes"],
         }
     )
 
