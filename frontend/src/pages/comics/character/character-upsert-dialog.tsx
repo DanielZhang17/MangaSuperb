@@ -17,14 +17,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { AI_PROVIDER_LABELS } from '@/hooks/use-ai-providers'
+import { useI18n } from '@/hooks/use-i18n'
 import type { AiProviderId, AiProvidersResponse, ICharacter } from '@/service/types'
 
 const SEX_OPTIONS = [
-  { value: 'unspecified', label: '未指定' },
-  { value: 'female', label: '女性' },
-  { value: 'male', label: '男性' },
-  { value: 'non-binary', label: '非二元' },
-  { value: 'other', label: '其他' },
+  { value: 'unspecified', labelKey: 'characterDialog.sex.unspecified' },
+  { value: 'female', labelKey: 'characterDialog.sex.female' },
+  { value: 'male', labelKey: 'characterDialog.sex.male' },
+  { value: 'non-binary', labelKey: 'characterDialog.sex.nonBinary' },
+  { value: 'other', labelKey: 'characterDialog.sex.other' },
 ]
 
 const FALLBACK_PROVIDERS: AiProvidersResponse = {
@@ -56,6 +57,7 @@ export function CharacterUpsertDialog({
   mode,
   open,
   character,
+  initialValues,
   providers = FALLBACK_PROVIDERS,
   defaultProvider,
   onOpenChange,
@@ -64,11 +66,13 @@ export function CharacterUpsertDialog({
   mode: 'create' | 'edit'
   open: boolean
   character?: ICharacter
+  initialValues?: Partial<Pick<ICharacter, 'name' | 'description' | 'sex' | 'style_prompt'>>
   providers?: AiProvidersResponse
   defaultProvider?: AiProviderId
   onOpenChange: (open: boolean) => void
   onSaved: (character: ICharacter) => void
 }) {
+  const { t } = useI18n('comics')
   const imageOptions = useMemo(
     () => (Object.keys(providers.providers) as AiProviderId[]).filter(
       (provider) => providers.providers[provider]?.image,
@@ -87,22 +91,22 @@ export function CharacterUpsertDialog({
 
   useEffect(() => {
     if (!open) return
-    setName(mode === 'edit' ? character?.name ?? '' : '')
-    setDescription(mode === 'edit' ? character?.description ?? '' : '')
-    setSex(mode === 'edit' ? character?.sex ?? 'unspecified' : 'unspecified')
-    setStylePrompt(mode === 'edit' ? character?.style_prompt ?? '' : '')
+    setName(mode === 'edit' ? character?.name ?? '' : initialValues?.name ?? '')
+    setDescription(mode === 'edit' ? character?.description ?? '' : initialValues?.description ?? '')
+    setSex(mode === 'edit' ? character?.sex ?? 'unspecified' : initialValues?.sex ?? 'unspecified')
+    setStylePrompt(mode === 'edit' ? character?.style_prompt ?? '' : initialValues?.style_prompt ?? '')
     setOptimize(false)
     setProvider(firstAvailableProvider(providers, 'image', defaultProvider))
-  }, [character, defaultProvider, mode, open, providers])
+  }, [character, defaultProvider, initialValues, mode, open, providers])
 
   const selectedTextProvider = firstAvailableProvider(providers, 'text', provider)
-  const title = mode === 'edit' ? '编辑人物' : '新建人物'
-  const submitLabel = mode === 'edit' ? '保存并重新生成' : '创建并生成'
+  const title = String(t(mode === 'edit' ? 'characterDialog.title.edit' : 'characterDialog.title.create'))
+  const submitLabel = String(t(mode === 'edit' ? 'characterDialog.submit.edit' : 'characterDialog.submit.create'))
 
   const handleSubmit = async () => {
     const cleanDescription = description.trim()
     if (!cleanDescription) {
-      toast.error('人物描述不能为空')
+      toast.error(String(t('characterDialog.descriptionRequired')))
 
       return
     }
@@ -110,7 +114,7 @@ export function CharacterUpsertDialog({
     try {
       setSubmitting(true)
       const payload = {
-        name: name.trim() || 'unspecified',
+        name: name.trim() || String(t('characterDialog.fallbackName')),
         description: cleanDescription,
         sex,
         style_prompt: stylePrompt.trim(),
@@ -123,10 +127,10 @@ export function CharacterUpsertDialog({
         : await CharactersApi.create(payload)
 
       onSaved(response.character)
-      toast.success(mode === 'edit' ? '人物已更新，开始重新生成形象' : '人物已创建，开始生成形象')
+      toast.success(String(t(mode === 'edit' ? 'characterDialog.success.edit' : 'characterDialog.success.create')))
       onOpenChange(false)
     } catch (error: any) {
-      toast.error(error?.message || (mode === 'edit' ? '人物更新失败' : '人物创建失败'))
+      toast.error(error?.message || String(t(mode === 'edit' ? 'characterDialog.error.edit' : 'characterDialog.error.create')))
     } finally {
       setSubmitting(false)
     }
@@ -143,31 +147,31 @@ export function CharacterUpsertDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            保存后会重新排队生成人物形象，原失败状态会被新的生成状态替代。
+            {String(t('characterDialog.description'))}
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="character-name">人物名称</Label>
+            <Label htmlFor="character-name">{String(t('characterDialog.name'))}</Label>
             <Input
               id="character-name"
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="例如：白石遥"
+              placeholder={String(t('characterDialog.namePlaceholder'))}
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="character-sex">性别</Label>
+            <Label htmlFor="character-sex">{String(t('characterDialog.sex'))}</Label>
             <Select value={sex} onValueChange={setSex}>
               <SelectTrigger id="character-sex" className="w-full">
-                <SelectValue placeholder="选择性别" />
+                <SelectValue placeholder={String(t('characterDialog.selectSex'))} />
               </SelectTrigger>
               <SelectContent>
                 {SEX_OPTIONS.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
-                    {option.label}
+                    {String(t(option.labelKey))}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -175,31 +179,31 @@ export function CharacterUpsertDialog({
           </div>
 
           <div className="space-y-2 sm:col-span-2">
-            <Label htmlFor="character-description">人物描述</Label>
+            <Label htmlFor="character-description">{String(t('characterDialog.descriptionLabel'))}</Label>
             <Textarea
               id="character-description"
               value={description}
               onChange={(event) => setDescription(event.target.value)}
               className="min-h-[180px] resize-y"
-              placeholder="写清楚角色名、年龄、服装、发型、气质和漫画风格。"
+              placeholder={String(t('characterDialog.descriptionPlaceholder'))}
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="character-style">风格补充</Label>
+            <Label htmlFor="character-style">{String(t('characterDialog.style'))}</Label>
             <Input
               id="character-style"
               value={stylePrompt}
               onChange={(event) => setStylePrompt(event.target.value)}
-              placeholder="例如：日式校园漫画风格"
+              placeholder={String(t('characterDialog.stylePlaceholder'))}
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="character-provider">AI模型</Label>
+            <Label htmlFor="character-provider">{String(t('characterDialog.aiModel'))}</Label>
             <Select value={provider} onValueChange={(value) => setProvider(value as AiProviderId)}>
               <SelectTrigger id="character-provider" className="w-full">
-                <SelectValue placeholder="选择模型" />
+                <SelectValue placeholder={String(t('characterDialog.chooseModel'))} />
               </SelectTrigger>
               <SelectContent>
                 {imageOptions.map((option) => (
@@ -213,8 +217,8 @@ export function CharacterUpsertDialog({
 
           <div className="flex items-center justify-between gap-4 rounded-lg border border-border/60 p-3 sm:col-span-2">
             <div>
-              <p className="text-sm font-medium">提交前优化描述</p>
-              <p className="text-xs text-muted-foreground">开启后会多调用一次文本模型。</p>
+              <p className="text-sm font-medium">{String(t('characterDialog.optimizeTitle'))}</p>
+              <p className="text-xs text-muted-foreground">{String(t('characterDialog.optimizeDescription'))}</p>
             </div>
             <Switch checked={optimize} onCheckedChange={setOptimize} />
           </div>
@@ -222,7 +226,7 @@ export function CharacterUpsertDialog({
 
         <DialogFooter>
           <Button onClick={handleSubmit} disabled={submitting}>
-            {submitting ? '提交中…' : submitLabel}
+            {submitting ? String(t('characterDialog.submitting')) : submitLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

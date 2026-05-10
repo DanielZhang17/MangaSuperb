@@ -7,7 +7,14 @@ import { StoryTab } from '../story-tab'
 
 vi.mock('@/hooks/use-i18n', () => ({
   useI18n: () => ({
-    t: (key: string) => key,
+    t: (key: string) => ({
+      'common.next': 'common.next',
+      'story.confirmTitle': '确认漫画名称',
+      'story.confirmDescription': '这个名称会用于后续分镜、生图和发布展示。',
+      'story.titleLabel': '漫画名称',
+      'story.continueCharacters': '继续选择人物',
+      'story.titleRequired': '请输入漫画名称',
+    }[key] ?? key),
   }),
 }))
 
@@ -17,6 +24,10 @@ vi.mock('../ai-model-card', () => ({
 
 vi.mock('../manga-style-card', () => ({
   MangaStyleCard: () => <div>Manga style card</div>,
+}))
+
+vi.mock('../manga-format-card', () => ({
+  MangaFormatCard: () => <div>Manga format card</div>,
 }))
 
 vi.mock('../manga-grid-layout-card', () => ({

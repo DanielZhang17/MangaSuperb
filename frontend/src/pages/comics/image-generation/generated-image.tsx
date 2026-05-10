@@ -2,6 +2,7 @@ import { ImageOff, RefreshCcw } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { useI18n } from '@/hooks/use-i18n'
 import { cn, proxiedStatic } from '@/lib/utils'
 
 export interface GeneratedImageProps {
@@ -19,6 +20,7 @@ export function GeneratedImage({
   aspectRatio = '4 / 3',
   onRetry,
 }: GeneratedImageProps) {
+  const { t } = useI18n('comics')
   const proxiedSrc = useMemo(() => proxiedStatic(src), [src])
   const [status, setStatus] = useState<'loading' | 'loaded' | 'failed'>(proxiedSrc ? 'loading' : 'failed')
   const [retryKey, setRetryKey] = useState(0)
@@ -45,13 +47,15 @@ export function GeneratedImage({
       >
         <ImageOff className="h-8 w-8" />
         <div>
-          <p className="font-medium text-foreground/80">{proxiedSrc ? '图片加载失败' : '暂无图片'}</p>
-          <p className="mt-1 text-xs">R2 图片可能还在写入或本地代理暂时不可用。</p>
+          <p className="font-medium text-foreground/80">
+            {proxiedSrc ? String(t('generatedImage.loadFailed')) : String(t('generatedImage.empty'))}
+          </p>
+          <p className="mt-1 text-xs">{String(t('generatedImage.helper'))}</p>
         </div>
         {proxiedSrc && (
           <Button type="button" variant="outline" size="sm" onClick={retry}>
             <RefreshCcw className="size-4" />
-            重试加载图片
+            {String(t('generatedImage.retry'))}
           </Button>
         )}
       </div>
@@ -65,7 +69,7 @@ export function GeneratedImage({
     >
       {status === 'loading' && (
         <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
-          图片加载中…
+          {String(t('generatedImage.loading'))}
         </div>
       )}
       <img

@@ -5,16 +5,18 @@ import { useLocation, useNavigate } from 'react-router'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useAuth } from '@/hooks/use-auth'
+import { useI18n } from '@/hooks/use-i18n'
 import { cn, getAvatarUrl } from '@/lib/utils'
 
 export function InfoCard({ collapsed }: { collapsed: boolean }) {
+  const { t } = useI18n('me')
   const location = useLocation()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const isActive = location.pathname.startsWith('/me')
   const { user, logout, logoutState } = useAuth()
 
-  const username = user?.username ?? '未登录'
+  const username = user?.username ?? String(t('username.guest'))
   const fallback = (username || 'U').slice(0, 2).toUpperCase()
   const avatarUrl = getAvatarUrl(user?.avatar_index ?? null)
 
@@ -37,7 +39,7 @@ export function InfoCard({ collapsed }: { collapsed: boolean }) {
           </div>
           {!collapsed && (
             <div className="flex flex-col">
-              <span className="text-sm font-semibold">去登录</span>
+              <span className="text-sm font-semibold">{String(t('auth.login'))}</span>
             </div>
           )}
         </button>
@@ -85,7 +87,7 @@ export function InfoCard({ collapsed }: { collapsed: boolean }) {
                   )}
                 >
                   <User className="size-4" />
-                  <span>个人信息</span>
+                  <span>{String(t('auth.profile'))}</span>
                 </button>
               </li>
               <li>
@@ -100,7 +102,7 @@ export function InfoCard({ collapsed }: { collapsed: boolean }) {
                   disabled={logoutState.isMutating}
                 >
                   <LogOut className="size-4" />
-                  <span>{logoutState.isMutating ? '退出中…' : '退出'}</span>
+                  <span>{logoutState.isMutating ? String(t('auth.loggingOut')) : String(t('auth.logout'))}</span>
                 </button>
               </li>
             </ul>

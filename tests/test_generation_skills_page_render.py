@@ -46,6 +46,7 @@ def test_build_page_generation_context_normalizes_model_objects() -> None:
     )
 
     assert context.comic_title == "Script Title"
+    assert context.style_notes == "Classic manga black and white linework."
     assert context.page_number == 3
     assert context.layout.layout_key == "grid-2x2"
     assert context.panels[0].dialogue == "Ready."

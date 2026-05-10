@@ -7,32 +7,12 @@ from typing import Any
 from flask_login import UserMixin
 
 from mangasuperb.extensions import db
+from mangasuperb.services import auto_preferences as _auto_preferences
 
-DEFAULT_STYLE_PRESETS: tuple[dict[str, Any], ...] = (
-    {
-        "value": "Classic manga black and white linework.",
-        "label": "经典黑白漫画线稿",
-        "is_custom": False,
-    },
-    {
-        "value": "High-contrast ink with splashy gradients",
-        "label": "高对比墨线 + 渐变",
-        "is_custom": False,
-    },
-    {
-        "value": "Moebius-inspired clean lines, minimal shading",
-        "label": "莫比乌斯风·干净线条",
-        "is_custom": False,
-    },
-    {
-        "value": "Gritty seinen style with textured shading",
-        "label": "青年向质感阴影",
-        "is_custom": False,
-    },
-)
+DEFAULT_STYLE_PRESETS = _auto_preferences.STYLE_PRESETS
 DEFAULT_STYLE_VALUES = {preset["value"] for preset in DEFAULT_STYLE_PRESETS}
-DEFAULT_LAYOUT_OPTIONS: tuple[str, ...] = ("auto-grid", "grid-2x2", "vertical", "cinematic")
-DEFAULT_COLOR_MODES: tuple[str, ...] = ("black-white", "color")
+DEFAULT_LAYOUT_OPTIONS = _auto_preferences.LAYOUT_OPTIONS
+DEFAULT_COLOR_MODES = _auto_preferences.COLOR_MODES
 
 
 def _default_style_presets() -> list[dict[str, Any]]:
@@ -40,139 +20,19 @@ def _default_style_presets() -> list[dict[str, Any]]:
 
 
 def _default_preferences_dict() -> dict[str, Any]:
-    return {
-        "style_presets": _default_style_presets(),
-        "selected_style": DEFAULT_STYLE_PRESETS[0]["value"],
-        "default_layout": DEFAULT_LAYOUT_OPTIONS[0],
-        "color_mode": DEFAULT_COLOR_MODES[0],
-    }
+    return _auto_preferences.default_preferences()
 
 
 def _default_preferences_json() -> str:
     return json.dumps(_default_preferences_dict(), ensure_ascii=False)
 
 
-def _normalize_style_presets(raw_presets: Any) -> list[dict[str, Any]]:
-    presets = _default_style_presets()
-    if not isinstance(raw_presets, list):
-        return presets
-
-    seen = {preset["value"] for preset in presets}
-    for entry in raw_presets:
-        if not isinstance(entry, dict):
-            continue
-        value_raw = entry.get("value") or entry.get("prompt")
-        if not isinstance(value_raw, str):
-            continue
-        value = value_raw.strip()
-        if not value:
-            continue
-
-        label_raw = entry.get("label") or entry.get("name")
-        label = label_raw.strip() if isinstance(label_raw, str) else ""
-        if not label:
-            label = "Custom Style"
-
-        is_custom_flag = entry.get("is_custom")
-        is_custom = bool(is_custom_flag) or value not in DEFAULT_STYLE_VALUES
-
-        if value in DEFAULT_STYLE_VALUES:
-            # Preserve canonical defaults but allow label overrides if provided.
-            for preset in presets:
-                if preset["value"] == value and label_raw:
-                    preset["label"] = label
-            continue
-
-        if value in seen:
-            # Update existing custom entry label if needed.
-            for preset in presets:
-                if preset["value"] == value:
-                    preset["label"] = label
-                    preset["is_custom"] = True
-                    break
-            continue
-
-        presets.append(
-            {
-                "value": value,
-                "label": label,
-                "is_custom": is_custom,
-            }
-        )
-        seen.add(value)
-
-    return presets
-
-
 def _normalize_preferences(raw: Any) -> dict[str, Any]:
-    base = _default_preferences_dict()
-    if raw is None:
-        return base
-
-    data: dict[str, Any]
-    if isinstance(raw, str):
-        try:
-            parsed = json.loads(raw)
-        except (TypeError, ValueError):
-            parsed = {}
-        data = parsed if isinstance(parsed, dict) else {}
-    elif isinstance(raw, dict):
-        data = raw
-    else:
-        data = {}
-
-    base["style_presets"] = _normalize_style_presets(data.get("style_presets"))
-
-    selected = data.get("selected_style")
-    if isinstance(selected, str) and selected.strip():
-        base["selected_style"] = selected.strip()
-
-    preset_values = {preset["value"] for preset in base["style_presets"]}
-    if base["selected_style"] not in preset_values:
-        base["selected_style"] = base["style_presets"][0]["value"]
-
-    layout = data.get("default_layout")
-    if isinstance(layout, str) and layout in DEFAULT_LAYOUT_OPTIONS:
-        base["default_layout"] = layout
-
-    color_mode = data.get("color_mode")
-    if isinstance(color_mode, str) and color_mode in DEFAULT_COLOR_MODES:
-        base["color_mode"] = color_mode
-
-    return base
+    return _auto_preferences.normalize_preferences(raw)
 
 
 def _apply_preferences_update(current: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
-    working = {
-        "style_presets": [
-            dict(item) for item in current.get("style_presets", _default_style_presets())
-        ],
-        "selected_style": current.get("selected_style", DEFAULT_STYLE_PRESETS[0]["value"]),
-        "default_layout": current.get("default_layout", DEFAULT_LAYOUT_OPTIONS[0]),
-        "color_mode": current.get("color_mode", DEFAULT_COLOR_MODES[0]),
-    }
-
-    style_presets_update = updates.get("style_presets")
-    if isinstance(style_presets_update, list):
-        working["style_presets"] = _normalize_style_presets(style_presets_update)
-
-    selected_update = updates.get("selected_style")
-    if isinstance(selected_update, str) and selected_update.strip():
-        working["selected_style"] = selected_update.strip()
-
-    preset_values = {preset["value"] for preset in working["style_presets"]}
-    if working["selected_style"] not in preset_values:
-        working["selected_style"] = working["style_presets"][0]["value"]
-
-    layout_update = updates.get("default_layout")
-    if isinstance(layout_update, str) and layout_update in DEFAULT_LAYOUT_OPTIONS:
-        working["default_layout"] = layout_update
-
-    color_update = updates.get("color_mode")
-    if isinstance(color_update, str) and color_update in DEFAULT_COLOR_MODES:
-        working["color_mode"] = color_update
-
-    return working
+    return _auto_preferences.apply_preferences_update(current, updates)
 
 
 class User(UserMixin, db.Model):
@@ -469,6 +329,7 @@ class Comic(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'started_at': self.started_at.isoformat() if self.started_at else None,
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'script': self.script.to_dict() if self.script else None,
             'pages': ([page.to_dict() for page in self.pages] if self.pages else []),
             'workflow_stages': (
                 [stage.to_dict() for stage in self.workflow_stages]
@@ -639,6 +500,111 @@ class ComicPage(db.Model):
             'image_url': self.image_url,
             'panel_text': self.panel_text,
             'layout': layout.to_dict() if layout else None,
+        }
+
+
+class ComicRenderRun(db.Model):
+    """Run-level state for first/all/remaining page generation."""
+
+    __tablename__ = 'comic_render_runs'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    comic_id = db.Column(
+        db.Integer,
+        db.ForeignKey('comics.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey('users.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
+    mode = db.Column(db.String(30), nullable=False)
+    status = db.Column(db.String(20), nullable=False, default='queued', index=True)
+    current_page_number = db.Column(db.Integer, nullable=True)
+    requested_pages_json = db.Column(db.Text, nullable=False, default='[]')
+    completed_pages_json = db.Column(db.Text, nullable=False, default='[]')
+    failed_pages_json = db.Column(db.Text, nullable=False, default='[]')
+    abort_requested = db.Column(db.Boolean, nullable=False, default=False)
+    job_id = db.Column(db.String(36), nullable=True, index=True)
+    error_message = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    started_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    comic = db.relationship('Comic', backref=db.backref('render_runs', lazy=True))
+
+    @staticmethod
+    def _loads(value: str | None) -> list[int]:
+        try:
+            parsed = json.loads(value or '[]')
+        except (TypeError, ValueError):
+            return []
+        return [
+            int(item)
+            for item in parsed
+            if isinstance(item, int) or str(item).isdigit()
+        ]
+
+    @staticmethod
+    def _dumps(values: list[int]) -> str:
+        return json.dumps(sorted(set(int(value) for value in values)))
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        comic_id: int,
+        user_id: int,
+        mode: str,
+        requested_pages: list[int],
+    ):
+        return cls(
+            comic_id=comic_id,
+            user_id=user_id,
+            mode=mode,
+            requested_pages_json=cls._dumps(requested_pages),
+            completed_pages_json='[]',
+            failed_pages_json='[]',
+        )
+
+    @property
+    def requested_pages(self) -> list[int]:
+        return self._loads(self.requested_pages_json)
+
+    @property
+    def completed_pages(self) -> list[int]:
+        return self._loads(self.completed_pages_json)
+
+    @property
+    def failed_pages(self) -> list[int]:
+        return self._loads(self.failed_pages_json)
+
+    def mark_completed_page(self, page_number: int) -> None:
+        self.completed_pages_json = self._dumps([*self.completed_pages, page_number])
+
+    def mark_failed_page(self, page_number: int) -> None:
+        self.failed_pages_json = self._dumps([*self.failed_pages, page_number])
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'comic_id': self.comic_id,
+            'user_id': self.user_id,
+            'mode': self.mode,
+            'status': self.status,
+            'current_page_number': self.current_page_number,
+            'requested_pages': self.requested_pages,
+            'completed_pages': self.completed_pages,
+            'failed_pages': self.failed_pages,
+            'abort_requested': self.abort_requested,
+            'job_id': self.job_id,
+            'error_message': self.error_message,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
         }
 
 

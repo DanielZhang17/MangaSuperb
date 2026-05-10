@@ -1,22 +1,45 @@
- 
-import { useAtom } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { ChevronDown, ChevronUp, Image as ImageIcon, Plus } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 
 import ComicsApi from '@/apis/comics'
 import PanelsApi from '@/apis/panels'
+import { type ActiveJobEntry, activeJobsAtom } from '@/atoms'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import {
+  DEFAULT_ASPECT_RATIOS,
+  DEFAULT_BUBBLE_SHAPES,
+  DEFAULT_COLOR_MODES,
+  DEFAULT_FONT_FAMILIES,
+  DEFAULT_FONT_SIZES,
+  DEFAULT_SELECTED_STYLE,
+  DEFAULT_STYLE_PRESETS,
+} from '@/config/preferences'
 import { AI_PROVIDER_LABELS, useAiProviders } from '@/hooks/use-ai-providers'
+import { useI18n } from '@/hooks/use-i18n'
+import { usePreferences } from '@/hooks/use-preferences'
+import { resolveAvailablePreferenceValue, resolvePreferenceValue } from '@/lib/auto-preferences'
 import { cn, proxiedStatic } from '@/lib/utils'
-import type { AiProviderId } from '@/service/types'
+import type { AiProviderId, AutoPreference, ColorMode, RenderRun } from '@/service/types'
 
-import { activeTabAtom, currentComicDetailAtom, currentComicIdAtom, imageProviderAtom, storyStepAtom, styleAtom, textProviderAtom } from '../atoms'
+import {
+  activeRenderRunAtom,
+  activeTabAtom,
+  aspectRatioAtom,
+  currentComicDetailAtom,
+  currentComicIdAtom,
+  currentComicOverridesAtom,
+  imageProviderAtom,
+  storyStepAtom,
+  styleAtom,
+  textProviderAtom,
+} from '../atoms'
+import { AutoSelectControl, type AutoSelectOption } from '../components/auto-select-control'
 import { ComicsWorkflowShell, WorkflowActionBar } from '../components/workflow-layout'
 import type { RenderProgressState } from '../workflow-types'
 import { GeneratedImage } from './generated-image'
@@ -40,37 +63,170 @@ const INITIAL_SCENES: Scene[] = [
   { id: 2, label: '02' },
 ]
 
-const FONT_OPTIONS = [
-  { value: 'source-han-sans', label: '思源黑体' },
-  { value: 'yahei', label: '微软雅黑' },
-  { value: 'heiti', label: '黑体' },
-  { value: 'songti', label: '宋体' },
+const FONT_LABELS: Record<string, string> = {
+  'source-han-sans': '思源黑体',
+  yahei: '微软雅黑',
+  heiti: '黑体',
+  songti: '宋体',
+}
+
+const FONT_OPTIONS = DEFAULT_FONT_FAMILIES.map((value) => ({
+  value,
+  label: FONT_LABELS[value] ?? value,
+}))
+
+const FONT_SIZE_OPTIONS = DEFAULT_FONT_SIZES.map((value) => ({
+  value,
+  label: value,
+}))
+
+const ASPECT_RATIO_OPTIONS = DEFAULT_ASPECT_RATIOS.map((value) => ({
+  value,
+  label: value,
+}))
+
+const DEFAULT_ASPECT_RATIO = DEFAULT_ASPECT_RATIOS[0] ?? '16:9'
+const DEFAULT_FONT_FAMILY = DEFAULT_FONT_FAMILIES[0] ?? 'source-han-sans'
+const DEFAULT_FONT_SIZE = DEFAULT_FONT_SIZES[1] ?? DEFAULT_FONT_SIZES[0] ?? '20'
+const DEFAULT_BUBBLE_SHAPE = DEFAULT_BUBBLE_SHAPES[0] ?? 'rect'
+const DEFAULT_COLOR_MODE = DEFAULT_COLOR_MODES[0] ?? 'black-white'
+
+type RenderRunMode = RenderRun['mode']
+
+const RENDER_RUN_ACTIONS: { mode: RenderRunMode; labelKey: string }[] = [
+  { mode: 'first_page', labelKey: 'image.generateFirst' },
+  { mode: 'remaining_pages', labelKey: 'image.generateRemaining' },
+  { mode: 'all_pages', labelKey: 'image.generateAll' },
 ]
 
-const FONT_SIZE_OPTIONS = ['18', '20', '22', '24', '28']
+const RENDER_RUN_MODE_LABELS: Record<RenderRunMode, string> = {
+  first_page: 'image.mode.firstPage',
+  remaining_pages: 'image.mode.remainingPages',
+  all_pages: 'image.mode.allPages',
+}
 
-const BUBBLE_SHAPES = [
-  { value: 'rect', label: '矩形' },
-  { value: 'round', label: '圆角' },
-]
+function isActiveRenderRun(renderRun: RenderRun | null) {
+  return Boolean(
+    renderRun
+      && (renderRun.status === 'queued' || renderRun.status === 'running'),
+  )
+}
 
-const STYLE_PRESETS = [
-  { value: 'Classic manga black and white linework.', label: '经典黑白漫画线稿' },
-  { value: 'High-contrast ink with splashy gradients', label: '高对比墨线 + 渐变' },
-  { value: 'Moebius-inspired clean lines, minimal shading', label: '莫比乌斯风·干净线条' },
-  { value: 'Gritty seinen style with textured shading', label: '青年向质感阴影' },
-]
+function isActiveRenderJobStatus(status: string | null | undefined) {
+  return status === 'queued' || status === 'started' || status === 'running'
+}
+
+function renderRunProgressStatus(renderRun: RenderRun): RenderProgressState['status'] {
+  if (renderRun.status === 'aborted') return 'idle'
+  if (renderRun.status === 'queued') return 'submitting'
+  if (renderRun.status === 'running') return 'rendering'
+  if (renderRun.status === 'completed') return 'completed'
+  if (renderRun.status === 'failed') return 'failed'
+
+  return 'idle'
+}
+
+function renderRunStatusMessage(renderRun: RenderRun, t: (key: string, options?: any) => unknown) {
+  const modeLabel = String(t(RENDER_RUN_MODE_LABELS[renderRun.mode]))
+
+  if (renderRun.status === 'aborted') {
+    return String(t('image.run.aborted'))
+  }
+
+  if (renderRun.abort_requested) {
+    return String(t('image.run.abortRequested'))
+  }
+
+  if (renderRun.status === 'queued') {
+    return String(t('image.run.queued', { mode: modeLabel }))
+  }
+
+  if (renderRun.status === 'running') {
+    return String(t('image.run.running', { mode: modeLabel }))
+  }
+
+  if (renderRun.status === 'completed') {
+    return String(t('image.run.completed', { mode: modeLabel }))
+  }
+
+  if (renderRun.status === 'failed') {
+    return renderRun.error_message
+      ? String(t('image.run.failedWithError', { mode: modeLabel, message: renderRun.error_message }))
+      : String(t('image.run.failed', { mode: modeLabel }))
+  }
+
+  return String(t('image.run.aborted'))
+}
+
+function renderRunHelperText(renderRun: RenderRun | null, t: (key: string, options?: any) => unknown) {
+  if (!renderRun) return undefined
+
+  if (renderRun.status === 'aborted') {
+    return String(t('image.run.helperAborted'))
+  }
+
+  if (renderRun.abort_requested) {
+    return String(t('image.run.helperAbortRequested'))
+  }
+
+  if (renderRun.status === 'completed') {
+    return String(t('image.run.helperCompleted'))
+  }
+
+  if (renderRun.status === 'failed') {
+    return String(t('image.run.helperFailed'))
+  }
+
+  return String(t('image.run.helperRunning'))
+}
+
+function createActiveRenderJob(renderRun: RenderRun, title?: string | null, fallbackTitle = 'Render run'): ActiveJobEntry {
+  return {
+    job_id: renderRun.job_id ?? `render-run-${renderRun.id}`,
+    render_run_id: renderRun.id,
+    comic_id: renderRun.comic_id,
+    stage: 'render',
+    status: renderRun.status,
+    title: title ?? fallbackTitle,
+    started_at: renderRun.started_at,
+    rq_status: renderRun.status,
+    workflow_stages: [{ stage: 'render', status: renderRun.status }],
+    render_progress: {
+      completed: renderRun.completed_pages.length,
+      total: renderRun.requested_pages.length,
+    },
+    render_run: renderRun,
+    reconnecting: false,
+    warning: null,
+  }
+}
+
+function parseImagePages(imagesRes: unknown): PageImage[] {
+  const pagesArr = (imagesRes as { pages?: unknown })?.pages
+
+  return Array.isArray(pagesArr) ? pagesArr as PageImage[] : []
+}
+
+function pagesToScenes(pagesArr: PageImage[]): Scene[] {
+  return [...pagesArr]
+    .sort((a, b) => a.page_number - b.page_number)
+    .map((page) => ({
+      id: page.page_number,
+      label: String(page.page_number).padStart(2, '0'),
+      pageId: page.page_id,
+    }))
+}
 
 function renderFailureMessage(comic: any): string | null {
   const stages = Array.isArray(comic?.workflow_stages) ? comic.workflow_stages : []
   const renderStage = stages.find((stage: any) => stage?.stage === 'render')
 
   if (renderStage?.status === 'failed') {
-    return renderStage.error_message || comic?.error_message || '渲染任务失败'
+    return renderStage.error_message || comic?.error_message || 'image.error.renderFailed'
   }
 
   if (comic?.workflow_stage === 'render' && comic?.workflow_status === 'failed') {
-    return comic?.error_message || '渲染任务失败'
+    return comic?.error_message || 'image.error.renderFailed'
   }
 
   return null
@@ -151,6 +307,49 @@ function ShapePreview({ shape }: { shape: string }) {
   )
 }
 
+function AutoBooleanSelectControl({
+  label,
+  value,
+  trueLabel,
+  falseLabel,
+  onChange,
+}: {
+  label: string
+  value: AutoPreference<boolean>
+  trueLabel: string
+  falseLabel: string
+  onChange: (value: AutoPreference<boolean>) => void
+}) {
+  const { t } = useI18n('common')
+  const selectValue = value.mode === 'manual' ? String(value.value) : 'auto'
+
+  return (
+    <LabelRow label={label}>
+      <Select
+        value={selectValue}
+        onValueChange={(nextValue) => {
+          if (nextValue === 'auto') {
+            onChange({ mode: 'auto' })
+
+            return
+          }
+
+          onChange({ mode: 'manual', value: nextValue === 'true' })
+        }}
+      >
+        <SelectTrigger className="w-44 max-w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="auto">{String(t('preference.auto'))}</SelectItem>
+          <SelectItem value="true">{trueLabel}</SelectItem>
+          <SelectItem value="false">{falseLabel}</SelectItem>
+        </SelectContent>
+      </Select>
+    </LabelRow>
+  )
+}
+
 function SceneThumbnail({
   label,
   isActive,
@@ -184,10 +383,12 @@ function SceneThumbnail({
 }
 
 function StoryboardCanvas({ onPreview, imageUrl }: { onPreview: () => void; imageUrl?: string | null }) {
+  const { t } = useI18n('comics')
+
   return (
     <main className="flex min-h-[420px] flex-1 flex-col items-center gap-4 lg:min-h-[540px]">
       <Button variant="secondary" onClick={onPreview} className="px-8">
-        预览
+        {String(t('image.preview'))}
       </Button>
       <div className="flex w-full flex-1 items-center justify-center overflow-hidden rounded-lg border border-dashed border-muted-foreground/40 bg-muted/80 p-3">
         {imageUrl ? (
@@ -203,148 +404,163 @@ function StoryboardCanvas({ onPreview, imageUrl }: { onPreview: () => void; imag
 // 去除本地实现，统一使用全局 proxiedStatic
 
 function PropertyPanel({
-  imageProvider,
-  onImageProviderChange,
+  imageProviderPreference,
+  onImageProviderPreferenceChange,
   imageProviderOptions,
-  styleValue,
-  onStyleChange,
-  fontFamily,
-  onFontFamilyChange,
-  fontSize,
-  onFontSizeChange,
-  bubbleShape,
-  onBubbleShapeChange,
-  hasTail,
-  onToggleTail,
+  textProviderPreference,
+  onTextProviderPreferenceChange,
+  textProviderOptions,
+  stylePreference,
+  onStylePreferenceChange,
+  styleOptions,
+  colorModePreference,
+  onColorModePreferenceChange,
+  aspectRatioPreference,
+  onAspectRatioPreferenceChange,
+  fontFamilyPreference,
+  onFontFamilyPreferenceChange,
+  fontSizePreference,
+  onFontSizePreferenceChange,
+  bubbleShapePreference,
+  onBubbleShapePreferenceChange,
+  bubbleTailPreference,
+  onBubbleTailPreferenceChange,
   onOpenPublish,
   onExportImage,
   canExport,
   isPublishing,
 }: {
-  imageProvider: AiProviderId
-  onImageProviderChange: (value: AiProviderId) => void
-  imageProviderOptions: AiProviderId[]
-  styleValue: string
-  onStyleChange: (value: string) => void
-  fontFamily: string
-  onFontFamilyChange: (value: string) => void
-  fontSize: string
-  onFontSizeChange: (value: string) => void
-  bubbleShape: string
-  onBubbleShapeChange: (shape: string) => void
-  hasTail: boolean
-  onToggleTail: () => void
+  imageProviderPreference: AutoPreference<AiProviderId>
+  onImageProviderPreferenceChange: (value: AutoPreference<AiProviderId>) => void
+  imageProviderOptions: AutoSelectOption<AiProviderId>[]
+  textProviderPreference: AutoPreference<AiProviderId>
+  onTextProviderPreferenceChange: (value: AutoPreference<AiProviderId>) => void
+  textProviderOptions: AutoSelectOption<AiProviderId>[]
+  stylePreference: AutoPreference<string>
+  onStylePreferenceChange: (value: AutoPreference<string>) => void
+  styleOptions: AutoSelectOption<string>[]
+  colorModePreference: AutoPreference<ColorMode>
+  onColorModePreferenceChange: (value: AutoPreference<ColorMode>) => void
+  aspectRatioPreference: AutoPreference<string>
+  onAspectRatioPreferenceChange: (value: AutoPreference<string>) => void
+  fontFamilyPreference: AutoPreference<string>
+  onFontFamilyPreferenceChange: (value: AutoPreference<string>) => void
+  fontSizePreference: AutoPreference<string>
+  onFontSizePreferenceChange: (value: AutoPreference<string>) => void
+  bubbleShapePreference: AutoPreference<string>
+  onBubbleShapePreferenceChange: (value: AutoPreference<string>) => void
+  bubbleTailPreference: AutoPreference<boolean>
+  onBubbleTailPreferenceChange: (value: AutoPreference<boolean>) => void
   onOpenPublish: () => void
   onExportImage: () => void
   canExport: boolean
   isPublishing: boolean
 }) {
+  const { t } = useI18n('comics')
+  const colorModeOptions = useMemo(() => (
+    DEFAULT_COLOR_MODES.map((value) => ({
+      value,
+      label: String(t(value === 'black-white' ? 'format.color.blackWhite' : 'format.color.color')),
+    }))
+  ), [t])
+  const bubbleShapeOptions = useMemo(() => (
+    DEFAULT_BUBBLE_SHAPES.map((value) => ({
+      value,
+      label: value === 'rect' ? String(t('options.bubbleShape.rect', { ns: 'me' })) : String(t('options.bubbleShape.round', { ns: 'me' })),
+    }))
+  ), [t])
+
   return (
     <aside className="flex min-w-0 flex-col gap-4 xl:w-80">
-      <PanelCard title="AI模型">
-        <LabelRow label="生图模型">
-          <Select value={imageProvider} onValueChange={(value) => onImageProviderChange(value as AiProviderId)}>
-            <SelectTrigger className="w-44 max-w-full">
-              <SelectValue placeholder="选择模型" />
-            </SelectTrigger>
-            <SelectContent>
-              {imageProviderOptions.map((provider) => (
-                <SelectItem key={provider} value={provider}>
-                  {AI_PROVIDER_LABELS[provider]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </LabelRow>
+      <PanelCard title={String(t('image.model'))}>
+        <AutoSelectControl
+          label={String(t('image.imageModel'))}
+          value={imageProviderPreference}
+          options={imageProviderOptions}
+          onChange={onImageProviderPreferenceChange}
+        />
+        <AutoSelectControl
+          label={String(t('image.textModel'))}
+          value={textProviderPreference}
+          options={textProviderOptions}
+          onChange={onTextProviderPreferenceChange}
+        />
       </PanelCard>
 
-      <PanelCard title="风格">
-        <LabelRow label="渲染风格">
-          <Select value={styleValue} onValueChange={onStyleChange}>
-            <SelectTrigger className="w-44 max-w-full">
-              <SelectValue placeholder="选择风格" />
-            </SelectTrigger>
-            <SelectContent>
-              {STYLE_PRESETS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </LabelRow>
+      <PanelCard title={String(t('image.style'))}>
+        <AutoSelectControl
+          label={String(t('image.renderStyle'))}
+          value={stylePreference}
+          options={styleOptions}
+          onChange={onStylePreferenceChange}
+        />
+        <AutoSelectControl
+          label={String(t('image.color'))}
+          value={colorModePreference}
+          options={colorModeOptions}
+          onChange={onColorModePreferenceChange}
+        />
+        <AutoSelectControl
+          label={String(t('image.aspectRatio'))}
+          value={aspectRatioPreference}
+          options={ASPECT_RATIO_OPTIONS}
+          onChange={onAspectRatioPreferenceChange}
+        />
       </PanelCard>
 
-      <PanelCard title="文本">
-        <LabelRow label="字体">
-          <Select value={fontFamily} onValueChange={onFontFamilyChange}>
-            <SelectTrigger className="w-44 max-w-full">
-              <SelectValue placeholder="选择字体" />
-            </SelectTrigger>
-            <SelectContent>
-              {FONT_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </LabelRow>
-        <LabelRow label="字体大小">
-          <Select value={fontSize} onValueChange={onFontSizeChange}>
-            <SelectTrigger className="w-40">
-              <SelectValue placeholder="选择大小" />
-            </SelectTrigger>
-            <SelectContent>
-              {FONT_SIZE_OPTIONS.map((size) => (
-                <SelectItem key={size} value={size}>
-                  {size}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </LabelRow>
+      <PanelCard title={String(t('image.text'))}>
+        <AutoSelectControl
+          label={String(t('image.font'))}
+          value={fontFamilyPreference}
+          options={FONT_OPTIONS}
+          onChange={onFontFamilyPreferenceChange}
+        />
+        <AutoSelectControl
+          label={String(t('image.fontSize'))}
+          value={fontSizePreference}
+          options={FONT_SIZE_OPTIONS}
+          onChange={onFontSizePreferenceChange}
+        />
       </PanelCard>
 
-      <PanelCard title="会话框">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <Select value={bubbleShape} onValueChange={onBubbleShapeChange}>
-            <SelectTrigger className="w-36">
-              <SelectValue placeholder="选择类型" />
-            </SelectTrigger>
-            <SelectContent>
-              {BUBBLE_SHAPES.map((shape) => (
-                <SelectItem key={shape.value} value={shape.value}>
-                  <div className="flex items-center gap-2">
-                    <ShapePreview shape={shape.value} />
-                    <span>{shape.label}</span>
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <div className="flex items-center gap-2">
-            <Checkbox id="bubble-tail" checked={hasTail} onCheckedChange={onToggleTail} />
-            <Label htmlFor="bubble-tail">{hasTail ? '有' : '无'}尾巴</Label>
-          </div>
+      <PanelCard title={String(t('image.bubble'))}>
+        <AutoSelectControl
+          label={String(t('image.bubbleType'))}
+          value={bubbleShapePreference}
+          options={bubbleShapeOptions}
+          onChange={onBubbleShapePreferenceChange}
+        />
+        <div className="flex justify-end">
+          <ShapePreview
+            shape={bubbleShapePreference.mode === 'manual'
+              ? bubbleShapePreference.value
+              : DEFAULT_BUBBLE_SHAPE}
+          />
         </div>
+        <AutoBooleanSelectControl
+          label={String(t('image.bubbleTail'))}
+          value={bubbleTailPreference}
+          trueLabel={String(t('image.tailOn'))}
+          falseLabel={String(t('image.tailOff'))}
+          onChange={onBubbleTailPreferenceChange}
+        />
       </PanelCard>
 
-      <PanelCard title="导出">
+      <PanelCard title={String(t('image.export'))}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Button
             variant="outline"
             onClick={onOpenPublish}
             disabled={!canExport || isPublishing}
           >
-            导出 PDF
+            {String(t('image.exportPdf'))}
           </Button>
           <Button
             variant="outline"
             onClick={onExportImage}
             disabled={!canExport}
           >
-            导出图片
+            {String(t('image.exportImages'))}
           </Button>
         </div>
       </PanelCard>
@@ -374,13 +590,13 @@ function LabelRow({ label, children }: { label: string; children: React.ReactNod
   )
 }
 
-function createRenderProgress(maxPollTries: number): RenderProgressState {
+function createRenderProgress(maxPollTries: number, message: string): RenderProgressState {
   return {
     status: 'idle',
     elapsedMs: 0,
     pollTries: 0,
     maxPollTries,
-    message: '准备生成漫画页',
+    message,
   }
 }
 
@@ -388,57 +604,320 @@ function createRenderProgress(maxPollTries: number): RenderProgressState {
  * 故事板生图配置页
  */
 export function ImageGeneration() {
+  const { t } = useI18n('comics')
   const [scenes, setScenes] = useState(INITIAL_SCENES)
   const [selectedScene, setSelectedScene] = useState(INITIAL_SCENES[0]?.id ?? 1)
   // Pages data from images API
   const [pages, setPages] = useState<PageImage[]>([])
-  const [fontFamily, setFontFamily] = useState(FONT_OPTIONS[0].value)
-  const [fontSize, setFontSize] = useState(FONT_SIZE_OPTIONS[1])
-  const [bubbleShape, setBubbleShape] = useState(BUBBLE_SHAPES[0].value)
+  const [fontFamily, setFontFamily] = useState(DEFAULT_FONT_FAMILY)
+  const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE)
+  const [bubbleShape, setBubbleShape] = useState(DEFAULT_BUBBLE_SHAPE)
   const [hasTail, setHasTail] = useState(true)
+  const [colorMode, setColorMode] = useState<ColorMode>(DEFAULT_COLOR_MODE)
   const [isRendering, setIsRendering] = useState(false)
+  const [isStartingRenderRun, setIsStartingRenderRun] = useState(false)
+  const [isAbortingRenderRun, setIsAbortingRenderRun] = useState(false)
   const [isPublishing, setIsPublishing] = useState(false)
   const [publishOpen, setPublishOpen] = useState(false)
   const [makePublic, setMakePublic] = useState(true)
   const MAX_POLL_TRIES = 180 // 180 * 2s = 6min; keep ahead of backend image timeout
   const [pollTries, setPollTries] = useState(0)
-  const [renderProgress, setRenderProgress] = useState<RenderProgressState>(() => createRenderProgress(MAX_POLL_TRIES))
+  const [renderProgress, setRenderProgress] = useState<RenderProgressState>(() => (
+    createRenderProgress(MAX_POLL_TRIES, String(t('image.readyMessage')))
+  ))
   const pollTimerRef = useRef<number | null>(null)
   const triesRef = useRef<number>(0)
   const renderStartedAtRef = useRef<number | null>(null)
   const renderTargetRef = useRef<{ pageNumber: number; previousImageUrl: string | null } | null>(null)
+  const refreshedRenderRunIdsRef = useRef<Set<number>>(new Set())
   // PDF 导出轮询
   const MAX_PDF_POLL_TRIES = 30 // 30 * 2s = 60s
   const pdfPollTimerRef = useRef<number | null>(null)
   const pdfTriesRef = useRef<number>(0)
   const [comicId] = useAtom(currentComicIdAtom)
   const [, setComicDetail] = useAtom(currentComicDetailAtom)
+  const [activeRenderRun, setActiveRenderRun] = useAtom(activeRenderRunAtom)
+  const setActiveJobs = useSetAtom(activeJobsAtom)
   const [style, setStyle] = useAtom(styleAtom)
+  const [aspectRatio, setAspectRatio] = useAtom(aspectRatioAtom)
+  const [overrides, setOverrides] = useAtom(currentComicOverridesAtom)
   const [imageProvider, setImageProvider] = useAtom(imageProviderAtom)
-  const [textProvider] = useAtom(textProviderAtom)
-  const { providers, imageProviders, loading: providersLoading } = useAiProviders()
-  const imageProviderInitializedRef = useRef(false)
-  const imageProviderChangedRef = useRef(false)
+  const [textProvider, setTextProvider] = useAtom(textProviderAtom)
+  const { providers, imageProviders, textProviders, loading: providersLoading } = useAiProviders()
+  const { preferences } = usePreferences()
+  const imageProviderOptions = useMemo(() => (
+    imageProviders.map((provider) => ({
+      value: provider,
+      label: AI_PROVIDER_LABELS[provider],
+    }))
+  ), [imageProviders])
+  const textProviderOptions = useMemo(() => (
+    textProviders.map((provider) => ({
+      value: provider,
+      label: AI_PROVIDER_LABELS[provider],
+    }))
+  ), [textProviders])
+  const styleOptions = useMemo(() => {
+    const preferencePresets = preferences?.style_presets
+    const presets = Array.isArray(preferencePresets) && preferencePresets.length > 0
+      ? preferencePresets
+      : DEFAULT_STYLE_PRESETS
+
+    return presets.map((preset) => ({
+      value: preset.value,
+      label: preset.label,
+    }))
+  }, [preferences?.style_presets])
+
+  const imageProviderFallback = imageProviders.includes(providers.defaults.image)
+    ? providers.defaults.image
+    : (imageProviders[0] ?? providers.defaults.image)
+  const textProviderFallback = textProviders.includes(providers.defaults.text)
+    ? providers.defaults.text
+    : (textProviders[0] ?? providers.defaults.text)
+  const preferenceImageProvider = preferences?.fields?.image_provider
+  const preferenceTextProvider = preferences?.fields?.text_provider
+  const defaultImageProvider = resolveAvailablePreferenceValue(
+    preferenceImageProvider,
+    imageProviders,
+    imageProviderFallback,
+  )
+  const defaultTextProvider = resolveAvailablePreferenceValue(
+    preferenceTextProvider,
+    textProviders,
+    textProviderFallback,
+  )
+  const imageProviderPreference = (
+    overrides.image_provider ?? preferenceImageProvider ?? { mode: 'auto' }
+  ) as AutoPreference<AiProviderId>
+  const textProviderPreference = (
+    overrides.text_provider ?? preferenceTextProvider ?? { mode: 'auto' }
+  ) as AutoPreference<AiProviderId>
+  const resolvedImageProvider = resolveAvailablePreferenceValue(
+    imageProviderPreference,
+    imageProviders,
+    defaultImageProvider,
+  )
+  const resolvedTextProvider = resolveAvailablePreferenceValue(
+    textProviderPreference,
+    textProviders,
+    defaultTextProvider,
+  )
+
+  const preferenceStyle = preferences?.fields?.style
+  const defaultStyle = resolvePreferenceValue(
+    preferenceStyle,
+    styleOptions[0]?.value ?? DEFAULT_SELECTED_STYLE,
+  )
+  const stylePreference = (overrides.style ?? preferenceStyle ?? { mode: 'auto' }) as AutoPreference<string>
+  const resolvedStyle = resolvePreferenceValue(stylePreference, defaultStyle)
+  const preferenceColorMode = preferences?.fields?.color_mode
+  const defaultColorMode = resolvePreferenceValue(preferenceColorMode, DEFAULT_COLOR_MODE)
+  const colorModePreference = (
+    overrides.color_mode ?? preferenceColorMode ?? { mode: 'auto' }
+  ) as AutoPreference<ColorMode>
+  const resolvedColorMode = resolvePreferenceValue(colorModePreference, defaultColorMode)
+  const preferenceAspectRatio = preferences?.fields?.aspect_ratio
+  const defaultAspectRatio = resolvePreferenceValue(preferenceAspectRatio, DEFAULT_ASPECT_RATIO)
+  const aspectRatioPreference = (
+    overrides.aspect_ratio ?? preferenceAspectRatio ?? { mode: 'auto' }
+  ) as AutoPreference<string>
+  const resolvedAspectRatio = resolvePreferenceValue(aspectRatioPreference, defaultAspectRatio)
+  const preferenceFontFamily = preferences?.fields?.font_family
+  const defaultFontFamily = resolvePreferenceValue(preferenceFontFamily, DEFAULT_FONT_FAMILY)
+  const fontFamilyPreference = (
+    overrides.font_family ?? preferenceFontFamily ?? { mode: 'auto' }
+  ) as AutoPreference<string>
+  const resolvedFontFamily = resolvePreferenceValue(fontFamilyPreference, defaultFontFamily)
+  const preferenceFontSize = preferences?.fields?.font_size
+  const defaultFontSize = resolvePreferenceValue(preferenceFontSize, DEFAULT_FONT_SIZE)
+  const fontSizePreference = (
+    overrides.font_size ?? preferenceFontSize ?? { mode: 'auto' }
+  ) as AutoPreference<string>
+  const resolvedFontSize = resolvePreferenceValue(fontSizePreference, defaultFontSize)
+  const preferenceBubbleShape = preferences?.fields?.bubble_shape
+  const defaultBubbleShape = resolvePreferenceValue(preferenceBubbleShape, DEFAULT_BUBBLE_SHAPE)
+  const bubbleShapePreference = (
+    overrides.bubble_shape ?? preferenceBubbleShape ?? { mode: 'auto' }
+  ) as AutoPreference<string>
+  const resolvedBubbleShape = resolvePreferenceValue(bubbleShapePreference, defaultBubbleShape)
+  const preferenceBubbleTail = preferences?.fields?.bubble_tail
+  const defaultBubbleTail = resolvePreferenceValue(preferenceBubbleTail, true)
+  const bubbleTailPreference = (
+    overrides.bubble_tail ?? preferenceBubbleTail ?? { mode: 'auto' }
+  ) as AutoPreference<boolean>
+  const resolvedBubbleTail = resolvePreferenceValue(bubbleTailPreference, defaultBubbleTail)
+  const renderOptions = useMemo(() => ({
+    image_provider: resolvedImageProvider,
+    text_provider: resolvedTextProvider,
+    style_description: resolvedStyle,
+    color_mode: resolvedColorMode,
+    aspect_ratio: resolvedAspectRatio,
+    font_family: resolvedFontFamily,
+    font_size: resolvedFontSize,
+    bubble_shape: resolvedBubbleShape,
+    bubble_tail: resolvedBubbleTail,
+  }), [
+    resolvedAspectRatio,
+    resolvedBubbleShape,
+    resolvedBubbleTail,
+    resolvedColorMode,
+    resolvedFontFamily,
+    resolvedFontSize,
+    resolvedImageProvider,
+    resolvedStyle,
+    resolvedTextProvider,
+  ])
+  const applyImagePages = useCallback((pagesArr: PageImage[]) => {
+    if (!Array.isArray(pagesArr) || pagesArr.length === 0) return
+
+    const sortedPages = [...pagesArr].sort((a, b) => a.page_number - b.page_number)
+    const newScenes = pagesToScenes(sortedPages)
+
+    setPages(sortedPages)
+    setScenes(newScenes)
+    setSelectedScene((current) => (
+      newScenes.some((scene) => scene.id === current) ? current : newScenes[0].id
+    ))
+  }, [])
+
+  const fetchImagePages = useCallback(async (targetComicId: number) => {
+    const imagesRes = await ComicsApi.listImages(targetComicId)
+
+    return parseImagePages(imagesRes)
+  }, [])
+
+  const activeJobs = useAtomValue(activeJobsAtom)
+  const lightweightActiveRenderJobForComic = useMemo(() => {
+    if (comicId === null) return null
+
+    return activeJobs.find((job) => (
+      job.comic_id === comicId
+      && Boolean(job.render_run_id)
+      && !job.render_run
+      && (isActiveRenderJobStatus(job.status) || isActiveRenderJobStatus(job.rq_status))
+    )) ?? null
+  }, [activeJobs, comicId])
+  const activeJobRenderRunForComic = useMemo(() => {
+    if (comicId === null) return null
+
+    const renderRuns = activeJobs
+      .map((job) => job.render_run)
+      .filter((renderRun): renderRun is RenderRun => Boolean(renderRun && renderRun.comic_id === comicId))
+
+    const activeJobRun = renderRuns.find((renderRun) => isActiveRenderRun(renderRun))
+    if (activeJobRun) return activeJobRun
+
+    const trackedRenderRunId = activeRenderRun?.comic_id === comicId ? activeRenderRun.id : null
+    for (const job of activeJobs) {
+      const renderRun = job.render_run
+      if (!renderRun || renderRun.comic_id !== comicId) continue
+      if (trackedRenderRunId === null || renderRun.id === trackedRenderRunId) return renderRun
+    }
+
+    return null
+  }, [activeJobs, activeRenderRun?.comic_id, activeRenderRun?.id, comicId])
+  const activeRenderRunForComic = activeJobRenderRunForComic
+    ?? (comicId !== null && activeRenderRun?.comic_id === comicId ? activeRenderRun : null)
+  const hasActiveRenderRun = isActiveRenderRun(activeRenderRunForComic) || Boolean(lightweightActiveRenderJobForComic)
+  const canAbortActiveRenderRun = Boolean(
+    (isActiveRenderRun(activeRenderRunForComic) && !activeRenderRunForComic?.abort_requested)
+      || lightweightActiveRenderJobForComic,
+  )
+  const disableRenderRunActions = !comicId || isRendering || isStartingRenderRun || hasActiveRenderRun
 
   useEffect(() => {
-    if (providersLoading || !imageProviders.length) return
-
-    if (!imageProviderInitializedRef.current) {
-      imageProviderInitializedRef.current = true
-      if (!imageProviderChangedRef.current && imageProvider === 'gemini') {
-        const defaultProvider = imageProviders.includes(providers.defaults.image)
-          ? providers.defaults.image
-          : imageProviders[0]
-        setImageProvider(defaultProvider)
-
-        return
+    if (!activeJobRenderRunForComic) return
+    setActiveRenderRun((current) => {
+      if (
+        current?.id === activeJobRenderRunForComic.id
+        && current.status === activeJobRenderRunForComic.status
+        && current.abort_requested === activeJobRenderRunForComic.abort_requested
+      ) {
+        return current
       }
+
+      return activeJobRenderRunForComic
+    })
+  }, [activeJobRenderRunForComic, setActiveRenderRun])
+
+  useEffect(() => {
+    if (!comicId || !activeRenderRunForComic || activeRenderRunForComic.status !== 'completed') return
+    if (refreshedRenderRunIdsRef.current.has(activeRenderRunForComic.id)) return
+
+    refreshedRenderRunIdsRef.current.add(activeRenderRunForComic.id)
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [pagesArr, detail] = await Promise.all([
+          fetchImagePages(comicId),
+          ComicsApi.get(comicId).catch(() => null),
+        ])
+        if (cancelled) return
+        applyImagePages(pagesArr)
+        if (detail) setComicDetail(detail)
+      } catch (error) {
+        console.warn('刷新后台渲染结果失败', error)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    activeRenderRunForComic,
+    applyImagePages,
+    comicId,
+    fetchImagePages,
+    setComicDetail,
+  ])
+
+  useEffect(() => {
+    if (providersLoading) return
+
+    if (imageProvider !== resolvedImageProvider) {
+      setImageProvider(resolvedImageProvider)
     }
 
-    if (!imageProviders.includes(imageProvider) && imageProviders[0]) {
-      setImageProvider(imageProviders[0])
+    if (textProvider !== resolvedTextProvider) {
+      setTextProvider(resolvedTextProvider)
     }
-  }, [imageProvider, imageProviders, providers.defaults.image, providersLoading, setImageProvider])
+  }, [
+    imageProvider,
+    providersLoading,
+    resolvedImageProvider,
+    resolvedTextProvider,
+    setImageProvider,
+    setTextProvider,
+    textProvider,
+  ])
+
+  useEffect(() => {
+    if (style !== resolvedStyle) setStyle(resolvedStyle)
+    if (aspectRatio !== resolvedAspectRatio) setAspectRatio(resolvedAspectRatio)
+    if (fontFamily !== resolvedFontFamily) setFontFamily(resolvedFontFamily)
+    if (fontSize !== resolvedFontSize) setFontSize(resolvedFontSize)
+    if (bubbleShape !== resolvedBubbleShape) setBubbleShape(resolvedBubbleShape)
+    if (hasTail !== resolvedBubbleTail) setHasTail(resolvedBubbleTail)
+    if (colorMode !== resolvedColorMode) setColorMode(resolvedColorMode)
+  }, [
+    aspectRatio,
+    bubbleShape,
+    colorMode,
+    fontFamily,
+    fontSize,
+    hasTail,
+    resolvedAspectRatio,
+    resolvedBubbleShape,
+    resolvedBubbleTail,
+    resolvedColorMode,
+    resolvedFontFamily,
+    resolvedFontSize,
+    resolvedStyle,
+    setAspectRatio,
+    setStyle,
+    style,
+  ])
   const [, setActiveTab] = useAtom(activeTabAtom)
   const [, setStoryStep] = useAtom(storyStepAtom)
 
@@ -446,7 +925,7 @@ export function ImageGeneration() {
     // 回到故事流程继续编辑；保持当前 comicId 不变
     setActiveTab('story')
     setStoryStep('input')
-    toast.success('已切换到故事流程，继续编辑当前漫画')
+    toast.success(String(t('image.backToStory')))
   }
 
   const previewHandler = () => {
@@ -461,19 +940,9 @@ export function ImageGeneration() {
     let cancelled = false
     ;(async () => {
       try {
-        const imagesRes = await ComicsApi.listImages(comicId)
-        const pagesArr = (imagesRes as any)?.pages ?? []
+        const pagesArr = await fetchImagePages(comicId)
         if (cancelled) return
-        if (Array.isArray(pagesArr) && pagesArr.length > 0) {
-          setPages(pagesArr)
-          const newScenes: Scene[] = pagesArr
-            .sort((a: any, b: any) => a.page_number - b.page_number)
-            .map((p: any) => ({ id: p.page_number, label: String(p.page_number).padStart(2, '0'), pageId: p.page_id }))
-          setScenes(newScenes)
-          if (!newScenes.some((s) => s.id === selectedScene)) {
-            setSelectedScene(newScenes[0].id)
-          }
-        }
+        applyImagePages(pagesArr)
       } catch {
         // 忽略加载失败，不阻断页面
       }
@@ -482,7 +951,7 @@ export function ImageGeneration() {
     return () => {
       cancelled = true
     }
-  }, [comicId, selectedScene])
+  }, [applyImagePages, comicId, fetchImagePages])
 
   // 分镜头列表卡片已移除
 
@@ -534,7 +1003,7 @@ export function ImageGeneration() {
 
   const handleGenerate = async () => {
     if (!comicId) {
-      toast.error('请先完成“分镜”步骤后再来生图')
+      toast.error(String(t('image.error.needPanels')))
 
       return
     }
@@ -550,7 +1019,7 @@ export function ImageGeneration() {
       renderStartedAtRef.current = Date.now()
       updateRenderProgress({
         status: 'submitting',
-        message: '正在提交渲染任务',
+        message: String(t('image.run.submitting', { mode: String(t('image.mode.firstPage')) })),
         elapsedMs: 0,
         pollTries: 0,
         error: null,
@@ -578,13 +1047,10 @@ export function ImageGeneration() {
       )))
 
       // A) 触发该页渲染（布局已在“分镜”步骤完成）
-      await PanelsApi.renderPage(comicId, targetPageNumber, {
-        image_provider: imageProvider,
-        text_provider: textProvider,
-      })
+      await PanelsApi.renderPage(comicId, targetPageNumber, renderOptions)
       updateRenderProgress({
         status: 'rendering',
-        message: '正在生成漫画页',
+        message: String(t('image.generatingMessage')),
         pollTries: 0,
         error: null,
       })
@@ -614,7 +1080,7 @@ export function ImageGeneration() {
           setPollTries(triesRef.current)
           updateRenderProgress({
             status: 'rendering',
-            message: '正在生成漫画页',
+            message: String(t('image.generatingMessage')),
             pollTries: triesRef.current,
           })
 
@@ -631,10 +1097,10 @@ export function ImageGeneration() {
               }
             }
 
-            toast.success('生图完成')
+            toast.success(String(t('image.success.completed')))
             updateRenderProgress({
               status: 'completed',
-              message: '生图完成',
+              message: String(t('image.success.completed')),
               pollTries: triesRef.current,
               error: null,
             })
@@ -652,7 +1118,13 @@ export function ImageGeneration() {
             const detail = await ComicsApi.get(comicId)
             const failureMessage = renderFailureMessage(detail)
             if (failureMessage) {
-              const message = `生图失败：${failureMessage}`
+              const translatedFailure = failureMessage === 'image.error.renderFailed'
+                ? String(t('image.error.renderFailed'))
+                : failureMessage
+              const message = String(t('image.run.failedWithError', {
+                mode: String(t('image.mode.firstPage')),
+                message: translatedFailure,
+              }))
               setComicDetail(detail)
               updateRenderProgress({
                 status: 'failed',
@@ -669,7 +1141,7 @@ export function ImageGeneration() {
             }
 
             if (triesRef.current >= MAX_POLL_TRIES) {
-              const message = '生图超时（6min），请稍后重试或检查任务队列'
+              const message = String(t('image.error.timeout'))
               updateRenderProgress({
                 status: 'timeout',
                 message,
@@ -688,11 +1160,11 @@ export function ImageGeneration() {
           setPollTries(triesRef.current)
           updateRenderProgress({
             status: 'rendering',
-            message: '正在生成漫画页',
+            message: String(t('image.generatingMessage')),
             pollTries: triesRef.current,
           })
           if (triesRef.current >= MAX_POLL_TRIES) {
-            const message = '生图轮询失败或超时'
+            const message = String(t('image.error.pollFailed'))
             updateRenderProgress({
               status: 'timeout',
               message,
@@ -716,7 +1188,7 @@ export function ImageGeneration() {
         console.warn('获取漫画详情失败', e)
       }
     } catch (err: any) {
-      const message = err?.message || '生图任务创建失败'
+      const message = err?.message || String(t('image.error.createFailed'))
       updateRenderProgress({
         status: 'failed',
         message,
@@ -729,10 +1201,197 @@ export function ImageGeneration() {
     }
   }
 
+  const handleStartRenderRun = async (mode: RenderRunMode) => {
+    if (!comicId) {
+      toast.error(String(t('image.error.needPanels')))
+
+      return
+    }
+
+    try {
+      setIsStartingRenderRun(true)
+      clearPoll()
+      setIsRendering(false)
+      setPollTries(0)
+      renderTargetRef.current = null
+      renderStartedAtRef.current = Date.now()
+      updateRenderProgress({
+        status: 'submitting',
+        message: String(t('image.run.submitting', {
+          mode: String(t(RENDER_RUN_MODE_LABELS[mode])),
+        })),
+        elapsedMs: 0,
+        pollTries: 0,
+        error: null,
+      })
+
+      const response = await PanelsApi.startRenderRun(comicId, {
+        mode,
+        ...renderOptions,
+      })
+      const renderRun = response.render_run
+      setActiveRenderRun(renderRun)
+      setActiveJobs((current) => {
+        const nextById = new Map(current.map((job) => [job.job_id, job]))
+        const job = createActiveRenderJob(renderRun, response.comic?.title, String(t('image.run.title')))
+        nextById.set(job.job_id, {
+          ...nextById.get(job.job_id),
+          ...job,
+        })
+
+        return [...nextById.values()]
+      })
+
+      if (response.comic) {
+        setComicDetail(response.comic)
+      }
+
+      updateRenderProgress({
+        status: renderRunProgressStatus(renderRun),
+        message: renderRunStatusMessage(renderRun, t),
+        pollTries: 0,
+        error: renderRun.status === 'failed' ? renderRun.error_message : null,
+      })
+    } catch (err: any) {
+      const message = err?.message || String(t('image.error.createFailed'))
+      updateRenderProgress({
+        status: 'failed',
+        message,
+        error: message,
+      })
+      toast.error(message)
+    } finally {
+      setIsStartingRenderRun(false)
+    }
+  }
+
+  const handleAbortRenderRun = async () => {
+    const fullRenderRunAbortId = activeRenderRunForComic
+      && isActiveRenderRun(activeRenderRunForComic)
+      && !activeRenderRunForComic.abort_requested
+      ? activeRenderRunForComic.id
+      : null
+    const renderRunId = fullRenderRunAbortId ?? lightweightActiveRenderJobForComic?.render_run_id
+    if (!renderRunId || !canAbortActiveRenderRun) return
+
+    try {
+      setIsAbortingRenderRun(true)
+      const response = await PanelsApi.abortRenderRun(renderRunId)
+      const renderRun = response.render_run
+      setActiveRenderRun(renderRun)
+      setActiveJobs((current) => {
+        const job = createActiveRenderJob(renderRun, undefined, String(t('image.run.title')))
+        const existingJob = current.find((activeJob) => (
+          activeJob.render_run_id === renderRun.id || activeJob.render_run?.id === renderRun.id
+        ))
+        const jobId = existingJob?.job_id ?? job.job_id
+        const nextById = new Map(current.map((activeJob) => [activeJob.job_id, activeJob]))
+        nextById.set(jobId, {
+          ...existingJob,
+          ...job,
+          job_id: jobId,
+          title: existingJob?.title ?? job.title,
+        })
+
+        return [...nextById.values()]
+      })
+      clearPoll()
+      setIsRendering(false)
+      setPollTries(0)
+      renderTargetRef.current = null
+      renderStartedAtRef.current = null
+      updateRenderProgress({
+        status: renderRunProgressStatus(renderRun),
+        message: renderRunStatusMessage(renderRun, t),
+        elapsedMs: 0,
+        pollTries: 0,
+        error: renderRun.status === 'failed' ? renderRun.error_message : null,
+      })
+    } catch (err: any) {
+      const message = err?.message || String(t('image.error.abortFailed'))
+      toast.error(message)
+    } finally {
+      setIsAbortingRenderRun(false)
+    }
+  }
+
+  const handleImageProviderPreferenceChange = (nextPreference: AutoPreference<AiProviderId>) => {
+    setOverrides((prev) => ({
+      ...prev,
+      image_provider: nextPreference,
+    }))
+    setImageProvider(resolveAvailablePreferenceValue(nextPreference, imageProviders, defaultImageProvider))
+  }
+
+  const handleTextProviderPreferenceChange = (nextPreference: AutoPreference<AiProviderId>) => {
+    setOverrides((prev) => ({
+      ...prev,
+      text_provider: nextPreference,
+    }))
+    setTextProvider(resolveAvailablePreferenceValue(nextPreference, textProviders, defaultTextProvider))
+  }
+
+  const handleStylePreferenceChange = (nextPreference: AutoPreference<string>) => {
+    setOverrides((prev) => ({
+      ...prev,
+      style: nextPreference,
+    }))
+    setStyle(resolvePreferenceValue(nextPreference, defaultStyle))
+  }
+
+  const handleColorModePreferenceChange = (nextPreference: AutoPreference<ColorMode>) => {
+    setOverrides((prev) => ({
+      ...prev,
+      color_mode: nextPreference,
+    }))
+    setColorMode(resolvePreferenceValue(nextPreference, defaultColorMode))
+  }
+
+  const handleAspectRatioPreferenceChange = (nextPreference: AutoPreference<string>) => {
+    setOverrides((prev) => ({
+      ...prev,
+      aspect_ratio: nextPreference,
+    }))
+    setAspectRatio(resolvePreferenceValue(nextPreference, defaultAspectRatio))
+  }
+
+  const handleFontFamilyPreferenceChange = (nextPreference: AutoPreference<string>) => {
+    setOverrides((prev) => ({
+      ...prev,
+      font_family: nextPreference,
+    }))
+    setFontFamily(resolvePreferenceValue(nextPreference, defaultFontFamily))
+  }
+
+  const handleFontSizePreferenceChange = (nextPreference: AutoPreference<string>) => {
+    setOverrides((prev) => ({
+      ...prev,
+      font_size: nextPreference,
+    }))
+    setFontSize(resolvePreferenceValue(nextPreference, defaultFontSize))
+  }
+
+  const handleBubbleShapePreferenceChange = (nextPreference: AutoPreference<string>) => {
+    setOverrides((prev) => ({
+      ...prev,
+      bubble_shape: nextPreference,
+    }))
+    setBubbleShape(resolvePreferenceValue(nextPreference, defaultBubbleShape))
+  }
+
+  const handleBubbleTailPreferenceChange = (nextPreference: AutoPreference<boolean>) => {
+    setOverrides((prev) => ({
+      ...prev,
+      bubble_tail: nextPreference,
+    }))
+    setHasTail(resolvePreferenceValue(nextPreference, defaultBubbleTail))
+  }
+
   const selectedImageUrl = useMemo(
     () => proxiedStatic(pages.find((p) => p.page_number === selectedScene)?.image_url),
     [pages, selectedScene],
   )
+  const renderProgressHelperText = renderRunHelperText(activeRenderRunForComic, t)
 
   return (
     <ComicsWorkflowShell>
@@ -747,11 +1406,34 @@ export function ImageGeneration() {
           }}
         />
         <section className="flex min-w-0 flex-col gap-4 rounded-lg border border-border/60 bg-card p-4 shadow-sm sm:p-5">
-          <GenerationStatusPanel progress={renderProgress} />
+          <GenerationStatusPanel progress={renderProgress} helperText={renderProgressHelperText} />
           <WorkflowActionBar>
-            <Button size="lg" onClick={handleGenerate} disabled={isRendering || !comicId}>
-              {isRendering ? `渲染中... (${pollTries}/${MAX_POLL_TRIES})` : '生图'}
+            <Button size="lg" onClick={handleGenerate} disabled={isRendering || isStartingRenderRun || hasActiveRenderRun || !comicId}>
+              {isRendering
+                ? String(t('image.rendering', { current: pollTries, max: MAX_POLL_TRIES }))
+                : String(t('image.generate'))}
             </Button>
+            {RENDER_RUN_ACTIONS.map((action) => (
+              <Button
+                key={action.mode}
+                size="lg"
+                variant="outline"
+                onClick={() => void handleStartRenderRun(action.mode)}
+                disabled={disableRenderRunActions}
+              >
+                {String(t(action.labelKey))}
+              </Button>
+            ))}
+            {canAbortActiveRenderRun && (
+              <Button
+                size="lg"
+                variant="destructive"
+                onClick={() => void handleAbortRenderRun()}
+                disabled={isAbortingRenderRun}
+              >
+                {String(t('image.abort'))}
+              </Button>
+            )}
           </WorkflowActionBar>
           <StoryboardCanvas
             onPreview={previewHandler}
@@ -759,28 +1441,33 @@ export function ImageGeneration() {
           />
         </section>
         <PropertyPanel
-          imageProvider={imageProvider}
-          onImageProviderChange={(provider) => {
-            imageProviderChangedRef.current = true
-            setImageProvider(provider)
-          }}
-          imageProviderOptions={imageProviders}
-          styleValue={style}
-          onStyleChange={setStyle}
-          fontFamily={fontFamily}
-          onFontFamilyChange={setFontFamily}
-          fontSize={fontSize}
-          onFontSizeChange={setFontSize}
-          bubbleShape={bubbleShape}
-          onBubbleShapeChange={setBubbleShape}
-          hasTail={hasTail}
-          onToggleTail={() => setHasTail((prev) => !prev)}
+          imageProviderPreference={imageProviderPreference}
+          onImageProviderPreferenceChange={handleImageProviderPreferenceChange}
+          imageProviderOptions={imageProviderOptions}
+          textProviderPreference={textProviderPreference}
+          onTextProviderPreferenceChange={handleTextProviderPreferenceChange}
+          textProviderOptions={textProviderOptions}
+          stylePreference={stylePreference}
+          onStylePreferenceChange={handleStylePreferenceChange}
+          styleOptions={styleOptions}
+          colorModePreference={colorModePreference}
+          onColorModePreferenceChange={handleColorModePreferenceChange}
+          aspectRatioPreference={aspectRatioPreference}
+          onAspectRatioPreferenceChange={handleAspectRatioPreferenceChange}
+          fontFamilyPreference={fontFamilyPreference}
+          onFontFamilyPreferenceChange={handleFontFamilyPreferenceChange}
+          fontSizePreference={fontSizePreference}
+          onFontSizePreferenceChange={handleFontSizePreferenceChange}
+          bubbleShapePreference={bubbleShapePreference}
+          onBubbleShapePreferenceChange={handleBubbleShapePreferenceChange}
+          bubbleTailPreference={bubbleTailPreference}
+          onBubbleTailPreferenceChange={handleBubbleTailPreferenceChange}
           onOpenPublish={() => setPublishOpen(true)}
           onExportImage={() => {
             const p = pages.find((x) => x.page_number === selectedScene)
             const url = proxiedStatic(p?.image_url)
             if (!url) {
-              toast.error('当前页暂无图片可导出')
+              toast.error(String(t('image.error.currentPageNoImage')))
 
               return
             }
@@ -801,15 +1488,15 @@ export function ImageGeneration() {
       <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>导出 PDF</DialogTitle>
+            <DialogTitle>{String(t('image.publish.title'))}</DialogTitle>
           </DialogHeader>
           <div className="flex items-center justify-between gap-4 py-2">
             <div>
-              <p className="text-sm font-medium">是否将漫画设为公开</p>
-              <p className="text-xs text-muted-foreground">公开后他人可访问你的漫画</p>
+              <p className="text-sm font-medium">{String(t('image.publish.publicTitle'))}</p>
+              <p className="text-xs text-muted-foreground">{String(t('image.publish.publicDescription'))}</p>
             </div>
             <div className="flex items-center gap-2">
-              <Label htmlFor="make-public" className="text-sm">公开</Label>
+              <Label htmlFor="make-public" className="text-sm">{String(t('image.publish.publicLabel'))}</Label>
               <Switch id="make-public" checked={makePublic} onCheckedChange={(v) => setMakePublic(Boolean(v))} />
             </div>
           </div>
@@ -822,7 +1509,7 @@ export function ImageGeneration() {
                   const resp = await ComicsApi.publish(comicId, { make_public: makePublic })
                   // 暂存输出，等待你提供 PDF 字段名
                   console.info('publish response:', resp)
-                  toast.success('发布成功，开始生成 PDF…')
+                  toast.success(String(t('image.publish.success')))
                   setPublishOpen(false)
 
                   // 开始轮询 comic 详情，直到出现 pdf_url 或超时
@@ -844,13 +1531,13 @@ export function ImageGeneration() {
                         document.body.appendChild(a)
                         a.click()
                         a.remove()
-                        toast.success('PDF 已就绪，开始下载')
+                        toast.success(String(t('image.publish.pdfReady')))
                         // 更新详情
                         try { setComicDetail(d) } catch {}
                       } else if (pdfTriesRef.current >= MAX_PDF_POLL_TRIES) {
                         clearPdfPoll()
                         setIsPublishing(false)
-                        toast.error('等待 PDF 超时（60s），请稍后在“我的创意”重试下载')
+                        toast.error(String(t('image.publish.pdfTimeout')))
                       }
                     } catch (e) {
                       console.warn('轮询 PDF 失败', e)
@@ -858,18 +1545,18 @@ export function ImageGeneration() {
                       if (pdfTriesRef.current >= MAX_PDF_POLL_TRIES) {
                         clearPdfPoll()
                         setIsPublishing(false)
-                        toast.error('PDF 生成轮询失败或超时')
+                        toast.error(String(t('image.publish.pdfPollFailed')))
                       }
                     }
                   }, 2000)
                 } catch (e: any) {
-                  toast.error(e?.message || '发布失败')
+                  toast.error(e?.message || String(t('image.error.publishFailed')))
                   setIsPublishing(false)
                 }
               }}
               disabled={isPublishing}
             >
-              {isPublishing ? '发布中…' : '确定'}
+              {isPublishing ? String(t('image.publish.publishing')) : String(t('image.publish.confirm'))}
             </Button>
           </DialogFooter>
         </DialogContent>

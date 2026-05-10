@@ -12,14 +12,16 @@ import {
   mergeActiveJobs,
   removeActiveJob,
   replaceActiveJobs,
+  userAtom,
 } from '@/atoms'
-import type { IComic } from '@/service/types'
+import type { IComic, RenderRun } from '@/service/types'
 
 const VISIBLE_POLL_MS = 2000
 const HIDDEN_POLL_MS = 10000
 const COMIC_REFRESH_MS = 5000
 const REMOVAL_DELAY_MS = 5000
 const MAX_BACKOFF_MS = 60000
+const TERMINAL_JOB_STATUSES = new Set(['finished', 'completed', 'failed', 'aborted'])
 
 interface ComicCacheEntry {
   comic: IComic
@@ -29,14 +31,32 @@ interface ComicCacheEntry {
 function normalizeActiveJob(job: ApiActiveJob): ActiveJobEntry {
   return {
     job_id: job.job_id,
-    comic_id: job.comic_id,
+    kind: job.kind,
+    render_run_id: job.render_run_id ?? null,
+    character_id: job.character_id ?? null,
+    comic_id: job.comic_id ?? null,
     stage: job.stage,
     status: job.status,
-    title: job.title,
-    started_at: job.started_at,
+    title: job.title ?? null,
+    started_at: job.started_at ?? null,
     reconnecting: false,
     warning: null,
-    render_progress: null,
+    render_progress: job.render_progress ?? null,
+    render_run: null,
+  }
+}
+
+function countRenderRunProgress(renderRun: RenderRun | null | undefined): ActiveJobRenderProgress | null {
+  if (!renderRun) return null
+
+  const completedPages = Array.isArray(renderRun.completed_pages) ? renderRun.completed_pages : []
+  const requestedPages = Array.isArray(renderRun.requested_pages) ? renderRun.requested_pages : []
+
+  if (completedPages.length === 0 && requestedPages.length === 0) return null
+
+  return {
+    completed: completedPages.length,
+    total: requestedPages.length,
   }
 }
 
@@ -80,18 +100,25 @@ function extractWorkflowStages(comic: IComic | null | undefined): ActiveJobStage
 
 function enrichJob(job: ActiveJobEntry, detail?: JobDetail, comic?: IComic): ActiveJobEntry {
   const resolvedComic = comic ?? ((detail?.comic as IComic | undefined) ?? job.comic ?? null)
+  const renderRun = detail?.render_run ?? job.render_run ?? null
+  const renderRunId = renderRun?.id ?? job.render_run_id ?? null
+  const renderRunProgress = countRenderRunProgress(renderRun)
+  const isRenderRunJob = Boolean(renderRunId)
   const workflowStages = extractWorkflowStages(resolvedComic) ?? job.workflow_stages
   const currentStage = workflowStages?.find((stage) => stage.stage === job.stage)
+  const comicRenderProgress = countRenderProgress(resolvedComic)
 
   return {
     ...job,
+    render_run_id: renderRunId,
+    render_run: renderRun,
     comic: resolvedComic,
-    comic_id: resolvedComic?.id ?? job.comic_id,
+    comic_id: renderRun?.comic_id ?? resolvedComic?.id ?? job.comic_id,
     title: resolvedComic?.title ?? job.title,
-    status: currentStage?.status ?? job.status,
+    status: renderRun?.status ?? currentStage?.status ?? job.status,
     rq_status: (detail?.rq_status as ActiveJobEntry['rq_status']) ?? job.rq_status,
     workflow_stages: workflowStages,
-    render_progress: countRenderProgress(resolvedComic),
+    render_progress: renderRunProgress ?? (isRenderRunJob ? job.render_progress ?? comicRenderProgress : comicRenderProgress),
     warning: typeof detail?.warning === 'string' ? detail.warning : job.warning ?? null,
     reconnecting: false,
   }
@@ -105,6 +132,12 @@ function isNotFound(error: unknown): boolean {
   const response = (error as { response?: { status?: number } } | undefined)?.response
 
   return response?.status === 404
+}
+
+function isTerminalJobDetail(detail: JobDetail | null | undefined): boolean {
+  return [detail?.rq_status, detail?.render_run?.status].some((status) => (
+    typeof status === 'string' && TERMINAL_JOB_STATUSES.has(status)
+  ))
 }
 
 function mapBackoffDelay(visible: boolean, failures: number): number {
@@ -134,6 +167,8 @@ export function mapStageToComicsTab(stage: string): string {
 
 export function useActiveJobs() {
   const jobs = useAtomValue(activeJobsAtom)
+  const user = useAtomValue(userAtom)
+  const userId = user?.id ?? null
   const jobsRef = useRef(jobs)
   const comicCacheRef = useRef(new Map<number, ComicCacheEntry>())
   const removalTimersRef = useRef(new Map<string, number>())
@@ -159,13 +194,22 @@ export function useActiveJobs() {
   }, [])
 
   useEffect(() => {
+    if (!userId) {
+      clearActiveJobs()
+
+      return undefined
+    }
+
     let cancelled = false
 
     const hydrate = async () => {
       try {
         const response = await JobsApi.listActive()
         if (cancelled) return
-        replaceActiveJobs(response.active.map(normalizeActiveJob))
+        const hydratedJobs = response.active.map(normalizeActiveJob)
+        const hydratedJobIds = new Set(hydratedJobs.map((job) => job.job_id))
+        const localOnlyJobs = jobsRef.current.filter((job) => !hydratedJobIds.has(job.job_id))
+        replaceActiveJobs([...localOnlyJobs, ...hydratedJobs])
       } catch (error) {
         if (isUnauthorized(error)) {
           clearActiveJobs()
@@ -178,10 +222,10 @@ export function useActiveJobs() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [userId])
 
   useEffect(() => {
-    if (jobs.length === 0) return undefined
+    if (!userId || jobs.length === 0) return undefined
 
     let cancelled = false
     let timerId: number | undefined
@@ -290,8 +334,7 @@ export function useActiveJobs() {
             continue
           }
 
-          const rqStatus = item.detail?.rq_status
-          if (rqStatus === 'finished' || rqStatus === 'failed') {
+          if (isTerminalJobDetail(item.detail)) {
             scheduleRemoval(item.job.job_id)
           } else {
             cancelRemoval(item.job.job_id)
@@ -335,7 +378,7 @@ export function useActiveJobs() {
         window.clearTimeout(timerId)
       }
     }
-  }, [isVisible, jobs.length])
+  }, [isVisible, jobs.length, userId])
 
   useEffect(() => () => {
     for (const timerId of removalTimersRef.current.values()) {

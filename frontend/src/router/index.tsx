@@ -11,7 +11,7 @@ const MePage = lazy(() => import('@/pages/me'))
 const AuthPage = lazy(() => import('@/pages/auth'))
 const CharacterCreatorPage = lazy(() => import('@/pages/create-character'))
 
-const router = createBrowserRouter([
+export const routes = [
   {
     path: '/',
     element: <DashboardLayout />,
@@ -27,7 +27,6 @@ const router = createBrowserRouter([
           <ComicsPage />
         </RequireAuth>
       ) },
-      
       { path: 'create-character', element: (
         <RequireAuth>
           <CharacterCreatorPage />
@@ -43,6 +42,8 @@ const router = createBrowserRouter([
   },
   { path: 'auth', element: <AuthPage /> },
   { path: '*', element: <Navigate to="/" replace /> },
-])
+]
+
+const router = createBrowserRouter(routes)
 
 export default router

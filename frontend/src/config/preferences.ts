@@ -27,4 +27,12 @@ export const DEFAULT_LAYOUT_OPTIONS = ['auto-grid', 'grid-2x2', 'vertical', 'cin
 
 export const DEFAULT_COLOR_MODES: ColorMode[] = ['black-white', 'color']
 
+export const DEFAULT_ASPECT_RATIOS = ['16:9', '4:3', '3:4', '1:1', '2:3', '3:2'] as const
+
+export const DEFAULT_FONT_FAMILIES = ['source-han-sans', 'yahei', 'heiti', 'songti'] as const
+
+export const DEFAULT_FONT_SIZES = ['18', '20', '22', '24', '28'] as const
+
+export const DEFAULT_BUBBLE_SHAPES = ['rect', 'round'] as const
+
 export const DEFAULT_SELECTED_STYLE = DEFAULT_STYLE_PRESETS[0]!.value

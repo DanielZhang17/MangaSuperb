@@ -3,6 +3,7 @@ import { Plus, X } from 'lucide-react'
 import { useMemo } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { useI18n } from '@/hooks/use-i18n'
 import { cn } from '@/lib/utils'
 
 import { currentComicDetailAtom, customPagesAtom, selectedPageAtom } from '../atoms'
@@ -32,6 +33,7 @@ function extractExistingPages(detail: any | null): number[] {
 }
 
 export function PageSidebar({ className, showAddButton = true }: PageSidebarProps) {
+  const { t } = useI18n('comics')
   const [selectedPage, setSelectedPage] = useAtom(selectedPageAtom)
   const comicDetail = useAtomValue(currentComicDetailAtom)
   const [customPages, setCustomPages] = useAtom(customPagesAtom)
@@ -86,7 +88,7 @@ export function PageSidebar({ className, showAddButton = true }: PageSidebarProp
     <aside className={cn('flex flex-col lg:flex-col gap-4 lg:w-44 lg:self-start w-full', className)}>
       {/* Mobile: flex-wrap downward, Desktop: vertical sidebar */}
       <div className="flex lg:flex-col gap-2 rounded-xl border bg-muted/40 p-3 lg:p-3">
-        <p className="hidden lg:block text-xs font-medium text-muted-foreground mb-2">页面</p>
+        <p className="hidden lg:block text-xs font-medium text-muted-foreground mb-2">{String(t('pageSidebar.title'))}</p>
         <div className="flex flex-wrap lg:flex-nowrap lg:flex-col gap-2 lg:gap-1 lg:overflow-x-hidden lg:overflow-y-auto lg:max-h-[420px] lg:pr-1 scrollbar-themed">
           {pages.map((page) => {
             const isActive = page === selectedPage
@@ -106,14 +108,15 @@ export function PageSidebar({ className, showAddButton = true }: PageSidebarProp
                   onClick={() => setSelectedPage(page)}
                   className="flex-1 text-left"
                 >
-                  第{String(page).padStart(2, '0')}页{isPlaceholder ? '（新建）' : ''}
+                  {String(t('pageSidebar.page', { page: String(page).padStart(2, '0') }))}
+                  {isPlaceholder ? `（${String(t('pageSidebar.newPage'))}）` : ''}
                 </button>
                 {isPlaceholder && (
                   <button
                     type="button"
                     onClick={() => handleDeletePage(page, isPlaceholder)}
                     className="ml-2 p-1 rounded hover:bg-destructive/10 hover:text-destructive transition-colors"
-                    aria-label="删除页面"
+                    aria-label={String(t('pageSidebar.delete'))}
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -133,7 +136,7 @@ export function PageSidebar({ className, showAddButton = true }: PageSidebarProp
           onClick={handleAddPage}
         >
           <Plus className="h-4 w-4" />
-          添加页面
+          {String(t('pageSidebar.add'))}
         </Button>
       )}
     </aside>

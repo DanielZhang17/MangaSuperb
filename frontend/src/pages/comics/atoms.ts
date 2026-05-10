@@ -2,8 +2,25 @@ import { atom } from 'jotai'
 
 import type { AiProviderId } from '@/service/types'
 import type { IComic } from '@/service/types'
+import type { AutoCharacterPrepareResponse, AutoPreference, ColorMode, RenderRun, WorkflowPreferenceFields } from '@/service/types'
 
 export type StoryStep = 'input' | 'panels' | 'generate'
+
+export type WorkflowMode = 'auto' | 'pro'
+
+export const workflowModeAtom = atom<WorkflowMode>('auto')
+
+export type CurrentComicOverrides = Partial<WorkflowPreferenceFields> & {
+  color_mode?: AutoPreference<ColorMode>
+}
+
+export const currentComicOverridesAtom = atom<CurrentComicOverrides>({})
+
+export const autoCharacterReviewAtom = atom<AutoCharacterPrepareResponse | null>(null)
+
+export const autoCharacterReviewStoryAtom = atom<string | null>(null)
+
+export const activeRenderRunAtom = atom<RenderRun | null>(null)
 
 export const storyStepAtom = atom<StoryStep>('input')
 

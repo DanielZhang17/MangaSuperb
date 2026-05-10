@@ -35,6 +35,7 @@ function SelectionView() {
   // 多选：存入全局 atom（只存 id）
   const [selectedIds, setSelectedIds] = useAtom(selectedCharacterIdsAtom)
   const [rolesMap, setRolesMap] = useAtom(selectedCharacterRolesAtom)
+  const seenSelectedIdsRef = useRef<Set<number>>(new Set())
 
   const totalRecognized = useMemo(() => characters.length, [characters])
 
@@ -81,9 +82,17 @@ function SelectionView() {
 
   // 同步选择集与当前列表：当列表变化时，移除已不存在的 id
   useEffect(() => {
+    if (loading) return
+
     const idSet = new Set(characters.map((c) => c.id))
+    for (const id of selectedIds) {
+      if (idSet.has(id)) {
+        seenSelectedIdsRef.current.add(id)
+      }
+    }
+
     setSelectedIds((prev) => {
-      const next = prev.filter((id) => idSet.has(id))
+      const next = prev.filter((id) => idSet.has(id) || !seenSelectedIdsRef.current.has(id))
 
       return next.length === prev.length ? prev : next
     })
@@ -91,7 +100,7 @@ function SelectionView() {
     setRolesMap((prev) => {
       const next: Record<number, string> = {}
       for (const id of selectedIds) {
-        if (idSet.has(id) && prev[id]) next[id] = prev[id]
+        if ((idSet.has(id) || !seenSelectedIdsRef.current.has(id)) && prev[id]) next[id] = prev[id]
       }
 
       const prevKeys = Object.keys(prev)
@@ -103,8 +112,7 @@ function SelectionView() {
 
       return next
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [characters])
+  }, [characters, loading, selectedIds, setRolesMap, setSelectedIds])
 
   const updateRole = (id: number, role: string) => {
     setRolesMap((prev) => ({ ...prev, [id]: role }))
@@ -151,14 +159,16 @@ function SelectionView() {
 
   return (
     <ComicsWorkflowShell>
-      {loading && <div className="text-sm text-muted-foreground">加载中...</div>}
+      {loading && <div className="text-sm text-muted-foreground">{String(t('characters.loading'))}</div>}
       {error && (
-        <div className="text-sm text-destructive">加载失败：{(error as any)?.message ?? 'Unknown error'}</div>
+        <div className="text-sm text-destructive">
+          {String(t('characters.error', { message: (error as any)?.message ?? 'Unknown error' }))}
+        </div>
       )}
 
       {!loading && !error && characters.length === 0 && (
         <div className="rounded-lg border border-dashed p-10 text-center text-muted-foreground">
-          暂无人物，去创建一个吧！
+          {String(t('characters.empty'))}
         </div>
       )}
 
@@ -191,7 +201,7 @@ function SelectionView() {
                   type="button"
                   variant="secondary"
                   size="icon-sm"
-                  aria-label={`编辑 ${displayName}`}
+                  aria-label={String(t('characters.edit', { name: displayName }))}
                   className="absolute right-2 top-2 z-10 shadow"
                   onClick={(event) => {
                     event.stopPropagation()
@@ -204,9 +214,9 @@ function SelectionView() {
                 <Badge
                   variant="secondary"
                   className="absolute right-2 top-2 z-10 shadow"
-                  title="公开人物只能选择，不能编辑"
+                  title={String(t('characters.publicOnlyTitle'))}
                 >
-                  公开
+                  {String(t('characters.publicBadge'))}
                 </Badge>
               ) : null}
               <CardContent className="p-4 flex flex-col gap-3">
@@ -244,7 +254,7 @@ function SelectionView() {
                     </p>
                   )}
                   {isSharedPublic && (
-                    <p className="text-xs text-muted-foreground">来自公开角色库，只可选择</p>
+                    <p className="text-xs text-muted-foreground">{String(t('characters.publicLibrary'))}</p>
                   )}
                 </div>
               </CardContent>
@@ -268,7 +278,7 @@ function SelectionView() {
             <div className="rounded-xl bg-background/70 p-3">
               <Plus className="h-6 w-6" />
             </div>
-            <p>新建人物</p>
+            <p>{String(t('characters.createNew'))}</p>
           </CardContent>
         </Card>
       </div>
@@ -288,8 +298,8 @@ function SelectionView() {
       {selectedIds.length > 0 && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <p className="font-medium">出镜人物职责与顺序</p>
-            <p className="text-sm text-muted-foreground">上移/下移改变顺序（顺序即 order_index），职责即 role</p>
+            <p className="font-medium">{String(t('characters.rolesTitle'))}</p>
+            <p className="text-sm text-muted-foreground">{String(t('characters.rolesHelp'))}</p>
           </div>
           <div className="space-y-3">
             {selectedIds.map((id, index) => {
@@ -303,22 +313,22 @@ function SelectionView() {
                     <div className="font-medium text-sm">{char ? getCharacterDisplayName(char) : `#${id}`}</div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Label className="text-xs text-muted-foreground">职责</Label>
+                    <Label className="text-xs text-muted-foreground">{String(t('characters.role'))}</Label>
                     <Select value={currentRole} onValueChange={(v) => updateRole(id, v)}>
                       <SelectTrigger className="w-36 h-8">
-                        <SelectValue placeholder="选择职责" />
+                        <SelectValue placeholder={String(t('characters.selectRole'))} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="protagonist">主角</SelectItem>
-                        <SelectItem value="supporting">配角</SelectItem>
-                        <SelectItem value="antagonist">反派</SelectItem>
-                        <SelectItem value="cameo">客串</SelectItem>
+                        <SelectItem value="protagonist">{String(t('characters.role.protagonist'))}</SelectItem>
+                        <SelectItem value="supporting">{String(t('characters.role.supporting'))}</SelectItem>
+                        <SelectItem value="antagonist">{String(t('characters.role.antagonist'))}</SelectItem>
+                        <SelectItem value="cameo">{String(t('characters.role.cameo'))}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button size="sm" variant="outline" onClick={() => moveUp(index)}>上移</Button>
-                    <Button size="sm" variant="outline" onClick={() => moveDown(index)}>下移</Button>
+                    <Button size="sm" variant="outline" onClick={() => moveUp(index)}>{String(t('characters.moveUp'))}</Button>
+                    <Button size="sm" variant="outline" onClick={() => moveDown(index)}>{String(t('characters.moveDown'))}</Button>
                   </div>
                 </div>
               )},

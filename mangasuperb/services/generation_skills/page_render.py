@@ -37,8 +37,8 @@ def build_page_generation_context(
         or "Untitled"
     )
     style_notes = (
-        _clean_text(script_data.get("style_notes"))
-        or _clean_text(getattr(comic, "style_description", None))
+        _clean_text(getattr(comic, "style_description", None))
+        or _clean_text(script_data.get("style_notes"))
         or "Classic manga black and white linework."
     )
 

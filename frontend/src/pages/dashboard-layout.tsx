@@ -6,6 +6,7 @@ import ModeToggle from '@/components/common/operations/mode-toggle'
 import SidebarToggle from '@/components/common/operations/sidebar-toggle'
 import { sidebarCollapsedAtom } from '@/components/layout/atoms'
 import { DashboardSidebar } from '@/components/layout/sidebar'
+import { ProgressShelf } from '@/components/progress-shelf'
 import { useAutoCollapseSidebar } from '@/hooks/use-auto-collapse-sidebar'
 import { useI18n } from '@/hooks/use-i18n'
 
@@ -30,6 +31,7 @@ export default function DashboardLayout() {
           </Suspense>
         </div>
       </div>
+      <ProgressShelf />
     </div>
   )
 }

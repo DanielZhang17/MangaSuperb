@@ -14,79 +14,38 @@ import { useI18n } from '@/hooks/use-i18n'
 import { proxiedStatic } from '@/lib/utils'
 import {
   activeTabAtom,
+  aspectRatioAtom,
   charactersCompletedAtom,
   currentComicDetailAtom,
   currentComicIdAtom,
+  currentComicOverridesAtom,
+  fullStoryAtom,
   mangaTitleAtom,
   selectedCharacterIdsAtom,
   selectedCharacterRolesAtom,
   storyCompletedAtom,
   styleAtom,
+  workflowModeAtom,
 } from '@/pages/comics/atoms'
-import type { IComic } from '@/service/types'
-
-function sortedComicCharacters(comic: IComic): any[] {
-  const characters = Array.isArray(comic.characters) ? comic.characters : []
-
-  return [...characters].sort((a, b) => Number(a?.order_index ?? 0) - Number(b?.order_index ?? 0))
-}
-
-function extractCharacterIds(comic: IComic): number[] {
-  return sortedComicCharacters(comic)
-    .map((character) => Number(character?.character_id ?? character?.id))
-    .filter((id): id is number => Number.isFinite(id))
-}
-
-function extractCharacterRoles(comic: IComic): Record<number, string> {
-  return sortedComicCharacters(comic).reduce<Record<number, string>>((roles, character) => {
-    const id = Number(character?.character_id ?? character?.id)
-    const role = typeof character?.role === 'string' ? character.role : ''
-
-    if (Number.isFinite(id) && role) {
-      roles[id] = role
-    }
-
-    return roles
-  }, {})
-}
-
-function inferResumeTab(comic: IComic): string {
-  const workflowStage = typeof comic.workflow_stage === 'string' ? comic.workflow_stage : ''
-  const pages = Array.isArray(comic.pages) ? comic.pages : []
-  const shots = Array.isArray(comic.panel_shots) ? comic.panel_shots : []
-  const layouts = Array.isArray(comic.page_layouts) ? comic.page_layouts : []
-
-  if (
-    ['render', 'cover', 'export', 'publish'].includes(workflowStage)
-    || pages.some((page) => Boolean(page?.image_url))
-  ) {
-    return 'image-generation'
-  }
-
-  if (workflowStage === 'shots' || shots.length > 0 || layouts.length > 0) {
-    return 'panels'
-  }
-
-  if (workflowStage === 'characters' || extractCharacterIds(comic).length > 0) {
-    return 'characters'
-  }
-
-  return 'story'
-}
+import { getComicWorkflowHydration } from '@/pages/comics/lib/workflow-hydration'
 
 export default function IdeasGrid() {
   const { user } = useAuth()
   const { t } = useI18n(['me', 'comics'])
   const navigate = useNavigate()
   const setActiveTab = useSetAtom(activeTabAtom)
+  const setAspectRatio = useSetAtom(aspectRatioAtom)
   const setCharactersCompleted = useSetAtom(charactersCompletedAtom)
   const setComicDetail = useSetAtom(currentComicDetailAtom)
   const setComicId = useSetAtom(currentComicIdAtom)
+  const setFullStory = useSetAtom(fullStoryAtom)
   const setMangaTitle = useSetAtom(mangaTitleAtom)
+  const setOverrides = useSetAtom(currentComicOverridesAtom)
   const setSelectedCharacterIds = useSetAtom(selectedCharacterIdsAtom)
   const setSelectedCharacterRoles = useSetAtom(selectedCharacterRolesAtom)
   const setStoryCompleted = useSetAtom(storyCompletedAtom)
   const setStyle = useSetAtom(styleAtom)
+  const setWorkflowMode = useSetAtom(workflowModeAtom)
 
   const { data, isLoading, error } = useSWR('comics:list:mine', () => ComicsApi.list())
   const comics = data?.comics ?? []
@@ -130,17 +89,21 @@ export default function IdeasGrid() {
             return
           }
 
-          const characterIds = extractCharacterIds(c)
+          const hydration = getComicWorkflowHydration(c)
 
-          setComicId(comicId)
+          setComicId(hydration.comicId || comicId)
           setComicDetail(c)
-          setMangaTitle(title)
-          if (c.style_description) setStyle(c.style_description)
+          setMangaTitle(hydration.title)
+          setFullStory(hydration.story)
+          if (hydration.style) setStyle(hydration.style)
+          if (hydration.aspectRatio) setAspectRatio(hydration.aspectRatio)
+          setOverrides(hydration.overrides)
           setStoryCompleted(true)
-          setCharactersCompleted(characterIds.length > 0)
-          setSelectedCharacterIds(characterIds)
-          setSelectedCharacterRoles(extractCharacterRoles(c))
-          setActiveTab(inferResumeTab(c))
+          setCharactersCompleted(hydration.characterIds.length > 0)
+          setSelectedCharacterIds(hydration.characterIds)
+          setSelectedCharacterRoles(hydration.characterRoles)
+          setWorkflowMode('pro')
+          setActiveTab(hydration.resumeTab)
           navigate('/comics')
         }
 

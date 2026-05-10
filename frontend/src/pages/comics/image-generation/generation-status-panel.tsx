@@ -1,15 +1,12 @@
 import { AlertCircle, CheckCircle2, Clock, Loader2 } from 'lucide-react'
 
 import { Progress } from '@/components/ui/progress'
+import { useI18n } from '@/hooks/use-i18n'
 import { cn } from '@/lib/utils'
 
 import type { RenderProgressState, RenderProgressStatus } from '../workflow-types'
 
-const STAGES: { key: RenderProgressStatus; label: string }[] = [
-  { key: 'optimizing', label: 'Prompt 优化' },
-  { key: 'rendering', label: '图像渲染' },
-  { key: 'uploading', label: 'R2 上传与整理' },
-]
+const STAGE_KEYS: RenderProgressStatus[] = ['optimizing', 'rendering', 'uploading']
 
 function formatElapsed(ms: number) {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000))
@@ -21,14 +18,22 @@ function formatElapsed(ms: number) {
 
 function statusIndex(status: RenderProgressStatus) {
   if (status === 'idle') return -1
-  if (status === 'completed') return STAGES.length
+  if (status === 'completed') return STAGE_KEYS.length
   if (status === 'failed' || status === 'timeout') return -1
-  const index = STAGES.findIndex((stage) => stage.key === status)
+  const index = STAGE_KEYS.findIndex((stage) => stage === status)
 
   return index === -1 ? 0 : index
 }
 
-export function GenerationStatusPanel({ progress }: { progress: RenderProgressState }) {
+export function GenerationStatusPanel({
+  progress,
+  helperText,
+}: {
+  progress: RenderProgressState
+  helperText?: string
+}) {
+  const { t } = useI18n('comics')
+  const resolvedHelperText = helperText ?? String(t('image.helperDefault'))
   const idle = progress.status === 'idle'
   const failed = progress.status === 'failed' || progress.status === 'timeout'
   const completed = progress.status === 'completed'
@@ -50,12 +55,12 @@ export function GenerationStatusPanel({ progress }: { progress: RenderProgressSt
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="font-medium text-foreground">{progress.message}</p>
-          <p className="mt-1 text-sm text-muted-foreground">图像生成可能需要几分钟，请保持页面打开。</p>
+          <p className="mt-1 text-sm text-muted-foreground">{resolvedHelperText}</p>
         </div>
         {!idle && (
           <div className="inline-flex items-center gap-2 rounded-md bg-muted px-2.5 py-1 text-xs text-muted-foreground">
             <Clock className="size-3.5" />
-            已用时 {formatElapsed(progress.elapsedMs)}
+            {String(t('image.elapsed', { time: formatElapsed(progress.elapsedMs) }))}
           </div>
         )}
       </div>
@@ -63,13 +68,13 @@ export function GenerationStatusPanel({ progress }: { progress: RenderProgressSt
       {!idle && <Progress value={pct} className="mt-4" />}
 
       <div className={cn('grid gap-2 sm:grid-cols-3', idle ? 'mt-3' : 'mt-4')}>
-        {STAGES.map((stage, index) => {
+        {STAGE_KEYS.map((stage, index) => {
           const done = completed || activeIndex > index
           const active = !failed && activeIndex === index && !completed
 
           return (
             <div
-              key={stage.key}
+              key={stage}
               className={cn(
                 'flex items-center gap-2 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-sm text-muted-foreground',
                 done && 'text-emerald-500',
@@ -86,7 +91,7 @@ export function GenerationStatusPanel({ progress }: { progress: RenderProgressSt
               ) : (
                 <span className="size-4 rounded-full border border-current" />
               )}
-              <span>{stage.label}</span>
+              <span>{String(t(`image.stage.${stage}`))}</span>
             </div>
           )
         })}

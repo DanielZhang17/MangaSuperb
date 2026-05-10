@@ -19,6 +19,7 @@ import { LoadingView } from '../../../components/common/loading-view'
 import { activeTabAtom, mangaTitleAtom, storyCompletedAtom, storyStepAtom } from '../atoms'
 import { ComicsWorkflowShell, WorkflowActionBar, WorkflowContent, WorkflowPanel } from '../components/workflow-layout'
 import { AIModelCard } from './ai-model-card'
+import { MangaFormatCard } from './manga-format-card'
 import { MangaGridLayoutCard } from './manga-grid-layout-card'
 import { MangaStyleCard } from './manga-style-card'
 import { StoryEditor } from './story-editor'
@@ -39,7 +40,7 @@ function InputView() {
   const confirmTitleAndContinue = () => {
     const cleanTitle = titleDraft.trim()
     if (!cleanTitle) {
-      toast.error('请输入漫画名称')
+      toast.error(String(t('story.titleRequired')))
 
       return
     }
@@ -60,6 +61,7 @@ function InputView() {
         <aside className="flex min-w-0 flex-col gap-4">
           <AIModelCard />
           <MangaStyleCard />
+          <MangaFormatCard />
           <MangaGridLayoutCard />
         </aside>
       </WorkflowContent>
@@ -78,13 +80,13 @@ function InputView() {
           onInteractOutside={(event) => event.preventDefault()}
         >
           <DialogHeader>
-            <DialogTitle>确认漫画名称</DialogTitle>
+            <DialogTitle>{String(t('story.confirmTitle'))}</DialogTitle>
             <DialogDescription>
-              这个名称会用于后续分镜、生图和发布展示。
+              {String(t('story.confirmDescription'))}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="manga-title-confirm">漫画名称</Label>
+            <Label htmlFor="manga-title-confirm">{String(t('story.titleLabel'))}</Label>
             <Input
               id="manga-title-confirm"
               value={titleDraft}
@@ -100,7 +102,7 @@ function InputView() {
           </div>
           <DialogFooter>
             <Button type="button" onClick={confirmTitleAndContinue}>
-              继续选择人物
+              {String(t('story.continueCharacters'))}
             </Button>
           </DialogFooter>
         </DialogContent>

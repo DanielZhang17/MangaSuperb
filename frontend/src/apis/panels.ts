@@ -1,5 +1,17 @@
 import request from '@/service'
-import type { AiProviderId, SetPanelLayoutRequest } from '@/service/types'
+import type { AiProviderId, RenderRun, SetPanelLayoutRequest } from '@/service/types'
+
+interface RenderOptions {
+  image_provider?: AiProviderId
+  text_provider?: AiProviderId
+  style_description?: string
+  color_mode?: string
+  aspect_ratio?: string
+  font_family?: string
+  font_size?: string
+  bubble_shape?: string
+  bubble_tail?: boolean
+}
 
 export const PanelsApi = {
   // Set a manual layout for a specific page within a comic
@@ -12,11 +24,28 @@ export const PanelsApi = {
   },
 
   // Trigger a render job for a particular page
-  renderPage(comicId: number, pageNumber: number, body: { image_provider?: AiProviderId; text_provider?: AiProviderId } = {}) {
+  renderPage(comicId: number, pageNumber: number, body: RenderOptions = {}) {
     return request<typeof body, { job_id: string }>({
       url: `/api/panels/${comicId}/pages/${pageNumber}/render`,
       method: 'POST',
       data: body,
+    })
+  },
+
+  startRenderRun(comicId: number, body: RenderOptions & {
+    mode: 'first_page' | 'all_pages' | 'remaining_pages'
+  }) {
+    return request<typeof body, { render_run: RenderRun; comic: any }>({
+      url: `/api/panels/${comicId}/render-runs`,
+      method: 'POST',
+      data: body,
+    })
+  },
+
+  abortRenderRun(renderRunId: number) {
+    return request<void, { render_run: RenderRun }>({
+      url: `/api/panels/render-runs/${renderRunId}/abort`,
+      method: 'POST',
     })
   },
 

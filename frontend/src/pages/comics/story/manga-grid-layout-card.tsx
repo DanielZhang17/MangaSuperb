@@ -1,3 +1,6 @@
+import { useAtom } from 'jotai'
+import { useMemo } from 'react'
+
 import {
   Card,
   CardContent,
@@ -6,6 +9,12 @@ import {
 } from '@/components/ui/card'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useI18n } from '@/hooks/use-i18n'
+import { usePreferences } from '@/hooks/use-preferences'
+import { resolvePreferenceValue } from '@/lib/auto-preferences'
+import type { AutoPreference } from '@/service/types'
+
+import { currentComicOverridesAtom } from '../atoms'
+import { AutoSelectControl } from '../components/auto-select-control'
 
 const LayoutVisual = ({ type }: { type: string }) => {
   const baseBoxClasses = 'bg-gray-400 rounded-sm'
@@ -59,26 +68,57 @@ const LayoutVisual = ({ type }: { type: string }) => {
 
 export function MangaGridLayoutCard() {
   const { t } = useI18n('comics')
-  const layouts = [
-    { key: 'grid.4panel', label: String(t('grid.4panel')) },
-    { key: 'grid.leftMainRightMinor', label: String(t('grid.leftMainRightMinor')) },
-    { key: 'grid.rightLongBar', label: String(t('grid.rightLongBar')) },
-    { key: 'grid.staggered', label: String(t('grid.staggered')) },
-  ]
+  const [overrides, setOverrides] = useAtom(currentComicOverridesAtom)
+  const { layoutOptions, preferences } = usePreferences()
+  const layoutLabels = useMemo<Record<string, string>>(() => ({
+    'auto-grid': String(t('grid.4panel')),
+    'grid-2x2': String(t('grid.4panel')),
+    vertical: String(t('grid.leftMainRightMinor')),
+    cinematic: String(t('grid.rightLongBar')),
+    staggered: String(t('grid.staggered')),
+  }), [t])
+  const layouts = useMemo(() => (
+    layoutOptions.map((value) => ({
+      value,
+      label: layoutLabels[value] ?? value,
+    }))
+  ), [layoutLabels, layoutOptions])
+  const preferenceLayout = preferences?.fields?.page_layout
+  const fallbackLayout = resolvePreferenceValue(preferenceLayout, layouts[0]?.value ?? 'auto-grid')
+  const pageLayoutPreference = (overrides.page_layout ?? preferenceLayout ?? { mode: 'auto' }) as AutoPreference<string>
+  const resolvedLayout = resolvePreferenceValue(pageLayoutPreference, fallbackLayout)
+
+  const handleLayoutPreferenceChange = (nextPreference: AutoPreference<string>) => {
+    setOverrides((prev: any) => ({
+      ...prev,
+      page_layout: nextPreference,
+    }))
+  }
 
   return (
     <Card className="rounded-lg">
       <CardHeader className="p-4 pb-3">
         <CardTitle className="text-base">{String(t('grid.title'))}</CardTitle>
       </CardHeader>
-      <CardContent className="p-4 pt-0">
+      <CardContent className="space-y-3 p-4 pt-0">
+        <AutoSelectControl
+          label={String(t('grid.autoDefault'))}
+          value={pageLayoutPreference}
+          options={layouts}
+          onChange={handleLayoutPreferenceChange}
+        />
         <ToggleGroup
           type="single"
-          defaultValue={String(t('grid.4panel'))}
+          value={resolvedLayout}
+          onValueChange={(value) => {
+            if (value) {
+              handleLayoutPreferenceChange({ mode: 'manual', value })
+            }
+          }}
           className="grid w-full grid-cols-2 gap-2"
         >
           {layouts.map((layout) => (
-            <ToggleGroupItem key={layout.key} value={layout.label} className="flex h-auto min-w-0 flex-col p-1.5">
+            <ToggleGroupItem key={layout.value} value={layout.value} className="flex h-auto min-w-0 flex-col p-1.5">
               <div className="mb-2 aspect-[5/3] w-full rounded-md bg-gray-200 p-2">
                 <LayoutVisual type={layout.label} />
               </div>
