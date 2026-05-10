@@ -2,6 +2,7 @@ import { useId } from 'react'
 
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useI18n } from '@/hooks/use-i18n'
 import type { AutoPreference } from '@/service/types'
 
 const AUTO_VALUE = '__auto__'
@@ -24,6 +25,7 @@ export function AutoSelectControl<T extends string>({
   options,
   onChange,
 }: AutoSelectControlProps<T>) {
+  const { t } = useI18n('common')
   const id = useId()
   const selectValue = value.mode === 'manual' ? value.value : AUTO_VALUE
 
@@ -48,7 +50,7 @@ export function AutoSelectControl<T extends string>({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={AUTO_VALUE}>Auto</SelectItem>
+          <SelectItem value={AUTO_VALUE}>{String(t('preference.auto'))}</SelectItem>
           {options.map((option) => (
             <SelectItem key={option.value} value={option.value}>
               {option.label}

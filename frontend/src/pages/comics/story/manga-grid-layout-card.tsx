@@ -102,7 +102,7 @@ export function MangaGridLayoutCard() {
       </CardHeader>
       <CardContent className="space-y-3 p-4 pt-0">
         <AutoSelectControl
-          label="Auto default"
+          label={String(t('grid.autoDefault'))}
           value={pageLayoutPreference}
           options={layouts}
           onChange={handleLayoutPreferenceChange}

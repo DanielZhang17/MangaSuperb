@@ -43,6 +43,8 @@ JOB_TYPE_STORY_OPTIMIZATION = "story_optimization"
 JOB_TYPE_CHARACTER_OPTIMIZATION = "character_optimization"
 JOB_TYPE_PAGE_RENDER = "page_render"
 ALLOWED_AI_PROVIDER_VALUES = {"gemini", "third_party", "openai"}
+ACTIVE_RQ_STATUSES = {"queued", "started", "running", "deferred"}
+ACTIVE_CHARACTER_IMAGE_STATUSES = {"pending", "processing"}
 
 
 def _normalise_ai_provider(value: Any, field: str) -> str | None:
@@ -113,6 +115,15 @@ def _queue_worker_snapshot(queue=None) -> dict[str, object]:
     except Exception as exc:  # pragma: no cover - defensive safety
         logger.error("Failed to collect worker snapshot: %s", exc)
         return {"status": "error", "active": 0, "workers": []}
+
+
+def _fetch_rq_status(job_id: str) -> str | None:
+    try:
+        job = Job.fetch(job_id, connection=current_app.extensions["redis_conn"])
+        return str(job.get_status())
+    except Exception as exc:
+        logger.info("Unable to fetch RQ job status for active job %s: %s", job_id, exc)
+        return None
 
 
 def _handle_comic_generation(data: dict[str, Any]) -> tuple[dict[str, Any], int]:
@@ -456,7 +467,7 @@ def get_job_status(job_id: str) -> Any:
 @bp.get("/active")
 @login_required
 def list_active_jobs() -> Any:
-    """Return in-flight workflow stages owned by the current user."""
+    """Return in-flight background jobs owned by the current user."""
     rows = (
         db.session.query(ComicWorkflowStage, Comic)
         .join(Comic, ComicWorkflowStage.comic_id == Comic.id)
@@ -513,4 +524,48 @@ def list_active_jobs() -> Any:
                 },
             }
         )
+
+    characters = (
+        Character.query.filter_by(user_id=current_user.id)
+        .order_by(Character.updated_at.asc())
+        .all()
+    )
+    for character in characters:
+        character_started_at = character.updated_at or character.created_at
+        if (
+            character.image_job_id
+            and character.image_status in ACTIVE_CHARACTER_IMAGE_STATUSES
+        ):
+            active.append(
+                {
+                    "job_id": character.image_job_id,
+                    "kind": "character_image",
+                    "character_id": character.id,
+                    "stage": "character_image",
+                    "status": character.image_status,
+                    "title": character.name,
+                    "started_at": (
+                        character_started_at.isoformat() if character_started_at else None
+                    ),
+                }
+            )
+
+        if character.optimization_job_id:
+            rq_status = _fetch_rq_status(character.optimization_job_id)
+            if rq_status not in ACTIVE_RQ_STATUSES:
+                continue
+
+            active.append(
+                {
+                    "job_id": character.optimization_job_id,
+                    "kind": "character_optimization",
+                    "character_id": character.id,
+                    "stage": "character_optimization",
+                    "status": rq_status,
+                    "title": character.name,
+                    "started_at": (
+                        character_started_at.isoformat() if character_started_at else None
+                    ),
+                }
+            )
     return jsonify({"active": active}), 200

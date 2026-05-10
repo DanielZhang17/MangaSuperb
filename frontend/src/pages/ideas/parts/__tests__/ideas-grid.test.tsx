@@ -8,6 +8,7 @@ import {
   charactersCompletedAtom,
   currentComicDetailAtom,
   currentComicIdAtom,
+  fullStoryAtom,
   mangaTitleAtom,
   selectedCharacterIdsAtom,
   selectedCharacterRolesAtom,
@@ -67,6 +68,12 @@ describe('IdeasGrid', () => {
       id: 42,
       title: '校园短篇',
       style_description: '日式校园漫画风格',
+      aspect_ratio: '3:4',
+      script: {
+        content: JSON.stringify({
+          story: 'A restored story from the saved comic.',
+        }),
+      },
       pages: [{ id: 9, page_number: 1, image_url: 'https://cdn.example.com/page-1.png' }],
       panel_shots: [{ id: 1, page_number: 1, panel_number: 1 }],
       characters: [
@@ -92,6 +99,7 @@ describe('IdeasGrid', () => {
     expect(store.get(currentComicIdAtom)).toBe(42)
     expect(store.get(currentComicDetailAtom)).toEqual(comic)
     expect(store.get(mangaTitleAtom)).toBe('校园短篇')
+    expect(store.get(fullStoryAtom)).toBe('A restored story from the saved comic.')
     expect(store.get(styleAtom)).toBe('日式校园漫画风格')
     expect(store.get(storyCompletedAtom)).toBe(true)
     expect(store.get(charactersCompletedAtom)).toBe(true)

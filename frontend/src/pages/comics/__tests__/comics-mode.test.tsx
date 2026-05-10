@@ -35,7 +35,34 @@ vi.mock('../image-generation/image-generation-tab', () => ({
 
 vi.mock('@/hooks/use-i18n', () => ({
   useI18n: () => ({
-    t: (key: string) => key,
+    t: (key: string, options?: any) => ({
+      'workflow.auto': 'Auto',
+      'workflow.pro': 'Pro',
+      'title.create': 'Comic Creation',
+      'title.panelsPage': 'Panels',
+      'tabs.story': 'Story',
+      'tabs.characters': 'Characters',
+      'tabs.panels': 'Panels',
+      'tabs.imageGeneration': 'Image Gen',
+      'panels.generatedShots': `${options?.count ?? 0} shots generated`,
+      'auto.title': 'Auto Manga',
+      'auto.subtitle': 'Upload or paste a novel to start.',
+      'auto.prepareCharacters': 'Prepare characters',
+      'auto.preparing': 'Preparing...',
+      'auto.openPro': 'Open Pro controls',
+      'auto.error.addStory': 'Add a story before preparing characters.',
+      'auto.error.prepareFailed': 'Character preparation failed',
+      'autoReview.title': 'Character Review',
+      'autoReview.badge.created': 'Created',
+      'autoReview.badge.reused': 'Reused',
+      'autoReview.summary.reused': 'Reused',
+      'autoReview.summary.created': 'Created',
+      'autoReview.summary.conflicts': 'Conflicts',
+      'autoReview.acceptHint': 'Accept prepared characters to use them in the Pro workflow.',
+      'autoReview.resolveConflicts': 'Review conflicts before accepting characters.',
+      'autoReview.stale': 'Story changed after this review. Prepare characters again before accepting.',
+      'autoReview.accept': 'Accept characters',
+    }[key] ?? key),
   }),
 }))
 

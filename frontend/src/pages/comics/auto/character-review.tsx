@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useAiProviders } from '@/hooks/use-ai-providers'
+import { useI18n } from '@/hooks/use-i18n'
 import type { AutoCharacterConflict, AutoCharacterPrepareResponse, AutoCharacterReviewItem, ICharacter } from '@/service/types'
 
 import {
@@ -22,9 +23,11 @@ import { WorkflowPanel } from '../components/workflow-layout'
 function CharacterRow({
   item,
   kind,
+  t,
 }: {
   item: AutoCharacterReviewItem
   kind: 'created' | 'reused'
+  t: (key: string, options?: any) => unknown
 }) {
   return (
     <div className="flex min-w-0 items-start justify-between gap-3 rounded-md border border-border/60 p-3">
@@ -32,7 +35,7 @@ function CharacterRow({
         <div className="flex flex-wrap items-center gap-2">
           <p className="font-medium">{item.character.name}</p>
           <Badge variant={kind === 'created' ? 'default' : 'secondary'}>
-            {kind === 'created' ? 'Created' : 'Reused'}
+            {String(t(kind === 'created' ? 'autoReview.badge.created' : 'autoReview.badge.reused'))}
           </Badge>
           <Badge variant="outline">{item.role}</Badge>
         </div>
@@ -49,11 +52,13 @@ function ConflictRow({
   onReview,
   onUse,
   onCreate,
+  t,
 }: {
   conflict: AutoCharacterConflict
   onReview: (character: ICharacter) => void
   onUse: (conflict: AutoCharacterConflict) => void
   onCreate: (conflict: AutoCharacterConflict) => void
+  t: (key: string, options?: any) => unknown
 }) {
   const visualTraits = conflict.candidate.visual_traits.filter(Boolean).join(', ')
 
@@ -67,14 +72,14 @@ function ConflictRow({
             <Badge variant="outline">{conflict.role}</Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            Matches existing character: {conflict.existing_character.name}
+            {String(t('autoReview.matchesExisting', { name: conflict.existing_character.name }))}
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Candidate: {conflict.candidate.description}
+            {String(t('autoReview.candidate', { description: conflict.candidate.description }))}
           </p>
           {visualTraits && (
             <p className="mt-1 text-xs text-muted-foreground">
-              Visual traits: {visualTraits}
+              {String(t('autoReview.visualTraits', { traits: visualTraits }))}
             </p>
           )}
           <p className="mt-1 text-sm text-muted-foreground">{conflict.reason}</p>
@@ -87,7 +92,7 @@ function ConflictRow({
             onClick={() => onReview(conflict.existing_character)}
           >
             <Pencil className="size-4" />
-            Review {conflict.existing_character.name}
+            {String(t('autoReview.action.review', { name: conflict.existing_character.name }))}
           </Button>
           <Button
             type="button"
@@ -96,14 +101,14 @@ function ConflictRow({
             onClick={() => onCreate(conflict)}
           >
             <Plus className="size-4" />
-            Create {conflict.candidate.name}
+            {String(t('autoReview.action.create', { name: conflict.candidate.name }))}
           </Button>
           <Button
             type="button"
             size="sm"
             onClick={() => onUse(conflict)}
           >
-            Use {conflict.existing_character.name}
+            {String(t('autoReview.action.use', { name: conflict.existing_character.name }))}
           </Button>
         </div>
       </div>
@@ -113,8 +118,10 @@ function ConflictRow({
 
 function FailedCandidateRow({
   failed,
+  t,
 }: {
   failed: AutoCharacterPrepareResponse['failed'][number]
+  t: (key: string, options?: any) => unknown
 }) {
   const visualTraits = failed.candidate.visual_traits.filter(Boolean).join(', ')
 
@@ -126,11 +133,11 @@ function FailedCandidateRow({
         <Badge variant="outline">{failed.role}</Badge>
       </div>
       <p className="mt-1 text-sm text-muted-foreground">
-        Candidate: {failed.candidate.description}
+        {String(t('autoReview.candidate', { description: failed.candidate.description }))}
       </p>
       {visualTraits && (
         <p className="mt-1 text-xs text-muted-foreground">
-          Visual traits: {visualTraits}
+          {String(t('autoReview.visualTraits', { traits: visualTraits }))}
         </p>
       )}
       <p className="mt-2 text-sm text-destructive">{failed.error}</p>
@@ -139,6 +146,7 @@ function FailedCandidateRow({
 }
 
 export function CharacterReview() {
+  const { t } = useI18n('comics')
   const [review, setReview] = useAtom(autoCharacterReviewAtom)
   const [reviewStory] = useAtom(autoCharacterReviewStoryAtom)
   const [currentStory] = useAtom(fullStoryAtom)
@@ -252,30 +260,30 @@ export function CharacterReview() {
   }
 
   return (
-    <WorkflowPanel title="Character Review">
+    <WorkflowPanel title={String(t('autoReview.title'))}>
       <div className="space-y-4">
         <div className="grid gap-3 md:grid-cols-3">
           <div className="rounded-md bg-muted/50 p-3">
             <p className="text-2xl font-semibold">{review.reused.length}</p>
-            <p className="text-sm text-muted-foreground">Reused</p>
+            <p className="text-sm text-muted-foreground">{String(t('autoReview.summary.reused'))}</p>
           </div>
           <div className="rounded-md bg-muted/50 p-3">
             <p className="text-2xl font-semibold">{review.created.length}</p>
-            <p className="text-sm text-muted-foreground">Created</p>
+            <p className="text-sm text-muted-foreground">{String(t('autoReview.summary.created'))}</p>
           </div>
           <div className="rounded-md bg-muted/50 p-3">
             <p className="text-2xl font-semibold">{review.conflicts.length}</p>
-            <p className="text-sm text-muted-foreground">Conflicts</p>
+            <p className="text-sm text-muted-foreground">{String(t('autoReview.summary.conflicts'))}</p>
           </div>
         </div>
 
         {acceptedItems.length > 0 && (
           <div className="space-y-2">
             {review.reused.map((item) => (
-              <CharacterRow key={`reused-${item.character.id}`} item={item} kind="reused" />
+              <CharacterRow key={`reused-${item.character.id}`} item={item} kind="reused" t={t} />
             ))}
             {review.created.map((item) => (
-              <CharacterRow key={`created-${item.character.id}`} item={item} kind="created" />
+              <CharacterRow key={`created-${item.character.id}`} item={item} kind="created" t={t} />
             ))}
           </div>
         )}
@@ -289,6 +297,7 @@ export function CharacterReview() {
                 onReview={setEditingCharacter}
                 onUse={handleUseConflict}
                 onCreate={setCreatingConflict}
+                t={t}
               />
             ))}
           </div>
@@ -297,12 +306,13 @@ export function CharacterReview() {
         {review.failed.length > 0 && (
           <div className="space-y-2">
             <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-              {review.failed.length} character candidates failed during preparation.
+              {String(t('autoReview.failedSummary', { count: review.failed.length }))}
             </div>
             {review.failed.map((failed) => (
               <FailedCandidateRow
                 key={`${failed.candidate.name}-${failed.role}`}
                 failed={failed}
+                t={t}
               />
             ))}
           </div>
@@ -311,14 +321,14 @@ export function CharacterReview() {
         <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-sm text-muted-foreground">
             {isStale
-              ? 'Story changed after this review. Prepare characters again before accepting.'
+              ? String(t('autoReview.stale'))
               : hasConflicts
-                ? 'Review conflicts before accepting characters.'
-                : 'Accept prepared characters to use them in the Pro workflow.'}
+                ? String(t('autoReview.resolveConflicts'))
+                : String(t('autoReview.acceptHint'))}
           </div>
           <Button type="button" onClick={handleAccept} disabled={!canAccept}>
             <CheckCircle2 className="size-4" />
-            Accept characters
+            {String(t('autoReview.accept'))}
           </Button>
         </div>
       </div>

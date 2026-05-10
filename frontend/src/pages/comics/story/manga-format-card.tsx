@@ -8,6 +8,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { DEFAULT_ASPECT_RATIOS } from '@/config/preferences'
+import { useI18n } from '@/hooks/use-i18n'
 import { usePreferences } from '@/hooks/use-preferences'
 import { resolvePreferenceValue } from '@/lib/auto-preferences'
 import type { AutoPreference, ColorMode } from '@/service/types'
@@ -15,12 +16,8 @@ import type { AutoPreference, ColorMode } from '@/service/types'
 import { aspectRatioAtom, currentComicOverridesAtom } from '../atoms'
 import { AutoSelectControl } from '../components/auto-select-control'
 
-const COLOR_MODE_LABELS: Record<ColorMode, string> = {
-  'black-white': 'Black and white',
-  color: 'Color',
-}
-
 export function MangaFormatCard() {
+  const { t } = useI18n('comics')
   const [aspectRatio, setAspectRatio] = useAtom(aspectRatioAtom)
   const [overrides, setOverrides] = useAtom(currentComicOverridesAtom)
   const { colorModes, preferences } = usePreferences()
@@ -33,9 +30,9 @@ export function MangaFormatCard() {
   const colorOptions = useMemo(() => (
     colorModes.map((value) => ({
       value,
-      label: COLOR_MODE_LABELS[value] ?? value,
+      label: String(t(value === 'black-white' ? 'format.color.blackWhite' : 'format.color.color')),
     }))
-  ), [colorModes])
+  ), [colorModes, t])
 
   const preferenceAspectRatio = preferences?.fields?.aspect_ratio
   const fallbackAspectRatio = resolvePreferenceValue(
@@ -75,17 +72,17 @@ export function MangaFormatCard() {
   return (
     <Card className="rounded-lg">
       <CardHeader className="p-4 pb-3">
-        <CardTitle className="text-base">Format</CardTitle>
+        <CardTitle className="text-base">{String(t('format.title'))}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 p-4 pt-0">
         <AutoSelectControl
-          label="Aspect ratio"
+          label={String(t('format.aspectRatio'))}
           value={aspectRatioPreference}
           options={aspectOptions}
           onChange={handleAspectRatioChange}
         />
         <AutoSelectControl
-          label="Color"
+          label={String(t('format.color'))}
           value={colorModePreference}
           options={colorOptions}
           onChange={handleColorModeChange}

@@ -8,7 +8,23 @@ import PanelsApi from '@/apis/panels'
 import { type ActiveJobEntry, activeJobsAtom, type ActiveJobStage } from '@/atoms'
 import { Button } from '@/components/ui/button'
 import useActiveJobs, { mapStageToComicsTab } from '@/hooks/use-active-jobs'
-import { activeTabAtom, currentComicDetailAtom, currentComicIdAtom } from '@/pages/comics/atoms'
+import { useI18n } from '@/hooks/use-i18n'
+import {
+  activeTabAtom,
+  aspectRatioAtom,
+  charactersCompletedAtom,
+  currentComicDetailAtom,
+  currentComicIdAtom,
+  currentComicOverridesAtom,
+  fullStoryAtom,
+  mangaTitleAtom,
+  selectedCharacterIdsAtom,
+  selectedCharacterRolesAtom,
+  storyCompletedAtom,
+  styleAtom,
+  workflowModeAtom,
+} from '@/pages/comics/atoms'
+import { getComicWorkflowHydration } from '@/pages/comics/lib/workflow-hydration'
 
 import { ProgressRow } from './progress-row'
 
@@ -61,28 +77,54 @@ function groupJobs(jobs: ActiveJobEntry[]): ActiveJobEntry[] {
 }
 
 export function ProgressShelf() {
+  const { t } = useI18n('progressShelf')
   const navigate = useNavigate()
+  const setAspectRatio = useSetAtom(aspectRatioAtom)
+  const setCharactersCompleted = useSetAtom(charactersCompletedAtom)
   const setComicId = useSetAtom(currentComicIdAtom)
   const setComicDetail = useSetAtom(currentComicDetailAtom)
+  const setFullStory = useSetAtom(fullStoryAtom)
+  const setMangaTitle = useSetAtom(mangaTitleAtom)
+  const setOverrides = useSetAtom(currentComicOverridesAtom)
+  const setSelectedCharacterIds = useSetAtom(selectedCharacterIdsAtom)
+  const setSelectedCharacterRoles = useSetAtom(selectedCharacterRolesAtom)
   const setActiveTab = useSetAtom(activeTabAtom)
   const setActiveJobs = useSetAtom(activeJobsAtom)
+  const setStoryCompleted = useSetAtom(storyCompletedAtom)
+  const setStyle = useSetAtom(styleAtom)
+  const setWorkflowMode = useSetAtom(workflowModeAtom)
   const { jobs } = useActiveJobs()
   const [expanded, setExpanded] = useState(false)
   const [abortingJobIds, setAbortingJobIds] = useState<Set<string>>(() => new Set())
 
   const groupedJobs = useMemo(() => groupJobs(jobs), [jobs])
 
-  if (groupedJobs.length === 0) return null
-
   const handleOpen = (job: ActiveJobEntry) => {
+    if (job.character_id || job.kind === 'character_image' || job.kind === 'character_optimization') {
+      navigate('/create-character')
+
+      return
+    }
+
     if (job.comic_id) {
       setComicId(job.comic_id)
     }
 
     if (job.comic) {
+      const hydration = getComicWorkflowHydration(job.comic)
       setComicDetail(job.comic)
+      setMangaTitle(hydration.title)
+      setFullStory(hydration.story)
+      if (hydration.style) setStyle(hydration.style)
+      if (hydration.aspectRatio) setAspectRatio(hydration.aspectRatio)
+      setOverrides(hydration.overrides)
+      setStoryCompleted(true)
+      setCharactersCompleted(hydration.characterIds.length > 0)
+      setSelectedCharacterIds(hydration.characterIds)
+      setSelectedCharacterRoles(hydration.characterRoles)
     }
 
+    setWorkflowMode('pro')
     setActiveTab(mapStageToComicsTab(job.stage))
     navigate('/comics')
   }
@@ -112,7 +154,7 @@ export function ProgressShelf() {
         return [...nextById.values()]
       })
     } catch (error: any) {
-      toast.error(error?.message || 'Render run abort failed')
+      toast.error(error?.message || String(t('error.abortFailed')))
     } finally {
       setAbortingJobIds((current) => {
         const next = new Set(current)
@@ -129,9 +171,11 @@ export function ProgressShelf() {
         <div className="pointer-events-auto w-[360px] max-w-full rounded-[28px] border border-white/10 bg-slate-950/95 p-4 shadow-2xl shadow-slate-950/50 backdrop-blur-xl">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Active jobs</p>
+              <p className="text-xs uppercase tracking-[0.24em] text-slate-400">{String(t('title.activeJobs'))}</p>
               <h3 className="text-lg font-semibold text-white">
-                {jobs.length} active now
+                {jobs.length > 0
+                  ? String(t('title.activeNow', { count: jobs.length }))
+                  : String(t('title.noActiveJobs'))}
               </h3>
             </div>
             <Button
@@ -145,22 +189,29 @@ export function ProgressShelf() {
             </Button>
           </div>
 
-          <div className="space-y-3">
-            {groupedJobs.map((job) => (
-              <ProgressRow
-                key={`${job.comic_id ?? 'job'}:${job.job_id}`}
-                job={job}
-                onOpen={handleOpen}
-                onAbort={(targetJob) => void handleAbort(targetJob)}
-                isAborting={abortingJobIds.has(job.job_id)}
-              />
-            ))}
-          </div>
+          {groupedJobs.length > 0 ? (
+            <div className="space-y-3">
+              {groupedJobs.map((job) => (
+                <ProgressRow
+                  key={`${job.comic_id ?? job.character_id ?? 'job'}:${job.job_id}`}
+                  job={job}
+                  onOpen={handleOpen}
+                  onAbort={(targetJob) => void handleAbort(targetJob)}
+                  isAborting={abortingJobIds.has(job.job_id)}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
+              {String(t('empty.description'))}
+            </div>
+          )}
         </div>
       ) : null}
 
       <button
         type="button"
+        title={String(t(expanded ? 'toggle.close' : 'toggle.open'))}
         onClick={() => setExpanded((current) => !current)}
         className="pointer-events-auto inline-flex items-center gap-3 rounded-full border border-white/10 bg-slate-950/95 px-4 py-3 text-left text-white shadow-xl shadow-slate-950/40 backdrop-blur-xl transition hover:border-sky-400/40"
       >
@@ -169,10 +220,12 @@ export function ProgressShelf() {
         </span>
         <span>
           <span className="block text-sm font-semibold">
-            {jobs.length} job{jobs.length === 1 ? '' : 's'} active
+            {jobs.length > 0
+              ? String(t('toggle.active', { count: jobs.length }))
+              : String(t('toggle.idle'))}
           </span>
           <span className="block text-xs text-slate-300">
-            Tap to reopen your active workflow
+            {jobs.length > 0 ? String(t('toggle.activeHint')) : String(t('toggle.idleHint'))}
           </span>
         </span>
       </button>

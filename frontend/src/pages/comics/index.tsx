@@ -25,7 +25,7 @@ export default function ComicsPage() {
   const pageTitle = activeTab === 'story'
     ? String(t('title.create'))
     : activeTab === 'panels'
-      ? '分镜'
+      ? String(t('title.panelsPage'))
       : activeTab === 'characters'
         ? String(t('tabs.characters'))
         : String(t('tabs.imageGeneration'))
@@ -35,8 +35,8 @@ export default function ComicsPage() {
       <Tabs value={workflowMode} onValueChange={(value) => setWorkflowMode(value as 'auto' | 'pro')}>
         <ComicsWorkflowShell className="pb-0">
           <TabsList className="grid w-full grid-cols-2 sm:w-[320px]">
-            <TabsTrigger value="auto" onClick={() => setWorkflowMode('auto')}>Auto</TabsTrigger>
-            <TabsTrigger value="pro" onClick={() => setWorkflowMode('pro')}>Pro</TabsTrigger>
+            <TabsTrigger value="auto" onClick={() => setWorkflowMode('auto')}>{String(t('workflow.auto'))}</TabsTrigger>
+            <TabsTrigger value="pro" onClick={() => setWorkflowMode('pro')}>{String(t('workflow.pro'))}</TabsTrigger>
           </TabsList>
         </ComicsWorkflowShell>
         <TabsContent value="auto" className="mt-0">
@@ -50,7 +50,7 @@ export default function ComicsPage() {
                   <h2 className="text-2xl font-semibold tracking-normal md:text-3xl">{pageTitle}</h2>
                   {activeTab === 'panels' && (
                     <p className="mt-1 text-sm text-muted-foreground">
-                      已生成 {shotsCount} 个镜头
+                      {String(t('panels.generatedShots', { count: shotsCount }))}
                     </p>
                   )}
                 </div>

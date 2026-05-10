@@ -11,7 +11,29 @@ vi.mock('../character-upsert-dialog', () => ({
 
 vi.mock('@/hooks/use-i18n', () => ({
   useI18n: () => ({
-    t: (key: string, options?: any) => options?.count ? `${key}:${options.count}` : key,
+    t: (key: string, options?: any) => ({
+      'characters.more': '更多人物',
+      'characters.selectPrompt': '请为你的人物选择形象',
+      'characters.recognized': `已识别到 ${options?.count ?? 0} 个角色`,
+      'characters.quickPick': '一键选择人物',
+      'characters.publicLibrary': '来自公开角色库，只可选择',
+      'characters.publicBadge': '公开',
+      'characters.edit': `编辑 ${options?.name}`,
+      'characters.publicOnlyTitle': '公开人物只能选择，不能编辑',
+      'characters.loading': '加载中...',
+      'characters.createNew': '新建人物',
+      'characters.rolesTitle': '出镜人物职责与顺序',
+      'characters.rolesHelp': '上移/下移改变顺序（顺序即 order_index），职责即 role',
+      'characters.role': '职责',
+      'characters.selectRole': '选择职责',
+      'characters.role.protagonist': '主角',
+      'characters.role.supporting': '配角',
+      'characters.role.antagonist': '反派',
+      'characters.role.cameo': '客串',
+      'characters.moveUp': '上移',
+      'characters.moveDown': '下移',
+      'common.next': '下一步',
+    }[key] ?? (options?.count ? `${key}:${options.count}` : key)),
   }),
 }))
 

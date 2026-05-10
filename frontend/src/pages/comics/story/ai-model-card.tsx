@@ -7,7 +7,6 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { AI_PROVIDER_LABELS, useAiProviders } from '@/hooks/use-ai-providers'
 import { useI18n } from '@/hooks/use-i18n'
 import { usePreferences } from '@/hooks/use-preferences'
@@ -66,27 +65,11 @@ export function AIModelCard() {
       </CardHeader>
       <CardContent className="space-y-3 p-4 pt-0">
         <AutoSelectControl
-          label="Auto default"
+          label={String(t('aiModel.autoDefault'))}
           value={textProviderPreference}
           options={providerOptions}
           onChange={handleTextProviderPreferenceChange}
         />
-        <ToggleGroup
-          type="single"
-          value={resolvedProvider}
-          onValueChange={(value) => {
-            if (value) {
-              handleTextProviderPreferenceChange({ mode: 'manual', value: value as AiProviderId })
-            }
-          }}
-          className="grid w-full grid-cols-2 gap-2"
-        >
-          {textProviders.map((provider) => (
-            <ToggleGroupItem key={provider} value={provider} className="w-full">
-              {AI_PROVIDER_LABELS[provider]}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
       </CardContent>
     </Card>
   )

@@ -10,6 +10,14 @@ beforeAll(() => {
   })
 })
 
+vi.mock('@/hooks/use-i18n', () => ({
+  useI18n: () => ({
+    t: (key: string) => ({
+      'preference.auto': '自动',
+    }[key] ?? key),
+  }),
+}))
+
 describe('AutoSelectControl', () => {
   it('renders auto and manual options and emits preference values', () => {
     const onChange = vi.fn()
@@ -26,7 +34,7 @@ describe('AutoSelectControl', () => {
     )
 
     expect(screen.getByText('Style')).toBeInTheDocument()
-    expect(screen.getByRole('combobox')).toHaveTextContent('Auto')
+    expect(screen.getByRole('combobox')).toHaveTextContent('自动')
 
     fireEvent.keyDown(screen.getByRole('combobox'), { key: 'ArrowDown' })
     fireEvent.click(screen.getByRole('option', { name: 'Japanese' }))
@@ -46,7 +54,7 @@ describe('AutoSelectControl', () => {
     )
 
     fireEvent.keyDown(screen.getByRole('combobox'), { key: 'ArrowDown' })
-    fireEvent.click(screen.getByRole('option', { name: 'Auto' }))
+    fireEvent.click(screen.getByRole('option', { name: '自动' }))
 
     expect(onChange).toHaveBeenCalledWith({ mode: 'auto' })
   })

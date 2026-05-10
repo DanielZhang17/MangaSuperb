@@ -1,6 +1,6 @@
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { ChevronDown, ChevronUp, Image as ImageIcon, Plus } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 
 import ComicsApi from '@/apis/comics'
@@ -21,6 +21,7 @@ import {
   DEFAULT_STYLE_PRESETS,
 } from '@/config/preferences'
 import { AI_PROVIDER_LABELS, useAiProviders } from '@/hooks/use-ai-providers'
+import { useI18n } from '@/hooks/use-i18n'
 import { usePreferences } from '@/hooks/use-preferences'
 import { resolveAvailablePreferenceValue, resolvePreferenceValue } from '@/lib/auto-preferences'
 import { cn, proxiedStatic } from '@/lib/utils'
@@ -79,26 +80,6 @@ const FONT_SIZE_OPTIONS = DEFAULT_FONT_SIZES.map((value) => ({
   label: value,
 }))
 
-const BUBBLE_SHAPE_LABELS: Record<string, string> = {
-  rect: '矩形',
-  round: '圆角',
-}
-
-const BUBBLE_SHAPES = DEFAULT_BUBBLE_SHAPES.map((value) => ({
-  value,
-  label: BUBBLE_SHAPE_LABELS[value] ?? value,
-}))
-
-const COLOR_MODE_LABELS: Record<ColorMode, string> = {
-  'black-white': '黑白',
-  color: '彩色',
-}
-
-const COLOR_MODE_OPTIONS = DEFAULT_COLOR_MODES.map((value) => ({
-  value,
-  label: COLOR_MODE_LABELS[value] ?? value,
-}))
-
 const ASPECT_RATIO_OPTIONS = DEFAULT_ASPECT_RATIOS.map((value) => ({
   value,
   label: value,
@@ -112,16 +93,16 @@ const DEFAULT_COLOR_MODE = DEFAULT_COLOR_MODES[0] ?? 'black-white'
 
 type RenderRunMode = RenderRun['mode']
 
-const RENDER_RUN_ACTIONS: { mode: RenderRunMode; label: string }[] = [
-  { mode: 'first_page', label: 'Generate first page' },
-  { mode: 'remaining_pages', label: 'Generate remaining pages' },
-  { mode: 'all_pages', label: 'Generate all pages' },
+const RENDER_RUN_ACTIONS: { mode: RenderRunMode; labelKey: string }[] = [
+  { mode: 'first_page', labelKey: 'image.generateFirst' },
+  { mode: 'remaining_pages', labelKey: 'image.generateRemaining' },
+  { mode: 'all_pages', labelKey: 'image.generateAll' },
 ]
 
 const RENDER_RUN_MODE_LABELS: Record<RenderRunMode, string> = {
-  first_page: 'first page',
-  remaining_pages: 'remaining pages',
-  all_pages: 'all pages',
+  first_page: 'image.mode.firstPage',
+  remaining_pages: 'image.mode.remainingPages',
+  all_pages: 'image.mode.allPages',
 }
 
 function isActiveRenderRun(renderRun: RenderRun | null) {
@@ -145,68 +126,68 @@ function renderRunProgressStatus(renderRun: RenderRun): RenderProgressState['sta
   return 'idle'
 }
 
-function renderRunStatusMessage(renderRun: RenderRun) {
-  const modeLabel = RENDER_RUN_MODE_LABELS[renderRun.mode]
+function renderRunStatusMessage(renderRun: RenderRun, t: (key: string, options?: any) => unknown) {
+  const modeLabel = String(t(RENDER_RUN_MODE_LABELS[renderRun.mode]))
 
   if (renderRun.status === 'aborted') {
-    return 'Render run aborted.'
+    return String(t('image.run.aborted'))
   }
 
   if (renderRun.abort_requested) {
-    return 'Abort requested. Waiting for the render run to stop.'
+    return String(t('image.run.abortRequested'))
   }
 
   if (renderRun.status === 'queued') {
-    return `Generate ${modeLabel} queued in the background.`
+    return String(t('image.run.queued', { mode: modeLabel }))
   }
 
   if (renderRun.status === 'running') {
-    return `Generate ${modeLabel} is running in the background.`
+    return String(t('image.run.running', { mode: modeLabel }))
   }
 
   if (renderRun.status === 'completed') {
-    return `Generate ${modeLabel} completed.`
+    return String(t('image.run.completed', { mode: modeLabel }))
   }
 
   if (renderRun.status === 'failed') {
     return renderRun.error_message
-      ? `Generate ${modeLabel} failed: ${renderRun.error_message}`
-      : `Generate ${modeLabel} failed.`
+      ? String(t('image.run.failedWithError', { mode: modeLabel, message: renderRun.error_message }))
+      : String(t('image.run.failed', { mode: modeLabel }))
   }
 
-  return 'Render run aborted.'
+  return String(t('image.run.aborted'))
 }
 
-function renderRunHelperText(renderRun: RenderRun | null) {
+function renderRunHelperText(renderRun: RenderRun | null, t: (key: string, options?: any) => unknown) {
   if (!renderRun) return undefined
 
   if (renderRun.status === 'aborted') {
-    return 'This render run was aborted. You can start another run when ready.'
+    return String(t('image.run.helperAborted'))
   }
 
   if (renderRun.abort_requested) {
-    return 'The abort request is pending. Keep generation paused until the run stops.'
+    return String(t('image.run.helperAbortRequested'))
   }
 
   if (renderRun.status === 'completed') {
-    return 'The background render run has completed.'
+    return String(t('image.run.helperCompleted'))
   }
 
   if (renderRun.status === 'failed') {
-    return 'The background render run failed. You can retry after reviewing the error.'
+    return String(t('image.run.helperFailed'))
   }
 
-  return 'This render run continues in the background. You can leave this page.'
+  return String(t('image.run.helperRunning'))
 }
 
-function createActiveRenderJob(renderRun: RenderRun, title?: string | null): ActiveJobEntry {
+function createActiveRenderJob(renderRun: RenderRun, title?: string | null, fallbackTitle = 'Render run'): ActiveJobEntry {
   return {
     job_id: renderRun.job_id ?? `render-run-${renderRun.id}`,
     render_run_id: renderRun.id,
     comic_id: renderRun.comic_id,
     stage: 'render',
     status: renderRun.status,
-    title: title ?? 'Render run',
+    title: title ?? fallbackTitle,
     started_at: renderRun.started_at,
     rq_status: renderRun.status,
     workflow_stages: [{ stage: 'render', status: renderRun.status }],
@@ -220,16 +201,32 @@ function createActiveRenderJob(renderRun: RenderRun, title?: string | null): Act
   }
 }
 
+function parseImagePages(imagesRes: unknown): PageImage[] {
+  const pagesArr = (imagesRes as { pages?: unknown })?.pages
+
+  return Array.isArray(pagesArr) ? pagesArr as PageImage[] : []
+}
+
+function pagesToScenes(pagesArr: PageImage[]): Scene[] {
+  return [...pagesArr]
+    .sort((a, b) => a.page_number - b.page_number)
+    .map((page) => ({
+      id: page.page_number,
+      label: String(page.page_number).padStart(2, '0'),
+      pageId: page.page_id,
+    }))
+}
+
 function renderFailureMessage(comic: any): string | null {
   const stages = Array.isArray(comic?.workflow_stages) ? comic.workflow_stages : []
   const renderStage = stages.find((stage: any) => stage?.stage === 'render')
 
   if (renderStage?.status === 'failed') {
-    return renderStage.error_message || comic?.error_message || '渲染任务失败'
+    return renderStage.error_message || comic?.error_message || 'image.error.renderFailed'
   }
 
   if (comic?.workflow_stage === 'render' && comic?.workflow_status === 'failed') {
-    return comic?.error_message || '渲染任务失败'
+    return comic?.error_message || 'image.error.renderFailed'
   }
 
   return null
@@ -323,6 +320,7 @@ function AutoBooleanSelectControl({
   falseLabel: string
   onChange: (value: AutoPreference<boolean>) => void
 }) {
+  const { t } = useI18n('common')
   const selectValue = value.mode === 'manual' ? String(value.value) : 'auto'
 
   return (
@@ -343,7 +341,7 @@ function AutoBooleanSelectControl({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="auto">Auto</SelectItem>
+          <SelectItem value="auto">{String(t('preference.auto'))}</SelectItem>
           <SelectItem value="true">{trueLabel}</SelectItem>
           <SelectItem value="false">{falseLabel}</SelectItem>
         </SelectContent>
@@ -385,10 +383,12 @@ function SceneThumbnail({
 }
 
 function StoryboardCanvas({ onPreview, imageUrl }: { onPreview: () => void; imageUrl?: string | null }) {
+  const { t } = useI18n('comics')
+
   return (
     <main className="flex min-h-[420px] flex-1 flex-col items-center gap-4 lg:min-h-[540px]">
       <Button variant="secondary" onClick={onPreview} className="px-8">
-        预览
+        {String(t('image.preview'))}
       </Button>
       <div className="flex w-full flex-1 items-center justify-center overflow-hidden rounded-lg border border-dashed border-muted-foreground/40 bg-muted/80 p-3">
         {imageUrl ? (
@@ -456,64 +456,78 @@ function PropertyPanel({
   canExport: boolean
   isPublishing: boolean
 }) {
+  const { t } = useI18n('comics')
+  const colorModeOptions = useMemo(() => (
+    DEFAULT_COLOR_MODES.map((value) => ({
+      value,
+      label: String(t(value === 'black-white' ? 'format.color.blackWhite' : 'format.color.color')),
+    }))
+  ), [t])
+  const bubbleShapeOptions = useMemo(() => (
+    DEFAULT_BUBBLE_SHAPES.map((value) => ({
+      value,
+      label: value === 'rect' ? String(t('options.bubbleShape.rect', { ns: 'me' })) : String(t('options.bubbleShape.round', { ns: 'me' })),
+    }))
+  ), [t])
+
   return (
     <aside className="flex min-w-0 flex-col gap-4 xl:w-80">
-      <PanelCard title="AI模型">
+      <PanelCard title={String(t('image.model'))}>
         <AutoSelectControl
-          label="生图模型"
+          label={String(t('image.imageModel'))}
           value={imageProviderPreference}
           options={imageProviderOptions}
           onChange={onImageProviderPreferenceChange}
         />
         <AutoSelectControl
-          label="文本模型"
+          label={String(t('image.textModel'))}
           value={textProviderPreference}
           options={textProviderOptions}
           onChange={onTextProviderPreferenceChange}
         />
       </PanelCard>
 
-      <PanelCard title="风格">
+      <PanelCard title={String(t('image.style'))}>
         <AutoSelectControl
-          label="渲染风格"
+          label={String(t('image.renderStyle'))}
           value={stylePreference}
           options={styleOptions}
           onChange={onStylePreferenceChange}
         />
         <AutoSelectControl
-          label="颜色"
+          label={String(t('image.color'))}
           value={colorModePreference}
-          options={COLOR_MODE_OPTIONS}
+          options={colorModeOptions}
           onChange={onColorModePreferenceChange}
         />
         <AutoSelectControl
-          label="画幅"
+          label={String(t('image.aspectRatio'))}
           value={aspectRatioPreference}
           options={ASPECT_RATIO_OPTIONS}
           onChange={onAspectRatioPreferenceChange}
         />
       </PanelCard>
 
-      <PanelCard title="文本">
+      <PanelCard title={String(t('image.text'))}>
         <AutoSelectControl
-          label="字体"
+          label={String(t('image.font'))}
           value={fontFamilyPreference}
           options={FONT_OPTIONS}
           onChange={onFontFamilyPreferenceChange}
         />
         <AutoSelectControl
-          label="字体大小"
+          label={String(t('image.fontSize'))}
           value={fontSizePreference}
           options={FONT_SIZE_OPTIONS}
           onChange={onFontSizePreferenceChange}
         />
       </PanelCard>
 
-      <PanelCard title="会话框">
+      <PanelCard title={String(t('image.bubble'))}>
         <AutoSelectControl
-          label="类型"
+          label={String(t('image.bubbleType'))}
           value={bubbleShapePreference}
-          options={BUBBLE_SHAPES}
+          options={bubbleShapeOptions}
           onChange={onBubbleShapePreferenceChange}
         />
         <div className="flex justify-end">
@@ -524,29 +538,29 @@ function PropertyPanel({
           />
         </div>
         <AutoBooleanSelectControl
-          label="尾巴"
+          label={String(t('image.bubbleTail'))}
           value={bubbleTailPreference}
-          trueLabel="有"
-          falseLabel="无"
+          trueLabel={String(t('image.tailOn'))}
+          falseLabel={String(t('image.tailOff'))}
           onChange={onBubbleTailPreferenceChange}
         />
       </PanelCard>
 
-      <PanelCard title="导出">
+      <PanelCard title={String(t('image.export'))}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Button
             variant="outline"
             onClick={onOpenPublish}
             disabled={!canExport || isPublishing}
           >
-            导出 PDF
+            {String(t('image.exportPdf'))}
           </Button>
           <Button
             variant="outline"
             onClick={onExportImage}
             disabled={!canExport}
           >
-            导出图片
+            {String(t('image.exportImages'))}
           </Button>
         </div>
       </PanelCard>
@@ -576,13 +590,13 @@ function LabelRow({ label, children }: { label: string; children: React.ReactNod
   )
 }
 
-function createRenderProgress(maxPollTries: number): RenderProgressState {
+function createRenderProgress(maxPollTries: number, message: string): RenderProgressState {
   return {
     status: 'idle',
     elapsedMs: 0,
     pollTries: 0,
     maxPollTries,
-    message: '准备生成漫画页',
+    message,
   }
 }
 
@@ -590,6 +604,7 @@ function createRenderProgress(maxPollTries: number): RenderProgressState {
  * 故事板生图配置页
  */
 export function ImageGeneration() {
+  const { t } = useI18n('comics')
   const [scenes, setScenes] = useState(INITIAL_SCENES)
   const [selectedScene, setSelectedScene] = useState(INITIAL_SCENES[0]?.id ?? 1)
   // Pages data from images API
@@ -607,11 +622,14 @@ export function ImageGeneration() {
   const [makePublic, setMakePublic] = useState(true)
   const MAX_POLL_TRIES = 180 // 180 * 2s = 6min; keep ahead of backend image timeout
   const [pollTries, setPollTries] = useState(0)
-  const [renderProgress, setRenderProgress] = useState<RenderProgressState>(() => createRenderProgress(MAX_POLL_TRIES))
+  const [renderProgress, setRenderProgress] = useState<RenderProgressState>(() => (
+    createRenderProgress(MAX_POLL_TRIES, String(t('image.readyMessage')))
+  ))
   const pollTimerRef = useRef<number | null>(null)
   const triesRef = useRef<number>(0)
   const renderStartedAtRef = useRef<number | null>(null)
   const renderTargetRef = useRef<{ pageNumber: number; previousImageUrl: string | null } | null>(null)
+  const refreshedRenderRunIdsRef = useRef<Set<number>>(new Set())
   // PDF 导出轮询
   const MAX_PDF_POLL_TRIES = 30 // 30 * 2s = 60s
   const pdfPollTimerRef = useRef<number | null>(null)
@@ -750,6 +768,25 @@ export function ImageGeneration() {
     resolvedStyle,
     resolvedTextProvider,
   ])
+  const applyImagePages = useCallback((pagesArr: PageImage[]) => {
+    if (!Array.isArray(pagesArr) || pagesArr.length === 0) return
+
+    const sortedPages = [...pagesArr].sort((a, b) => a.page_number - b.page_number)
+    const newScenes = pagesToScenes(sortedPages)
+
+    setPages(sortedPages)
+    setScenes(newScenes)
+    setSelectedScene((current) => (
+      newScenes.some((scene) => scene.id === current) ? current : newScenes[0].id
+    ))
+  }, [])
+
+  const fetchImagePages = useCallback(async (targetComicId: number) => {
+    const imagesRes = await ComicsApi.listImages(targetComicId)
+
+    return parseImagePages(imagesRes)
+  }, [])
+
   const activeJobs = useAtomValue(activeJobsAtom)
   const lightweightActiveRenderJobForComic = useMemo(() => {
     if (comicId === null) return null
@@ -805,6 +842,37 @@ export function ImageGeneration() {
   }, [activeJobRenderRunForComic, setActiveRenderRun])
 
   useEffect(() => {
+    if (!comicId || !activeRenderRunForComic || activeRenderRunForComic.status !== 'completed') return
+    if (refreshedRenderRunIdsRef.current.has(activeRenderRunForComic.id)) return
+
+    refreshedRenderRunIdsRef.current.add(activeRenderRunForComic.id)
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [pagesArr, detail] = await Promise.all([
+          fetchImagePages(comicId),
+          ComicsApi.get(comicId).catch(() => null),
+        ])
+        if (cancelled) return
+        applyImagePages(pagesArr)
+        if (detail) setComicDetail(detail)
+      } catch (error) {
+        console.warn('刷新后台渲染结果失败', error)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    activeRenderRunForComic,
+    applyImagePages,
+    comicId,
+    fetchImagePages,
+    setComicDetail,
+  ])
+
+  useEffect(() => {
     if (providersLoading) return
 
     if (imageProvider !== resolvedImageProvider) {
@@ -857,7 +925,7 @@ export function ImageGeneration() {
     // 回到故事流程继续编辑；保持当前 comicId 不变
     setActiveTab('story')
     setStoryStep('input')
-    toast.success('已切换到故事流程，继续编辑当前漫画')
+    toast.success(String(t('image.backToStory')))
   }
 
   const previewHandler = () => {
@@ -872,19 +940,9 @@ export function ImageGeneration() {
     let cancelled = false
     ;(async () => {
       try {
-        const imagesRes = await ComicsApi.listImages(comicId)
-        const pagesArr = (imagesRes as any)?.pages ?? []
+        const pagesArr = await fetchImagePages(comicId)
         if (cancelled) return
-        if (Array.isArray(pagesArr) && pagesArr.length > 0) {
-          setPages(pagesArr)
-          const newScenes: Scene[] = pagesArr
-            .sort((a: any, b: any) => a.page_number - b.page_number)
-            .map((p: any) => ({ id: p.page_number, label: String(p.page_number).padStart(2, '0'), pageId: p.page_id }))
-          setScenes(newScenes)
-          if (!newScenes.some((s) => s.id === selectedScene)) {
-            setSelectedScene(newScenes[0].id)
-          }
-        }
+        applyImagePages(pagesArr)
       } catch {
         // 忽略加载失败，不阻断页面
       }
@@ -893,7 +951,7 @@ export function ImageGeneration() {
     return () => {
       cancelled = true
     }
-  }, [comicId, selectedScene])
+  }, [applyImagePages, comicId, fetchImagePages])
 
   // 分镜头列表卡片已移除
 
@@ -945,7 +1003,7 @@ export function ImageGeneration() {
 
   const handleGenerate = async () => {
     if (!comicId) {
-      toast.error('请先完成“分镜”步骤后再来生图')
+      toast.error(String(t('image.error.needPanels')))
 
       return
     }
@@ -961,7 +1019,7 @@ export function ImageGeneration() {
       renderStartedAtRef.current = Date.now()
       updateRenderProgress({
         status: 'submitting',
-        message: '正在提交渲染任务',
+        message: String(t('image.run.submitting', { mode: String(t('image.mode.firstPage')) })),
         elapsedMs: 0,
         pollTries: 0,
         error: null,
@@ -992,7 +1050,7 @@ export function ImageGeneration() {
       await PanelsApi.renderPage(comicId, targetPageNumber, renderOptions)
       updateRenderProgress({
         status: 'rendering',
-        message: '正在生成漫画页',
+        message: String(t('image.generatingMessage')),
         pollTries: 0,
         error: null,
       })
@@ -1022,7 +1080,7 @@ export function ImageGeneration() {
           setPollTries(triesRef.current)
           updateRenderProgress({
             status: 'rendering',
-            message: '正在生成漫画页',
+            message: String(t('image.generatingMessage')),
             pollTries: triesRef.current,
           })
 
@@ -1039,10 +1097,10 @@ export function ImageGeneration() {
               }
             }
 
-            toast.success('生图完成')
+            toast.success(String(t('image.success.completed')))
             updateRenderProgress({
               status: 'completed',
-              message: '生图完成',
+              message: String(t('image.success.completed')),
               pollTries: triesRef.current,
               error: null,
             })
@@ -1060,7 +1118,13 @@ export function ImageGeneration() {
             const detail = await ComicsApi.get(comicId)
             const failureMessage = renderFailureMessage(detail)
             if (failureMessage) {
-              const message = `生图失败：${failureMessage}`
+              const translatedFailure = failureMessage === 'image.error.renderFailed'
+                ? String(t('image.error.renderFailed'))
+                : failureMessage
+              const message = String(t('image.run.failedWithError', {
+                mode: String(t('image.mode.firstPage')),
+                message: translatedFailure,
+              }))
               setComicDetail(detail)
               updateRenderProgress({
                 status: 'failed',
@@ -1077,7 +1141,7 @@ export function ImageGeneration() {
             }
 
             if (triesRef.current >= MAX_POLL_TRIES) {
-              const message = '生图超时（6min），请稍后重试或检查任务队列'
+              const message = String(t('image.error.timeout'))
               updateRenderProgress({
                 status: 'timeout',
                 message,
@@ -1096,11 +1160,11 @@ export function ImageGeneration() {
           setPollTries(triesRef.current)
           updateRenderProgress({
             status: 'rendering',
-            message: '正在生成漫画页',
+            message: String(t('image.generatingMessage')),
             pollTries: triesRef.current,
           })
           if (triesRef.current >= MAX_POLL_TRIES) {
-            const message = '生图轮询失败或超时'
+            const message = String(t('image.error.pollFailed'))
             updateRenderProgress({
               status: 'timeout',
               message,
@@ -1124,7 +1188,7 @@ export function ImageGeneration() {
         console.warn('获取漫画详情失败', e)
       }
     } catch (err: any) {
-      const message = err?.message || '生图任务创建失败'
+      const message = err?.message || String(t('image.error.createFailed'))
       updateRenderProgress({
         status: 'failed',
         message,
@@ -1139,7 +1203,7 @@ export function ImageGeneration() {
 
   const handleStartRenderRun = async (mode: RenderRunMode) => {
     if (!comicId) {
-      toast.error('请先完成“分镜”步骤后再来生图')
+      toast.error(String(t('image.error.needPanels')))
 
       return
     }
@@ -1153,7 +1217,9 @@ export function ImageGeneration() {
       renderStartedAtRef.current = Date.now()
       updateRenderProgress({
         status: 'submitting',
-        message: `Submitting ${RENDER_RUN_ACTIONS.find((action) => action.mode === mode)?.label ?? 'render run'}...`,
+        message: String(t('image.run.submitting', {
+          mode: String(t(RENDER_RUN_MODE_LABELS[mode])),
+        })),
         elapsedMs: 0,
         pollTries: 0,
         error: null,
@@ -1167,7 +1233,7 @@ export function ImageGeneration() {
       setActiveRenderRun(renderRun)
       setActiveJobs((current) => {
         const nextById = new Map(current.map((job) => [job.job_id, job]))
-        const job = createActiveRenderJob(renderRun, response.comic?.title)
+        const job = createActiveRenderJob(renderRun, response.comic?.title, String(t('image.run.title')))
         nextById.set(job.job_id, {
           ...nextById.get(job.job_id),
           ...job,
@@ -1182,12 +1248,12 @@ export function ImageGeneration() {
 
       updateRenderProgress({
         status: renderRunProgressStatus(renderRun),
-        message: renderRunStatusMessage(renderRun),
+        message: renderRunStatusMessage(renderRun, t),
         pollTries: 0,
         error: renderRun.status === 'failed' ? renderRun.error_message : null,
       })
     } catch (err: any) {
-      const message = err?.message || 'Render run creation failed'
+      const message = err?.message || String(t('image.error.createFailed'))
       updateRenderProgress({
         status: 'failed',
         message,
@@ -1214,7 +1280,7 @@ export function ImageGeneration() {
       const renderRun = response.render_run
       setActiveRenderRun(renderRun)
       setActiveJobs((current) => {
-        const job = createActiveRenderJob(renderRun)
+        const job = createActiveRenderJob(renderRun, undefined, String(t('image.run.title')))
         const existingJob = current.find((activeJob) => (
           activeJob.render_run_id === renderRun.id || activeJob.render_run?.id === renderRun.id
         ))
@@ -1236,13 +1302,13 @@ export function ImageGeneration() {
       renderStartedAtRef.current = null
       updateRenderProgress({
         status: renderRunProgressStatus(renderRun),
-        message: renderRunStatusMessage(renderRun),
+        message: renderRunStatusMessage(renderRun, t),
         elapsedMs: 0,
         pollTries: 0,
         error: renderRun.status === 'failed' ? renderRun.error_message : null,
       })
     } catch (err: any) {
-      const message = err?.message || 'Render run abort failed'
+      const message = err?.message || String(t('image.error.abortFailed'))
       toast.error(message)
     } finally {
       setIsAbortingRenderRun(false)
@@ -1325,7 +1391,7 @@ export function ImageGeneration() {
     () => proxiedStatic(pages.find((p) => p.page_number === selectedScene)?.image_url),
     [pages, selectedScene],
   )
-  const renderProgressHelperText = renderRunHelperText(activeRenderRunForComic)
+  const renderProgressHelperText = renderRunHelperText(activeRenderRunForComic, t)
 
   return (
     <ComicsWorkflowShell>
@@ -1343,7 +1409,9 @@ export function ImageGeneration() {
           <GenerationStatusPanel progress={renderProgress} helperText={renderProgressHelperText} />
           <WorkflowActionBar>
             <Button size="lg" onClick={handleGenerate} disabled={isRendering || isStartingRenderRun || hasActiveRenderRun || !comicId}>
-              {isRendering ? `渲染中... (${pollTries}/${MAX_POLL_TRIES})` : '生图'}
+              {isRendering
+                ? String(t('image.rendering', { current: pollTries, max: MAX_POLL_TRIES }))
+                : String(t('image.generate'))}
             </Button>
             {RENDER_RUN_ACTIONS.map((action) => (
               <Button
@@ -1353,7 +1421,7 @@ export function ImageGeneration() {
                 onClick={() => void handleStartRenderRun(action.mode)}
                 disabled={disableRenderRunActions}
               >
-                {action.label}
+                {String(t(action.labelKey))}
               </Button>
             ))}
             {canAbortActiveRenderRun && (
@@ -1363,7 +1431,7 @@ export function ImageGeneration() {
                 onClick={() => void handleAbortRenderRun()}
                 disabled={isAbortingRenderRun}
               >
-                Abort
+                {String(t('image.abort'))}
               </Button>
             )}
           </WorkflowActionBar>
@@ -1399,7 +1467,7 @@ export function ImageGeneration() {
             const p = pages.find((x) => x.page_number === selectedScene)
             const url = proxiedStatic(p?.image_url)
             if (!url) {
-              toast.error('当前页暂无图片可导出')
+              toast.error(String(t('image.error.currentPageNoImage')))
 
               return
             }
@@ -1420,15 +1488,15 @@ export function ImageGeneration() {
       <Dialog open={publishOpen} onOpenChange={setPublishOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>导出 PDF</DialogTitle>
+            <DialogTitle>{String(t('image.publish.title'))}</DialogTitle>
           </DialogHeader>
           <div className="flex items-center justify-between gap-4 py-2">
             <div>
-              <p className="text-sm font-medium">是否将漫画设为公开</p>
-              <p className="text-xs text-muted-foreground">公开后他人可访问你的漫画</p>
+              <p className="text-sm font-medium">{String(t('image.publish.publicTitle'))}</p>
+              <p className="text-xs text-muted-foreground">{String(t('image.publish.publicDescription'))}</p>
             </div>
             <div className="flex items-center gap-2">
-              <Label htmlFor="make-public" className="text-sm">公开</Label>
+              <Label htmlFor="make-public" className="text-sm">{String(t('image.publish.publicLabel'))}</Label>
               <Switch id="make-public" checked={makePublic} onCheckedChange={(v) => setMakePublic(Boolean(v))} />
             </div>
           </div>
@@ -1441,7 +1509,7 @@ export function ImageGeneration() {
                   const resp = await ComicsApi.publish(comicId, { make_public: makePublic })
                   // 暂存输出，等待你提供 PDF 字段名
                   console.info('publish response:', resp)
-                  toast.success('发布成功，开始生成 PDF…')
+                  toast.success(String(t('image.publish.success')))
                   setPublishOpen(false)
 
                   // 开始轮询 comic 详情，直到出现 pdf_url 或超时
@@ -1463,13 +1531,13 @@ export function ImageGeneration() {
                         document.body.appendChild(a)
                         a.click()
                         a.remove()
-                        toast.success('PDF 已就绪，开始下载')
+                        toast.success(String(t('image.publish.pdfReady')))
                         // 更新详情
                         try { setComicDetail(d) } catch {}
                       } else if (pdfTriesRef.current >= MAX_PDF_POLL_TRIES) {
                         clearPdfPoll()
                         setIsPublishing(false)
-                        toast.error('等待 PDF 超时（60s），请稍后在“我的创意”重试下载')
+                        toast.error(String(t('image.publish.pdfTimeout')))
                       }
                     } catch (e) {
                       console.warn('轮询 PDF 失败', e)
@@ -1477,18 +1545,18 @@ export function ImageGeneration() {
                       if (pdfTriesRef.current >= MAX_PDF_POLL_TRIES) {
                         clearPdfPoll()
                         setIsPublishing(false)
-                        toast.error('PDF 生成轮询失败或超时')
+                        toast.error(String(t('image.publish.pdfPollFailed')))
                       }
                     }
                   }, 2000)
                 } catch (e: any) {
-                  toast.error(e?.message || '发布失败')
+                  toast.error(e?.message || String(t('image.error.publishFailed')))
                   setIsPublishing(false)
                 }
               }}
               disabled={isPublishing}
             >
-              {isPublishing ? '发布中…' : '确定'}
+              {isPublishing ? String(t('image.publish.publishing')) : String(t('image.publish.confirm'))}
             </Button>
           </DialogFooter>
         </DialogContent>

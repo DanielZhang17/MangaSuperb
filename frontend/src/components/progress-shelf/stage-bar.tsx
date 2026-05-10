@@ -1,4 +1,5 @@
 import type { ActiveJobStage } from '@/atoms'
+import { useI18n } from '@/hooks/use-i18n'
 import { cn } from '@/lib/utils'
 
 interface StageBarProps {
@@ -16,6 +17,8 @@ function segmentTone(status: string, isCurrent: boolean): string {
 }
 
 export function StageBar({ currentStage, stages }: StageBarProps) {
+  const { t } = useI18n('progressShelf')
+
   return (
     <div className="space-y-2">
       <div className="flex gap-1.5">
@@ -43,7 +46,7 @@ export function StageBar({ currentStage, stages }: StageBarProps) {
               stage.stage === currentStage && 'bg-sky-500/10 text-sky-200',
             )}
           >
-            {stage.stage}
+            {String(t(`stage.${stage.stage}`, { defaultValue: stage.stage }))}
           </span>
         ))}
       </div>

@@ -37,9 +37,44 @@ describe('ProgressRow', () => {
 
     render(<ProgressRow job={job} onOpen={vi.fn()} />)
 
-    expect(screen.getByText('Render run')).toBeInTheDocument()
-    expect(screen.getByText('Pages 2/4')).toBeInTheDocument()
-    expect(screen.getByText('Current page 3')).toBeInTheDocument()
-    expect(screen.getByText('Aborted')).toBeInTheDocument()
+    expect(screen.getByText('渲染任务')).toBeInTheDocument()
+    expect(screen.getByText('页数 2/4')).toBeInTheDocument()
+    expect(screen.getByText('当前第 3 页')).toBeInTheDocument()
+    expect(screen.getByText('已中止')).toBeInTheDocument()
+  })
+
+  it('translates known backend worker warnings', () => {
+    const job: ActiveJobEntry = {
+      job_id: 'render-job-queued',
+      render_run_id: 45,
+      comic_id: 9,
+      stage: 'render',
+      status: 'queued',
+      title: 'Queued Render Run',
+      started_at: '2026-04-24T00:00:00.000Z',
+      render_progress: { completed: 0, total: 2 },
+      warning: 'No active RQ workers detected; job will remain queued.',
+      render_run: {
+        id: 45,
+        comic_id: 9,
+        user_id: 1,
+        mode: 'all_pages',
+        status: 'queued',
+        current_page_number: null,
+        requested_pages: [1, 2],
+        completed_pages: [],
+        failed_pages: [],
+        abort_requested: false,
+        job_id: 'render-job-queued',
+        error_message: 'No active RQ workers detected; job will remain queued.',
+        created_at: '2026-04-24T00:00:00.000Z',
+        started_at: null,
+        completed_at: null,
+      },
+    }
+
+    render(<ProgressRow job={job} onOpen={vi.fn()} />)
+
+    expect(screen.getAllByText('未检测到后台 Worker，任务会保持排队。')).toHaveLength(2)
   })
 })

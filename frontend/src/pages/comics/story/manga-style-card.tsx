@@ -78,7 +78,7 @@ export function MangaStyleCard() {
       </CardHeader>
       <CardContent className="space-y-3 p-4 pt-0">
         <AutoSelectControl
-          label="Auto default"
+          label={String(t('style.autoDefault'))}
           value={stylePreference}
           options={styleOptions}
           onChange={handleStylePreferenceChange}

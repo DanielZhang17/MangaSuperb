@@ -5,6 +5,19 @@ import { describe, expect, it, vi } from 'vitest'
 import { aspectRatioAtom } from '../../atoms'
 import { MangaFormatCard } from '../manga-format-card'
 
+vi.mock('@/hooks/use-i18n', () => ({
+  useI18n: () => ({
+    t: (key: string) => ({
+      'format.title': 'Format',
+      'format.aspectRatio': 'Aspect ratio',
+      'format.color': 'Color',
+      'format.color.blackWhite': 'Black and white',
+      'format.color.color': 'Color',
+      'preference.auto': 'Auto',
+    }[key] ?? key),
+  }),
+}))
+
 vi.mock('@/hooks/use-preferences', () => ({
   usePreferences: () => ({
     colorModes: ['black-white', 'color'],

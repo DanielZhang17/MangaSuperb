@@ -235,6 +235,54 @@ def test_active_jobs_returns_only_in_flight_for_current_user(app, auth_client, u
     assert entry["started_at"] is not None
 
 
+def test_active_jobs_includes_character_image_and_optimization_jobs(
+    app,
+    auth_client,
+    user,
+    monkeypatch,
+):
+    rq_fetch_calls = _patch_rq_fetch(monkeypatch)
+    with app.app_context():
+        character = _create_character(app, user.id)
+        character.image_job_id = "character-image-job"
+        character.image_status = "processing"
+        character.optimization_job_id = "character-optimization-job"
+
+        other = User(
+            username="other-character",
+            email="other-character@example.com",
+            password_hash="x",
+        )
+        db.session.add(other)
+        db.session.commit()
+        other_character = _create_character(app, other.id)
+        other_character.image_job_id = "other-character-image-job"
+        other_character.image_status = "processing"
+        db.session.commit()
+        character_id = character.id
+
+    res = auth_client.get("/api/jobs/active")
+
+    assert res.status_code == 200
+    active = res.get_json()["active"]
+    by_job_id = {entry["job_id"]: entry for entry in active}
+    assert set(by_job_id) == {"character-image-job", "character-optimization-job"}
+    assert rq_fetch_calls == ["character-optimization-job"]
+    assert by_job_id["character-image-job"] == {
+        "job_id": "character-image-job",
+        "kind": "character_image",
+        "character_id": character_id,
+        "stage": "character_image",
+        "status": "processing",
+        "title": "Nova",
+        "started_at": by_job_id["character-image-job"]["started_at"],
+    }
+    assert by_job_id["character-image-job"]["started_at"] is not None
+    assert by_job_id["character-optimization-job"]["kind"] == "character_optimization"
+    assert by_job_id["character-optimization-job"]["character_id"] == character_id
+    assert by_job_id["character-optimization-job"]["status"] == "queued"
+
+
 def test_active_jobs_handles_orphan_when_comic_deleted(app, auth_client, user):
     with app.app_context():
         comic = _create_comic_simple(user.id, title="Soon-Gone")

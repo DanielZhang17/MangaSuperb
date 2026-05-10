@@ -31,7 +31,9 @@ export interface JobDetail {
 
 export interface ActiveJob {
   job_id: string
+  kind?: 'comic' | 'render_run' | 'character_image' | 'character_optimization' | string
   render_run_id?: number | null
+  character_id?: number | null
   comic_id?: number | null
   stage: string
   status: string

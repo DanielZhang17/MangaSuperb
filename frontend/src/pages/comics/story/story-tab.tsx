@@ -40,7 +40,7 @@ function InputView() {
   const confirmTitleAndContinue = () => {
     const cleanTitle = titleDraft.trim()
     if (!cleanTitle) {
-      toast.error('请输入漫画名称')
+      toast.error(String(t('story.titleRequired')))
 
       return
     }
@@ -80,13 +80,13 @@ function InputView() {
           onInteractOutside={(event) => event.preventDefault()}
         >
           <DialogHeader>
-            <DialogTitle>确认漫画名称</DialogTitle>
+            <DialogTitle>{String(t('story.confirmTitle'))}</DialogTitle>
             <DialogDescription>
-              这个名称会用于后续分镜、生图和发布展示。
+              {String(t('story.confirmDescription'))}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="manga-title-confirm">漫画名称</Label>
+            <Label htmlFor="manga-title-confirm">{String(t('story.titleLabel'))}</Label>
             <Input
               id="manga-title-confirm"
               value={titleDraft}
@@ -102,7 +102,7 @@ function InputView() {
           </div>
           <DialogFooter>
             <Button type="button" onClick={confirmTitleAndContinue}>
-              继续选择人物
+              {String(t('story.continueCharacters'))}
             </Button>
           </DialogFooter>
         </DialogContent>

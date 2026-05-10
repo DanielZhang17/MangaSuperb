@@ -26,7 +26,7 @@ vi.mock('@/components/progress-shelf', () => ({
 }))
 
 describe('DashboardLayout', () => {
-  it('mounts the floating progress shelf for background jobs', () => {
+  it('mounts the floating progress shelf for dashboard routes', () => {
     render(
       <MemoryRouter initialEntries={['/']}>
         <Routes>
@@ -37,6 +37,10 @@ describe('DashboardLayout', () => {
       </MemoryRouter>,
     )
 
+    expect(screen.getByText('Sidebar')).toBeInTheDocument()
+    expect(screen.getByText('Sidebar toggle')).toBeInTheDocument()
+    expect(screen.getByText('Mode toggle')).toBeInTheDocument()
+    expect(screen.getByText('Dashboard child')).toBeInTheDocument()
     expect(screen.getByText('Progress shelf mounted')).toBeInTheDocument()
   })
 })

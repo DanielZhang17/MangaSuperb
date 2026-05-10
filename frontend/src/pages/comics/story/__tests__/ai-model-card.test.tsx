@@ -19,11 +19,12 @@ vi.mock('@/hooks/use-ai-providers', () => ({
     providers: {
       defaults: { image: 'third_party', text: 'third_party' },
       providers: {
+        gemini: { image: true, text: true },
         third_party: { image: true, text: true },
       },
     },
-    imageProviders: ['third_party'],
-    textProviders: ['third_party'],
+    imageProviders: (globalThis as any).__mockImageProviders ?? ['third_party'],
+    textProviders: (globalThis as any).__mockTextProviders ?? ['third_party'],
     loading: false,
   }),
 }))
@@ -40,6 +41,11 @@ vi.mock('@/hooks/use-preferences', () => ({
 }))
 
 describe('AIModelCard', () => {
+  beforeEach(() => {
+    ;(globalThis as any).__mockImageProviders = undefined
+    ;(globalThis as any).__mockTextProviders = undefined
+  })
+
   it('displays an available fallback when a saved provider is unavailable', () => {
     render(
       <Provider>
@@ -48,5 +54,20 @@ describe('AIModelCard', () => {
     )
 
     expect(screen.getByRole('combobox')).toHaveTextContent('Third Party')
+  })
+
+  it('uses the auto/manual provider select as the only provider control', () => {
+    ;(globalThis as any).__mockImageProviders = ['gemini', 'third_party']
+    ;(globalThis as any).__mockTextProviders = ['gemini', 'third_party']
+
+    render(
+      <Provider>
+        <AIModelCard />
+      </Provider>,
+    )
+
+    expect(screen.getAllByRole('combobox')).toHaveLength(1)
+    expect(screen.queryByRole('radio', { name: 'Gemini' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('radio', { name: 'Third Party' })).not.toBeInTheDocument()
   })
 })

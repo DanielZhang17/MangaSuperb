@@ -53,7 +53,7 @@ export function StoryEditor(){
 
   const handleImportedText = (text: string) => {
     if (!text.trim()) {
-      toast.error('导入文件为空')
+      toast.error(String(t('story.importEmpty')))
       resetFileInput()
 
       return
@@ -83,7 +83,7 @@ export function StoryEditor(){
     const isTextFile = file.type === 'text/plain' || file.name.toLowerCase().endsWith('.txt')
 
     if (!isTextFile) {
-      toast.error('请导入 .txt 文本文件')
+      toast.error(String(t('story.importTxtOnly')))
       resetFileInput()
 
       return
@@ -96,7 +96,7 @@ export function StoryEditor(){
     }
 
     reader.onerror = () => {
-      toast.error('文件读取失败，请重试')
+      toast.error(String(t('story.fileReadFailed')))
       resetFileInput()
     }
 
@@ -105,13 +105,13 @@ export function StoryEditor(){
 
   const handleEnhance = async () => {
     if (!storyEnhanceEnabled) {
-      toast.error('AI 增强剧情未启用')
+      toast.error(String(t('story.enhanceDisabled')))
 
       return
     }
 
     if (!hasContent) {
-      toast.error('请先输入故事内容')
+      toast.error(String(t('story.required')))
 
       return
     }
@@ -131,9 +131,9 @@ export function StoryEditor(){
         setComicDetail(response.comic)
       }
 
-      toast.success('剧情已增强')
+      toast.success(String(t('story.enhanced')))
     } catch (error: any) {
-      toast.error(error?.message || 'AI 增强剧情失败')
+      toast.error(error?.message || String(t('story.enhanceFailed')))
     } finally {
       setEnhancing(false)
     }
@@ -167,7 +167,7 @@ export function StoryEditor(){
             onClick={() => fileInputRef.current?.click()}
           >
             <Upload className="size-4" />
-            导入 TXT
+            {String(t('story.importTxt'))}
           </Button>
           {storyEnhanceEnabled && (
             <Button
@@ -179,7 +179,7 @@ export function StoryEditor(){
               disabled={enhancing || !hasContent}
             >
               <Sparkles className="size-4" />
-              {enhancing ? '增强中…' : 'AI 增强剧情'}
+              {enhancing ? String(t('story.enhancing')) : String(t('story.enhance'))}
             </Button>
           )}
         </div>
@@ -192,15 +192,15 @@ export function StoryEditor(){
           onChange={(e) => setContent(e.target.value)}
         />
         <div className="absolute bottom-4 right-4 text-sm text-muted-foreground">
-          {charCount}/1000字
+          {String(t('story.charCount', { count: charCount }))}
         </div>
       </div>
       <Dialog open={Boolean(pendingImport)} onOpenChange={(open) => !open && closeImportDialog()}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>导入文本</DialogTitle>
+            <DialogTitle>{String(t('story.importDialog.title'))}</DialogTitle>
             <DialogDescription>
-              当前故事已有内容，请选择替换现有文本或追加到末尾。
+              {String(t('story.importDialog.description'))}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -209,20 +209,20 @@ export function StoryEditor(){
               variant="outline"
               onClick={closeImportDialog}
             >
-              取消 Cancel
+              {String(t('story.importDialog.cancel'))}
             </Button>
             <Button
               type="button"
               variant="secondary"
               onClick={() => pendingImport && applyImport(`${content}\n\n${pendingImport}`)}
             >
-              追加 Append
+              {String(t('story.importDialog.append'))}
             </Button>
             <Button
               type="button"
               onClick={() => pendingImport && applyImport(pendingImport)}
             >
-              替换 Replace
+              {String(t('story.importDialog.replace'))}
             </Button>
           </DialogFooter>
         </DialogContent>

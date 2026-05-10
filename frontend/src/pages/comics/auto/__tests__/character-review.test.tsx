@@ -29,6 +29,30 @@ vi.mock('../../character/character-upsert-dialog', () => ({
   }) => open ? <div role="dialog">{mode} {character?.name ?? initialValues?.name}</div> : null,
 }))
 
+vi.mock('@/hooks/use-i18n', () => ({
+  useI18n: () => ({
+    t: (key: string, options?: any) => ({
+      'autoReview.title': 'Character Review',
+      'autoReview.badge.created': 'Created',
+      'autoReview.badge.reused': 'Reused',
+      'autoReview.summary.reused': 'Reused',
+      'autoReview.summary.created': 'Created',
+      'autoReview.summary.conflicts': 'Conflicts',
+      'autoReview.matchesExisting': `Matches existing character: ${options?.name}`,
+      'autoReview.candidate': `Candidate: ${options?.description}`,
+      'autoReview.visualTraits': `Visual traits: ${options?.traits}`,
+      'autoReview.action.review': `Review ${options?.name}`,
+      'autoReview.action.create': `Create ${options?.name}`,
+      'autoReview.action.use': `Use ${options?.name}`,
+      'autoReview.failedSummary': `${options?.count} character candidates failed during preparation.`,
+      'autoReview.stale': 'Story changed after this review. Prepare characters again before accepting.',
+      'autoReview.resolveConflicts': 'Review conflicts before accepting characters.',
+      'autoReview.acceptHint': 'Accept prepared characters to use them in the Pro workflow.',
+      'autoReview.accept': 'Accept characters',
+    }[key] ?? key),
+  }),
+}))
+
 function character(id: number, name: string): ICharacter {
   return {
     id,

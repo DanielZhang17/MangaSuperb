@@ -33,12 +33,7 @@ import {
 import { AutoSelectControl } from '../components/auto-select-control'
 import { ComicsWorkflowShell, WorkflowActionBar, WorkflowContent } from '../components/workflow-layout'
 
-const LAYOUT_OPTIONS = [
-  { value: 'auto-grid', label: '自动布局 (auto-grid)' },
-  { value: 'grid-2x2', label: '四宫格 (grid-2x2)' },
-  { value: 'vertical', label: '竖版长条 (vertical)' },
-  { value: 'cinematic', label: '宽银幕 (cinematic)' },
-]
+const LAYOUT_OPTIONS = ['auto-grid', 'grid-2x2', 'vertical', 'cinematic'] as const
 
 const DEFAULT_ASPECT_RATIO = DEFAULT_ASPECT_RATIOS[0] ?? '16:9'
 
@@ -49,11 +44,11 @@ function shotFailureMessage(comic: any): string | null {
   const shotsStage = stages.find((stage: any) => stage?.stage === 'shots')
 
   if (shotsStage?.status === 'failed') {
-    return shotsStage.error_message || comic?.error_message || '分镜任务失败'
+    return shotsStage.error_message || comic?.error_message || 'panels.failure'
   }
 
   if (comic?.workflow_stage === 'shots' && comic?.workflow_status === 'failed') {
-    return comic?.error_message || '分镜任务失败'
+    return comic?.error_message || 'panels.failure'
   }
 
   return null
@@ -86,11 +81,16 @@ export function PanelsTab() {
   const layoutSelectOptions = useMemo(() => (
     layoutOptions.map((value) => ({
       value,
-      label: LAYOUT_OPTIONS.find((option) => option.value === value)?.label ?? value,
+      label: {
+        'auto-grid': String(t('grid.autoGrid')),
+        'grid-2x2': String(t('grid.4panel')),
+        vertical: String(t('grid.leftMainRightMinor')),
+        cinematic: String(t('grid.rightLongBar')),
+      }[value] ?? value,
     }))
-  ), [layoutOptions])
+  ), [layoutOptions, t])
   const preferenceLayout = preferences?.fields?.page_layout
-  const fallbackLayout = resolvePreferenceValue(preferenceLayout, layoutSelectOptions[0]?.value ?? LAYOUT_OPTIONS[0].value)
+  const fallbackLayout = resolvePreferenceValue(preferenceLayout, layoutSelectOptions[0]?.value ?? LAYOUT_OPTIONS[0])
   const pageLayoutPreference = (overrides.page_layout ?? preferenceLayout ?? { mode: 'auto' }) as AutoPreference<string>
   const resolvedLayout = resolvePreferenceValue(pageLayoutPreference, fallbackLayout)
   const [selectedLayout, setSelectedLayout] = useState<string>(resolvedLayout)
@@ -176,6 +176,10 @@ export function PanelsTab() {
 
     return arr
   }, [shots])
+  const visibleShots = useMemo(
+    () => sortedShots.filter((shot: any) => shot?.page_number === selectedScene),
+    [selectedScene, sortedShots],
+  )
 
   const handleGeneratePanels = async () => {
     try {
@@ -192,18 +196,18 @@ export function PanelsTab() {
         }))
 
         const createRes = await ComicsApi.create({
-          title: title || '未命名',
+          title: title || String(t('editor.untitled')),
           story,
           style: resolvedStyleForCreate || '',
           aspect_ratio: resolvedAspectRatioForCreate || DEFAULT_ASPECT_RATIO,
           characters,
         })
         const created = (createRes as any)?.comic
-        if (!created?.id) throw new Error('创建漫画失败')
+        if (!created?.id) throw new Error(String(t('panels.createFailed')))
         cid = created.id
         setComicId(cid)
         setComicDetail(created)
-        toast.success('漫画已创建')
+        toast.success(String(t('panels.created')))
       }
 
       // 2) 不再区分 old/new story，若当前页暂无分镜，则触发通用优化任务
@@ -215,7 +219,7 @@ export function PanelsTab() {
             comic_id: cid as number,
             text_provider: resolvedTextProviderForPanels,
           })
-          toast.success('已提交分镜生成任务')
+          toast.success(String(t('panels.submitted')))
         } catch {}
 
         await pollComicUntilShots(cid as number)
@@ -231,7 +235,7 @@ export function PanelsTab() {
         setComicDetail(layoutComic)
       }
     } catch (e: any) {
-      const message = e?.message || '分镜生成失败'
+      const message = e?.message || String(t('panels.failure'))
       setPanelError(message)
       toast.error(message)
     } finally {
@@ -270,13 +274,15 @@ export function PanelsTab() {
             }
 
             setPolling(false)
-            reject(new Error(`分镜生成失败：${failureMessage}`))
+            reject(new Error(String(t('panels.failedPrefix', {
+              message: failureMessage === 'panels.failure' ? String(t('panels.failure')) : failureMessage,
+            }))))
 
             return
           }
 
           if (hasShotsForPage) {
-            toast.success('分镜生成成功')
+            toast.success(String(t('panels.success')))
             if (pollRef.__panelsPoll) {
               window.clearInterval(pollRef.__panelsPoll)
               pollRef.__panelsPoll = null
@@ -299,7 +305,7 @@ export function PanelsTab() {
           }
           
           setPolling(false)
-          reject(new Error('分镜数据生成超时，请检查文本模型或任务队列状态'))
+          reject(new Error(String(t('panels.timeout'))))
         }
       }
 
@@ -315,22 +321,24 @@ export function PanelsTab() {
         <section className="min-w-0 rounded-lg border border-border/60 bg-card p-4 shadow-sm sm:p-5">
           <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h3 className="text-lg font-semibold">分镜</h3>
+              <h3 className="text-lg font-semibold">{String(t('title.panelsPage'))}</h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                {sortedShots.length > 0 ? `${sortedShots.length} 个镜头 · 当前第 ${selectedScene} 页` : '还没有可用镜头'}
+                {visibleShots.length > 0
+                  ? String(t('panels.status', { count: visibleShots.length, page: selectedScene }))
+                  : String(t('panels.emptyStatus'))}
               </p>
             </div>
           </div>
           <div className="space-y-3">
-            {sortedShots.length === 0 ? (
+            {visibleShots.length === 0 ? (
               <div className="flex min-h-[320px] items-center justify-center rounded-lg border border-dashed border-border text-muted-foreground">
                 <div className="flex flex-col items-center gap-2">
                   <ImageIcon className="h-8 w-8" />
-                  <span className="text-sm">暂无分镜数据，请点击下侧“生成分镜”。</span>
+                  <span className="text-sm">{String(t('panels.emptyHint'))}</span>
                 </div>
               </div>
             ) : (
-              sortedShots.map((s: any, idx: number) => {
+              visibleShots.map((s: any, idx: number) => {
                 const isEditing = editingPanelId === s.id
                 const displayText = s.description
                   
@@ -342,7 +350,7 @@ export function PanelsTab() {
                         <Textarea
                           value={editingDialogue}
                           onChange={(e) => setEditingDialogue(e.target.value)}
-                          placeholder="填写对白（必填）"
+                          placeholder={String(t('panels.dialoguePlaceholder'))}
                           className="min-h-[72px] text-sm"
                         />
                       ) : (
@@ -350,12 +358,14 @@ export function PanelsTab() {
                       )}
                     </div>
                     <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground md:justify-end">
-                      <span className="whitespace-nowrap">第{s.page_number}页 · #{s.panel_number}</span>
+                      <span className="whitespace-nowrap">
+                        {String(t('panels.pageMarker', { page: s.page_number, panel: s.panel_number }))}
+                      </span>
                       {!isEditing ? (
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          aria-label="编辑对白"
+                          aria-label={String(t('panels.editDialogue'))}
                           onClick={() => {
                             setEditingPanelId(s.id)
                             setEditingDialogue(s.dialogue || s.description || '')
@@ -369,7 +379,7 @@ export function PanelsTab() {
                             size="sm"
                             onClick={async () => {
                               if (!editingDialogue.trim()) {
-                                toast.error('对白不能为空')
+                                toast.error(String(t('panels.dialogueRequired')))
                                   
                                 return
                               }
@@ -385,16 +395,16 @@ export function PanelsTab() {
                                   
                                 setEditingPanelId(null)
                                 setEditingDialogue('')
-                                toast.success('已保存')
+                                toast.success(String(t('panels.saved')))
                               } catch (err: any) {
-                                toast.error(err?.message || '保存失败')
+                                toast.error(err?.message || String(t('panels.saveFailed')))
                               } finally {
                                 setSavingId(null)
                               }
                             }}
                             disabled={savingId === s.id}
                           >
-                            {savingId === s.id ? '保存中…' : '保存'}
+                            {savingId === s.id ? String(t('panels.saving')) : String(t('panels.save'))}
                           </Button>
                           <Button
                             size="sm"
@@ -405,7 +415,7 @@ export function PanelsTab() {
                             }}
                             disabled={savingId === s.id}
                           >
-                              取消
+                            {String(t('panels.cancel'))}
                           </Button>
                         </div>
                       )}
@@ -418,23 +428,23 @@ export function PanelsTab() {
         </section>
 
         <aside className="flex min-w-0 flex-col gap-4">
-          <PanelCard title="布局">
-            <LabelRow label="页面选择">
+          <PanelCard title={String(t('panels.layout'))}>
+            <LabelRow label={String(t('panels.pageSelection'))}>
               <Select value={String(selectedScene)} onValueChange={(v) => setSelectedScene(Number(v))}>
                 <SelectTrigger className="w-40">
-                  <SelectValue placeholder="选择页面" />
+                  <SelectValue placeholder={String(t('panels.selectPage'))} />
                 </SelectTrigger>
                 <SelectContent>
                   {scenes.map((sc) => (
                     <SelectItem key={sc.id} value={String(sc.id)}>
-                      第{sc.label}页
+                      {String(t('panels.pageOption', { page: sc.label }))}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </LabelRow>
             <AutoSelectControl
-              label="页面布局"
+              label={String(t('panels.pageLayout'))}
               value={pageLayoutPreference}
               options={layoutSelectOptions}
               onChange={handleLayoutPreferenceChange}
@@ -450,12 +460,12 @@ export function PanelsTab() {
             {polling && (
               <div role="status" className="w-full max-w-xl rounded-lg border border-primary/30 bg-primary/10 p-4">
                 <div className="mb-2 flex items-center justify-between gap-3 text-sm">
-                  <span className="font-medium text-primary">正在生成分镜</span>
+                  <span className="font-medium text-primary">{String(t('panels.generatingTitle'))}</span>
                   <span className="text-muted-foreground">{pollPct}%</span>
                 </div>
                 <Progress value={pollPct} />
                 <p className="mt-2 text-xs text-muted-foreground">
-                  正在拆分镜头和整理页面布局，完成后会自动刷新列表。
+                  {String(t('panels.generatingHelp'))}
                 </p>
               </div>
             )}
@@ -470,7 +480,11 @@ export function PanelsTab() {
                 onClick={handleGeneratePanels}
                 disabled={submitting || polling}
               >
-                {submitting ? '提交中…' : polling ? `生成分镜中… ${pollPct}%` : '生成分镜'}
+                {submitting
+                  ? String(t('panels.submitting'))
+                  : polling
+                    ? String(t('panels.generatingButton', { pct: pollPct }))
+                    : String(t('panels.submit'))}
               </Button>
               <Button
                 size="lg"

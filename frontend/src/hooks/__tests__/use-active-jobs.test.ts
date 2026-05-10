@@ -1,10 +1,11 @@
 import { renderHook, waitFor } from '@testing-library/react'
+import { getDefaultStore } from 'jotai'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ComicsApi } from '@/apis/comics'
 import { JobsApi } from '@/apis/jobs'
-import { clearActiveJobs, mergeActiveJobs } from '@/atoms'
+import { clearActiveJobs, mergeActiveJobs, userAtom } from '@/atoms'
 
 import { useActiveJobs } from '../use-active-jobs'
 
@@ -36,11 +37,19 @@ vi.mock('@/apis/comics', async () => {
 const listActiveMock = vi.mocked(JobsApi.listActive)
 const getJobMock = vi.mocked(JobsApi.get)
 const getComicMock = vi.mocked(ComicsApi.get)
+const store = getDefaultStore()
 
 describe('useActiveJobs', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     clearActiveJobs()
+    store.set(userAtom, {
+      id: 1,
+      username: 'tester',
+      email: 'tester@example.com',
+      avatar_index: 1,
+      created_at: '2026-05-10T00:00:00.000Z',
+    } as any)
     listActiveMock.mockReset()
     getJobMock.mockReset()
     getComicMock.mockReset()
@@ -48,6 +57,19 @@ describe('useActiveJobs', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    store.set(userAtom, null)
+  })
+
+  it('does not poll active jobs before a user session is available', async () => {
+    store.set(userAtom, null)
+
+    renderHook(() => useActiveJobs())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(listActiveMock).not.toHaveBeenCalled()
   })
 
   it('preserves locally seeded jobs when the initial active-list hydrate is stale', async () => {
@@ -134,6 +156,40 @@ describe('useActiveJobs', () => {
         job_id: 'render-job-1',
         render_run_id: 42,
         render_progress: { completed: 1, total: 4 },
+      })
+    })
+  })
+
+  it('preserves active character job metadata from the active jobs response', async () => {
+    listActiveMock.mockResolvedValue({
+      active: [
+        {
+          job_id: 'character-image-job',
+          kind: 'character_image',
+          character_id: 44,
+          stage: 'character_image',
+          status: 'processing',
+          title: 'Nova',
+          started_at: '2026-05-10T00:00:00.000Z',
+        },
+      ],
+    })
+
+    getJobMock.mockResolvedValue({
+      job_id: 'character-image-job',
+      rq_status: 'started',
+    } as any)
+
+    const { result } = renderHook(() => useActiveJobs())
+
+    await waitFor(() => {
+      expect(result.current.jobs[0]).toMatchObject({
+        job_id: 'character-image-job',
+        kind: 'character_image',
+        character_id: 44,
+        stage: 'character_image',
+        status: 'processing',
+        title: 'Nova',
       })
     })
   })

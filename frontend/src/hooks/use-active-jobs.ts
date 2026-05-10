@@ -12,6 +12,7 @@ import {
   mergeActiveJobs,
   removeActiveJob,
   replaceActiveJobs,
+  userAtom,
 } from '@/atoms'
 import type { IComic, RenderRun } from '@/service/types'
 
@@ -30,7 +31,9 @@ interface ComicCacheEntry {
 function normalizeActiveJob(job: ApiActiveJob): ActiveJobEntry {
   return {
     job_id: job.job_id,
+    kind: job.kind,
     render_run_id: job.render_run_id ?? null,
+    character_id: job.character_id ?? null,
     comic_id: job.comic_id ?? null,
     stage: job.stage,
     status: job.status,
@@ -164,6 +167,8 @@ export function mapStageToComicsTab(stage: string): string {
 
 export function useActiveJobs() {
   const jobs = useAtomValue(activeJobsAtom)
+  const user = useAtomValue(userAtom)
+  const userId = user?.id ?? null
   const jobsRef = useRef(jobs)
   const comicCacheRef = useRef(new Map<number, ComicCacheEntry>())
   const removalTimersRef = useRef(new Map<string, number>())
@@ -189,6 +194,12 @@ export function useActiveJobs() {
   }, [])
 
   useEffect(() => {
+    if (!userId) {
+      clearActiveJobs()
+
+      return undefined
+    }
+
     let cancelled = false
 
     const hydrate = async () => {
@@ -211,10 +222,10 @@ export function useActiveJobs() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [userId])
 
   useEffect(() => {
-    if (jobs.length === 0) return undefined
+    if (!userId || jobs.length === 0) return undefined
 
     let cancelled = false
     let timerId: number | undefined
@@ -367,7 +378,7 @@ export function useActiveJobs() {
         window.clearTimeout(timerId)
       }
     }
-  }, [isVisible, jobs.length])
+  }, [isVisible, jobs.length, userId])
 
   useEffect(() => () => {
     for (const timerId of removalTimersRef.current.values()) {

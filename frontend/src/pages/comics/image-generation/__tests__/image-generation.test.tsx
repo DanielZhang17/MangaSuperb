@@ -152,7 +152,7 @@ describe('ImageGeneration render polling', () => {
     startRenderRunMock.mockResolvedValueOnce({ render_run: renderRun, comic: { id: 7 } } as any)
     const { store } = renderImageGeneration()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Generate all pages' }))
+    fireEvent.click(screen.getByRole('button', { name: '生成所有页' }))
 
     await waitFor(() => {
       expect(startRenderRunMock).toHaveBeenCalledWith(7, {
@@ -180,7 +180,7 @@ describe('ImageGeneration render polling', () => {
         render_run: renderRun,
       }),
     ])
-    expect(screen.getByText('Generate all pages queued in the background.')).toBeInTheDocument()
+    expect(screen.getByText('所有页渲染已加入后台队列。')).toBeInTheDocument()
   })
 
   it('starts a remaining-pages render run', async () => {
@@ -188,14 +188,14 @@ describe('ImageGeneration render polling', () => {
     startRenderRunMock.mockResolvedValueOnce({ render_run: renderRun, comic: { id: 7 } } as any)
     renderImageGeneration()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Generate remaining pages' }))
+    fireEvent.click(screen.getByRole('button', { name: '生成剩余页' }))
 
     await waitFor(() => {
       expect(startRenderRunMock).toHaveBeenCalledWith(7, expect.objectContaining({
         mode: 'remaining_pages',
       }))
     })
-    expect(screen.getByText('Generate remaining pages is running in the background.')).toBeInTheDocument()
+    expect(screen.getByText('剩余页渲染正在后台运行。')).toBeInTheDocument()
   })
 
   it('aborts the active render run and disables the active run UI', async () => {
@@ -211,15 +211,15 @@ describe('ImageGeneration render polling', () => {
     abortRenderRunMock.mockResolvedValueOnce({ render_run: abortedRun } as any)
     const { store } = renderImageGeneration()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Generate all pages' }))
+    fireEvent.click(screen.getByRole('button', { name: '生成所有页' }))
 
-    const abortButton = await screen.findByRole('button', { name: 'Abort' })
+    const abortButton = await screen.findByRole('button', { name: '中止' })
     fireEvent.click(abortButton)
 
     await waitFor(() => expect(abortRenderRunMock).toHaveBeenCalledWith(202))
     expect(store.get(activeRenderRunAtom)).toEqual(abortedRun)
-    expect(screen.getByText('Render run aborted.')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Abort' })).not.toBeInTheDocument()
+    expect(screen.getByText('渲染任务已中止。')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '中止' })).not.toBeInTheDocument()
   })
 
   it('does not block render actions for a different comic active render run', async () => {
@@ -241,7 +241,7 @@ describe('ImageGeneration render polling', () => {
       </Provider>,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Generate all pages' }))
+    fireEvent.click(screen.getByRole('button', { name: '生成所有页' }))
 
     await waitFor(() => {
       expect(startRenderRunMock).toHaveBeenCalledWith(7, expect.objectContaining({
@@ -285,9 +285,57 @@ describe('ImageGeneration render polling', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Generate all pages' })).toBeEnabled()
+      expect(screen.getByRole('button', { name: '生成所有页' })).toBeEnabled()
     })
     expect(store.get(activeRenderRunAtom)).toEqual(completedRun)
+  })
+
+  it('refreshes page images when the status shelf hydrates a completed render run', async () => {
+    const runningRun = makeRenderRun({
+      id: 409,
+      comic_id: 7,
+      status: 'running',
+      mode: 'remaining_pages',
+      requested_pages: [1, 2],
+    })
+    const completedRun = makeRenderRun({
+      ...runningRun,
+      status: 'completed',
+      completed_pages: [1, 2],
+      completed_at: '2026-05-10T00:02:00Z',
+    })
+    listImagesMock
+      .mockResolvedValueOnce({ pages: [] } as any)
+      .mockResolvedValueOnce({
+        pages: [
+          { page_id: 11, page_number: 1, image_url: 'https://cdn.example.com/page-1.png' },
+          { page_id: 12, page_number: 2, image_url: 'https://cdn.example.com/page-2.png' },
+        ],
+      } as any)
+    const store = createStore()
+    store.set(currentComicIdAtom, 7)
+    store.set(activeRenderRunAtom, runningRun)
+    store.set(activeJobsAtom, [{
+      job_id: 'render-job-409',
+      render_run_id: 409,
+      comic_id: 7,
+      stage: 'render',
+      status: 'completed',
+      title: 'Completed Remaining Run',
+      render_run: completedRun,
+      render_progress: { completed: 2, total: 2 },
+    }])
+
+    render(
+      <Provider store={store}>
+        <ImageGeneration />
+      </Provider>,
+    )
+
+    await waitFor(() => {
+      expect(listImagesMock).toHaveBeenCalledTimes(2)
+    })
+    expect(screen.getByAltText('page preview')).toHaveAttribute('src', 'https://cdn.example.com/page-1.png')
   })
 
   it('keeps render actions disabled while a render run abort request is pending', async () => {
@@ -308,7 +356,7 @@ describe('ImageGeneration render polling', () => {
       </Provider>,
     )
 
-    expect(screen.getByRole('button', { name: 'Generate all pages' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '生成所有页' })).toBeDisabled()
   })
 
   it('prefers a newer active shelf render run over a stale terminal atom run', async () => {
@@ -347,8 +395,8 @@ describe('ImageGeneration render polling', () => {
       </Provider>,
     )
 
-    expect(screen.getByRole('button', { name: 'Generate all pages' })).toBeDisabled()
-    expect(await screen.findByRole('button', { name: 'Abort' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '生成所有页' })).toBeDisabled()
+    expect(await screen.findByRole('button', { name: '中止' })).toBeInTheDocument()
     await waitFor(() => {
       expect(store.get(activeRenderRunAtom)).toEqual(newerRunningRun)
     })
@@ -373,7 +421,7 @@ describe('ImageGeneration render polling', () => {
       </Provider>,
     )
 
-    expect(screen.getByRole('button', { name: 'Generate all pages' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '生成所有页' })).toBeDisabled()
   })
 
   it('aborts the lightweight active render-run id when the atom has a stale terminal run', async () => {
@@ -412,7 +460,7 @@ describe('ImageGeneration render polling', () => {
       </Provider>,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Abort' }))
+    fireEvent.click(screen.getByRole('button', { name: '中止' }))
 
     await waitFor(() => {
       expect(abortRenderRunMock).toHaveBeenCalledWith(809)
@@ -468,8 +516,8 @@ describe('ImageGeneration render polling', () => {
       await vi.advanceTimersByTimeAsync(2_000)
     })
 
-    expect(toast.error).toHaveBeenCalledWith('生图失败：Third-party API error 524')
-    expect(screen.getByRole('alert')).toHaveTextContent('生图失败：Third-party API error 524')
+    expect(toast.error).toHaveBeenCalledWith('第一页渲染失败：Third-party API error 524')
+    expect(screen.getByRole('alert')).toHaveTextContent('第一页渲染失败：Third-party API error 524')
     expect(screen.getByRole('button', { name: '生图' })).toBeEnabled()
   })
 

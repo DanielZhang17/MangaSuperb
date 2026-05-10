@@ -7,6 +7,7 @@ import toast from 'react-hot-toast'
 import { AutoApi } from '@/apis/auto'
 import { Button } from '@/components/ui/button'
 import { useAiProviders } from '@/hooks/use-ai-providers'
+import { useI18n } from '@/hooks/use-i18n'
 import { usePreferences } from '@/hooks/use-preferences'
 import { resolveAvailablePreferenceValue, resolvePreferenceValue } from '@/lib/auto-preferences'
 
@@ -22,6 +23,7 @@ import { StoryEditor } from '../story/story-editor'
 import { CharacterReview } from './character-review'
 
 export function AutoModeTab({ onOpenPro }: { onOpenPro: () => void }) {
+  const { t } = useI18n('comics')
   const [story] = useAtom(fullStoryAtom)
   const [style] = useAtom(styleAtom)
   const [overrides] = useAtom(currentComicOverridesAtom)
@@ -63,7 +65,7 @@ export function AutoModeTab({ onOpenPro }: { onOpenPro: () => void }) {
 
   const handlePrepareCharacters = async () => {
     if (!hasStory) {
-      toast.error('Add a story before preparing characters.')
+      toast.error(String(t('auto.error.addStory')))
 
       return
     }
@@ -79,7 +81,7 @@ export function AutoModeTab({ onOpenPro }: { onOpenPro: () => void }) {
       setReviewStory(story)
       setReview(response)
     } catch (error: any) {
-      toast.error(error?.message || 'Character preparation failed')
+      toast.error(error?.message || String(t('auto.error.prepareFailed')))
     } finally {
       setPreparing(false)
     }
@@ -89,8 +91,8 @@ export function AutoModeTab({ onOpenPro }: { onOpenPro: () => void }) {
     <ComicsWorkflowShell>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
-          <h2 className="text-2xl font-semibold tracking-normal md:text-3xl">Auto Manga</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Upload or paste a novel to start.</p>
+          <h2 className="text-2xl font-semibold tracking-normal md:text-3xl">{String(t('auto.title'))}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{String(t('auto.subtitle'))}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button
@@ -99,11 +101,11 @@ export function AutoModeTab({ onOpenPro }: { onOpenPro: () => void }) {
             disabled={preparing || !hasStory}
             className="shrink-0"
           >
-            {preparing ? 'Preparing...' : 'Prepare characters'}
+            {preparing ? String(t('auto.preparing')) : String(t('auto.prepareCharacters'))}
           </Button>
           <Button type="button" variant="outline" onClick={onOpenPro} className="shrink-0">
             <SlidersHorizontal className="size-4" />
-            Open Pro controls
+            {String(t('auto.openPro'))}
           </Button>
         </div>
       </div>
