@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createStore, Provider } from 'jotai'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, useLocation } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import PanelsApi from '@/apis/panels'
@@ -11,6 +11,7 @@ import {
   fullStoryAtom,
   mangaTitleAtom,
   styleAtom,
+  workflowModeAtom,
 } from '@/pages/comics/atoms'
 
 import { ProgressShelf } from '../index'
@@ -68,8 +69,12 @@ vi.mock('@/hooks/use-i18n', () => ({
       'toggle.activeHint': '点击返回正在运行的工作流',
       'toggle.idleHint': '点击查看后台任务',
       'stage.outline': '故事',
+      'stage.story': '故事',
+      'stage.characters': '人物',
+      'stage.panels': '分镜',
       'stage.shots': '分镜',
       'stage.render': '生图',
+      'stage.preview': '预览',
       'stage.cover': '封面',
       'stage.export': '导出',
       'stage.publish': '发布',
@@ -80,7 +85,9 @@ vi.mock('@/hooks/use-i18n', () => ({
       'status.failed': '失败',
       'status.completed': '完成',
       'status.queued': '排队中',
+      'status.needsReview': '待确认',
       'status.reconnecting': '重连中',
+      'job.autoRun': '自动漫画生成',
       'job.renderRun': '渲染任务',
       'job.characterImage': '人物生图',
       'job.characterOptimization': '人物优化',
@@ -106,9 +113,16 @@ vi.mock('@/apis/panels', () => ({
 
 const abortRenderRunMock = vi.mocked(PanelsApi.abortRenderRun)
 
+function LocationProbe() {
+  const location = useLocation()
+
+  return <span data-testid="location-path">{location.pathname}</span>
+}
+
 describe('ProgressShelf', () => {
   beforeEach(() => {
     ;(globalThis as any).__mockShelfJobs = undefined
+    window.localStorage.clear()
     abortRenderRunMock.mockReset()
     abortRenderRunMock.mockResolvedValue({
       render_run: {
@@ -129,6 +143,54 @@ describe('ProgressShelf', () => {
         completed_at: '2026-05-10T00:01:00.000Z',
       },
     } as any)
+  })
+
+  it('collapses to a circular progress button', () => {
+    const store = createStore()
+    store.set(activeJobsAtom, [])
+
+    render(
+      <Provider store={store}>
+        <MemoryRouter>
+          <ProgressShelf />
+        </MemoryRouter>
+      </Provider>,
+    )
+
+    const orb = screen.getByTestId('progress-shelf-orb')
+
+    expect(orb).toHaveClass('h-14', 'w-14', 'rounded-full')
+    expect(screen.queryByText('点击返回正在运行的工作流')).not.toBeInTheDocument()
+    expect(screen.queryByText('Abortable Render Run')).not.toBeInTheDocument()
+  })
+
+  it('drags the collapsed button and snaps it half-hidden to the closest edge', () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 800 })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 600 })
+    window.localStorage.setItem('progress-shelf-position', JSON.stringify({ x: 100, y: 100, edge: 'left' }))
+    ;(globalThis as any).__mockShelfJobs = []
+    const store = createStore()
+    store.set(activeJobsAtom, [])
+
+    render(
+      <Provider store={store}>
+        <MemoryRouter>
+          <ProgressShelf />
+        </MemoryRouter>
+      </Provider>,
+    )
+
+    const orb = screen.getByTestId('progress-shelf-orb')
+    fireEvent.mouseDown(orb, { button: 0, clientX: 128, clientY: 128 })
+    fireEvent.mouseMove(window, { clientX: 18, clientY: 228 })
+    fireEvent.mouseUp(window)
+
+    expect(orb).toHaveStyle({ left: '-28px', top: '200px' })
+    expect(JSON.parse(window.localStorage.getItem('progress-shelf-position') || '{}')).toMatchObject({
+      edge: 'left',
+      x: -28,
+      y: 200,
+    })
   })
 
   it('stays openable when there are no active jobs', () => {
@@ -285,5 +347,118 @@ describe('ProgressShelf', () => {
     expect(store.get(mangaTitleAtom)).toBe('Shelf Comic')
     expect(store.get(fullStoryAtom)).toBe('Story restored from the progress shelf.')
     expect(store.get(styleAtom)).toBe('Shelf saved style')
+  })
+
+  it('opens Auto-run jobs in Auto mode on the comics page', async () => {
+    ;(globalThis as any).__mockShelfJobs = [{
+      job_id: 'auto-run-job-12',
+      kind: 'auto_run',
+      auto_run_id: 12,
+      comic_id: 88,
+      stage: 'render',
+      status: 'running',
+      title: 'Auto Shelf Run',
+      started_at: '2026-05-10T00:00:00.000Z',
+      render_progress: { completed: 2, failed: 0, total: 6, current_page_number: 3 },
+      auto_run: {
+        id: 12,
+        comic_id: 88,
+        user_id: 1,
+        status: 'running',
+        current_stage: 'render',
+        story_snapshot: 'Auto story',
+        title_snapshot: 'Auto Shelf Run',
+        preferences_snapshot: {},
+        character_review: null,
+        selected_character_ids: [],
+        render_run_id: null,
+        render_run: null,
+        render_progress: { completed: 2, failed: 0, total: 6, current_page_number: 3 },
+        abort_requested: false,
+        job_id: 'auto-run-job-12',
+        error_message: null,
+        created_at: '2026-05-10T00:00:00.000Z',
+        started_at: '2026-05-10T00:00:01.000Z',
+        completed_at: null,
+        updated_at: '2026-05-10T00:00:01.000Z',
+      },
+    }]
+    const store = createStore()
+    store.set(activeJobsAtom, [])
+    store.set(workflowModeAtom, 'pro')
+
+    render(
+      <Provider store={store}>
+        <MemoryRouter initialEntries={['/dashboard']}>
+          <ProgressShelf />
+          <LocationProbe />
+        </MemoryRouter>
+      </Provider>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /1 个任务进行中/i }))
+    fireEvent.click(await screen.findByText('Auto Shelf Run'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location-path')).toHaveTextContent('/comics')
+    })
+    expect(store.get(workflowModeAtom)).toBe('auto')
+    expect(store.get(currentComicIdAtom)).toBe(88)
+  })
+
+  it('shows Auto-run character creation as its own shelf stage', async () => {
+    ;(globalThis as any).__mockShelfJobs = [{
+      job_id: 'auto-run-job-characters',
+      kind: 'auto_run',
+      auto_run_id: 13,
+      comic_id: 89,
+      stage: 'characters',
+      status: 'running',
+      title: 'Auto Character Run',
+      started_at: '2026-05-10T00:00:00.000Z',
+      workflow_stages: [
+        { stage: 'outline', status: 'completed' },
+        { stage: 'shots', status: 'pending' },
+        { stage: 'render', status: 'pending' },
+      ],
+      auto_run: {
+        id: 13,
+        comic_id: 89,
+        user_id: 1,
+        status: 'running',
+        current_stage: 'characters',
+        story_snapshot: 'Auto story',
+        title_snapshot: 'Auto Character Run',
+        preferences_snapshot: {},
+        character_review: null,
+        selected_character_ids: [],
+        render_run_id: null,
+        render_run: null,
+        render_progress: null,
+        abort_requested: false,
+        job_id: 'auto-run-job-characters',
+        error_message: null,
+        created_at: '2026-05-10T00:00:00.000Z',
+        started_at: '2026-05-10T00:00:01.000Z',
+        completed_at: null,
+        updated_at: '2026-05-10T00:00:01.000Z',
+      },
+    }]
+    const store = createStore()
+    store.set(activeJobsAtom, [])
+
+    render(
+      <Provider store={store}>
+        <MemoryRouter>
+          <ProgressShelf />
+        </MemoryRouter>
+      </Provider>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /1 个任务进行中/i }))
+
+    expect(screen.getByText('Auto Character Run')).toBeInTheDocument()
+    expect(screen.getAllByText('人物').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('预览').length).toBeGreaterThan(0)
   })
 })

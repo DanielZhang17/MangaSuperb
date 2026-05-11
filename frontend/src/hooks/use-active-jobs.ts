@@ -14,7 +14,7 @@ import {
   replaceActiveJobs,
   userAtom,
 } from '@/atoms'
-import type { IComic, RenderRun } from '@/service/types'
+import type { AutoRun, IComic, RenderRun } from '@/service/types'
 
 const VISIBLE_POLL_MS = 2000
 const HIDDEN_POLL_MS = 10000
@@ -32,6 +32,8 @@ function normalizeActiveJob(job: ApiActiveJob): ActiveJobEntry {
   return {
     job_id: job.job_id,
     kind: job.kind,
+    auto_run_id: job.auto_run_id ?? null,
+    auto_run: job.auto_run ?? null,
     render_run_id: job.render_run_id ?? null,
     character_id: job.character_id ?? null,
     comic_id: job.comic_id ?? null,
@@ -50,13 +52,16 @@ function countRenderRunProgress(renderRun: RenderRun | null | undefined): Active
   if (!renderRun) return null
 
   const completedPages = Array.isArray(renderRun.completed_pages) ? renderRun.completed_pages : []
+  const failedPages = Array.isArray(renderRun.failed_pages) ? renderRun.failed_pages : []
   const requestedPages = Array.isArray(renderRun.requested_pages) ? renderRun.requested_pages : []
 
-  if (completedPages.length === 0 && requestedPages.length === 0) return null
+  if (completedPages.length === 0 && failedPages.length === 0 && requestedPages.length === 0) return null
 
   return {
     completed: completedPages.length,
+    failed: failedPages.length,
     total: requestedPages.length,
+    current_page_number: renderRun.current_page_number ?? null,
   }
 }
 
@@ -99,26 +104,33 @@ function extractWorkflowStages(comic: IComic | null | undefined): ActiveJobStage
 }
 
 function enrichJob(job: ActiveJobEntry, detail?: JobDetail, comic?: IComic): ActiveJobEntry {
+  const autoRun = (detail?.auto_run as AutoRun | null | undefined) ?? job.auto_run ?? null
   const resolvedComic = comic ?? ((detail?.comic as IComic | undefined) ?? job.comic ?? null)
-  const renderRun = detail?.render_run ?? job.render_run ?? null
+  const renderRun = autoRun?.render_run ?? detail?.render_run ?? job.render_run ?? null
   const renderRunId = renderRun?.id ?? job.render_run_id ?? null
   const renderRunProgress = countRenderRunProgress(renderRun)
   const isRenderRunJob = Boolean(renderRunId)
+  const isAutoRunJob = job.kind === 'auto_run' || Boolean(autoRun ?? job.auto_run_id)
   const workflowStages = extractWorkflowStages(resolvedComic) ?? job.workflow_stages
   const currentStage = workflowStages?.find((stage) => stage.stage === job.stage)
   const comicRenderProgress = countRenderProgress(resolvedComic)
 
   return {
     ...job,
+    auto_run_id: autoRun?.id ?? job.auto_run_id ?? null,
+    auto_run: autoRun,
     render_run_id: renderRunId,
     render_run: renderRun,
     comic: resolvedComic,
-    comic_id: renderRun?.comic_id ?? resolvedComic?.id ?? job.comic_id,
-    title: resolvedComic?.title ?? job.title,
-    status: renderRun?.status ?? currentStage?.status ?? job.status,
+    comic_id: autoRun?.comic_id ?? renderRun?.comic_id ?? resolvedComic?.id ?? job.comic_id,
+    stage: autoRun?.current_stage ?? job.stage,
+    title: autoRun?.title_snapshot ?? resolvedComic?.title ?? job.title,
+    status: autoRun?.status ?? renderRun?.status ?? currentStage?.status ?? job.status,
     rq_status: (detail?.rq_status as ActiveJobEntry['rq_status']) ?? job.rq_status,
     workflow_stages: workflowStages,
-    render_progress: renderRunProgress ?? (isRenderRunJob ? job.render_progress ?? comicRenderProgress : comicRenderProgress),
+    render_progress: autoRun?.render_progress
+      ?? renderRunProgress
+      ?? (isRenderRunJob || isAutoRunJob ? job.render_progress ?? comicRenderProgress : comicRenderProgress),
     warning: typeof detail?.warning === 'string' ? detail.warning : job.warning ?? null,
     reconnecting: false,
   }
@@ -135,7 +147,7 @@ function isNotFound(error: unknown): boolean {
 }
 
 function isTerminalJobDetail(detail: JobDetail | null | undefined): boolean {
-  return [detail?.rq_status, detail?.render_run?.status].some((status) => (
+  return [detail?.rq_status, detail?.render_run?.status, detail?.auto_run?.status].some((status) => (
     typeof status === 'string' && TERMINAL_JOB_STATUSES.has(status)
   ))
 }

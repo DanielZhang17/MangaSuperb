@@ -245,6 +245,75 @@ export interface AutoCharacterPrepareResponse {
   suggested_roles: Record<number, string>
 }
 
+export type AutoRunStatus = 'queued' | 'running' | 'needs_review' | 'completed' | 'failed' | 'aborted'
+
+export type AutoRunStage = 'story' | 'characters' | 'panels' | 'render' | 'preview'
+
+export interface AutoRunRenderProgress {
+  completed: number
+  failed: number
+  total: number
+  current_page_number: number | null
+}
+
+export interface AutoRun {
+  id: number
+  comic_id: number
+  user_id: number
+  status: AutoRunStatus
+  current_stage: AutoRunStage
+  story_snapshot: string
+  title_snapshot: string
+  preferences_snapshot: Record<string, unknown>
+  character_review: AutoCharacterPrepareResponse | null
+  selected_character_ids: number[]
+  render_run_id: number | null
+  render_run: RenderRun | null
+  render_progress: AutoRunRenderProgress | null
+  abort_requested: boolean
+  job_id: string | null
+  error_message: string | null
+  created_at: string | null
+  started_at: string | null
+  completed_at: string | null
+  updated_at: string | null
+}
+
+export interface StartAutoRunRequest {
+  comic_id?: number | null
+  title: string
+  story: string
+  preferences?: Record<string, unknown>
+}
+
+export interface AutoRunResponse {
+  auto_run: AutoRun | null
+  comic?: IComic | null
+}
+
+export type ActiveAutoRunResponse = AutoRunResponse
+
+export interface ResolveAutoRunRequest {
+  selected_character_ids?: number[]
+  character_roles?: Record<number, string>
+}
+
+export interface ActiveAutoRunJobExtension {
+  kind: 'auto_run'
+  auto_run_id?: number | null
+  auto_run?: AutoRun | null
+}
+
+export interface ActiveAutoRunJob extends ActiveAutoRunJobExtension {
+  job_id: string
+  comic_id?: number | null
+  stage: AutoRunStage
+  status: AutoRunStatus
+  title?: string | null
+  started_at?: string | null
+  render_progress?: AutoRunRenderProgress | null
+}
+
 export interface UpdateCharacterNameRequest {
   name: string
 }

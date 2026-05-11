@@ -736,6 +736,7 @@ class ComicAutoRun(db.Model):
             'completed': len(self.render_run.completed_pages),
             'failed': len(self.render_run.failed_pages),
             'total': len(requested),
+            'current_page_number': self.render_run.current_page_number,
         }
 
     def to_dict(self):

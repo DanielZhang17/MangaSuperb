@@ -9,8 +9,40 @@ import { StageBar } from './stage-bar'
 
 const GENERATION_FLOW = ['outline', 'shots', 'render']
 const PUBLISH_FLOW = ['cover', 'export', 'publish']
+const AUTO_RUN_FLOW = ['story', 'characters', 'panels', 'render', 'preview']
 const CHARACTER_STAGES = new Set(['character_image', 'character_optimization'])
 const NO_ACTIVE_RQ_WORKERS_MESSAGE = 'No active RQ workers detected; job will remain queued.'
+
+function isAutoRunJob(job: ActiveJobEntry): boolean {
+  return job.kind === 'auto_run' || Boolean(job.auto_run_id || job.auto_run)
+}
+
+function normalizeAutoRunStage(stage: string): string {
+  if (stage === 'outline') return 'story'
+  if (stage === 'shots') return 'panels'
+
+  return stage
+}
+
+function buildAutoRunStages(job: ActiveJobEntry): ActiveJobStage[] {
+  const currentStage = normalizeAutoRunStage(job.auto_run?.current_stage ?? job.stage)
+  const currentIndex = Math.max(AUTO_RUN_FLOW.indexOf(currentStage), 0)
+  const status = job.auto_run?.status ?? job.status
+
+  return AUTO_RUN_FLOW.map((stage, index) => {
+    if (status === 'completed') {
+      return { stage, status: 'completed' }
+    }
+    if (index < currentIndex) {
+      return { stage, status: 'completed' }
+    }
+    if (index === currentIndex) {
+      return { stage, status }
+    }
+
+    return { stage, status: 'pending' }
+  })
+}
 
 function buildFallbackStages(job: ActiveJobEntry): ActiveJobStage[] {
   if (CHARACTER_STAGES.has(job.stage)) {
@@ -39,6 +71,7 @@ function statusLabel(job: ActiveJobEntry, t: (key: string, options?: any) => unk
   if (hasJobStatus(job, ['aborted'])) return String(t('status.aborted'))
   if (hasJobStatus(job, ['failed'])) return String(t('status.failed'))
   if (hasJobStatus(job, ['finished', 'completed'])) return String(t('status.completed'))
+  if (hasJobStatus(job, ['needs_review'])) return String(t('status.needsReview'))
   if (hasJobStatus(job, ['queued', 'deferred', 'pending'])) return String(t('status.queued'))
 
   return String(t('status.running'))
@@ -51,6 +84,7 @@ function stageLabel(stage: string, t: (key: string, options?: any) => unknown): 
 }
 
 function jobTypeLabel(job: ActiveJobEntry, t: (key: string, options?: any) => unknown): string {
+  if (isAutoRunJob(job)) return String(t('job.autoRun'))
   if (job.render_run_id || job.render_run) return String(t('job.renderRun'))
   if (job.kind === 'character_image' || job.stage === 'character_image') return String(t('job.characterImage'))
   if (job.kind === 'character_optimization' || job.stage === 'character_optimization') return String(t('job.characterOptimization'))
@@ -91,7 +125,9 @@ interface ProgressRowProps {
 
 export function ProgressRow({ job, onOpen, onAbort, isAborting = false }: ProgressRowProps) {
   const { t } = useI18n('progressShelf')
-  const stages = job.workflow_stages?.length ? job.workflow_stages : buildFallbackStages(job)
+  const stages = isAutoRunJob(job)
+    ? buildAutoRunStages(job)
+    : job.workflow_stages?.length ? job.workflow_stages : buildFallbackStages(job)
   const renderProgress = job.render_progress
   const isRenderRun = Boolean(job.render_run_id || job.render_run)
   const currentPageNumber = job.render_run?.current_page_number

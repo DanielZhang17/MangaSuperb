@@ -1,5 +1,12 @@
 import request from '@/service'
-import type { AutoCharacterPrepareRequest, AutoCharacterPrepareResponse } from '@/service/types'
+import type {
+  ActiveAutoRunResponse,
+  AutoCharacterPrepareRequest,
+  AutoCharacterPrepareResponse,
+  AutoRunResponse,
+  ResolveAutoRunRequest,
+  StartAutoRunRequest,
+} from '@/service/types'
 
 export const AutoApi = {
   prepareCharacters(body: AutoCharacterPrepareRequest) {
@@ -8,6 +15,52 @@ export const AutoApi = {
       method: 'POST',
       data: body,
       timeout: 60000,
+    })
+  },
+
+  startRun(body: StartAutoRunRequest) {
+    return request<StartAutoRunRequest, AutoRunResponse>({
+      url: '/api/auto/runs',
+      method: 'POST',
+      data: body,
+      timeout: 60000,
+    })
+  },
+
+  getActiveRun(comicId?: number | null) {
+    return request<void, ActiveAutoRunResponse>({
+      url: '/api/auto/runs/active',
+      method: 'GET',
+      params: comicId ? { comic_id: comicId } : undefined,
+    })
+  },
+
+  getRun(autoRunId: number) {
+    return request<void, AutoRunResponse>({
+      url: `/api/auto/runs/${autoRunId}`,
+      method: 'GET',
+    })
+  },
+
+  abortRun(autoRunId: number) {
+    return request<void, AutoRunResponse>({
+      url: `/api/auto/runs/${autoRunId}/abort`,
+      method: 'POST',
+    })
+  },
+
+  retryRun(autoRunId: number) {
+    return request<void, AutoRunResponse>({
+      url: `/api/auto/runs/${autoRunId}/retry`,
+      method: 'POST',
+    })
+  },
+
+  resolveRun(autoRunId: number, body: ResolveAutoRunRequest) {
+    return request<ResolveAutoRunRequest, AutoRunResponse>({
+      url: `/api/auto/runs/${autoRunId}/resolve`,
+      method: 'POST',
+      data: body,
     })
   },
 }

@@ -31,7 +31,7 @@ from mangasuperb.services.jobs import (
     enqueue_story_optimization,
     process_character_optimization,
 )
-from models import Character, Comic, ComicRenderRun, ComicWorkflowStage, Script
+from models import Character, Comic, ComicAutoRun, ComicRenderRun, ComicWorkflowStage, Script
 from swagger import JOB_CREATE_DOC, JOB_STATUS_DOC
 
 logger = logging.getLogger(__name__)
@@ -124,6 +124,29 @@ def _fetch_rq_status(job_id: str) -> str | None:
     except Exception as exc:
         logger.info("Unable to fetch RQ job status for active job %s: %s", job_id, exc)
         return None
+
+
+def _auto_run_job_id(auto_run: ComicAutoRun) -> str:
+    return auto_run.job_id or f"auto-run-{auto_run.id}"
+
+
+def _auto_run_active_payload(auto_run: ComicAutoRun) -> dict[str, Any] | None:
+    comic = auto_run.comic
+    if not comic:
+        return None
+    started_at = auto_run.started_at or auto_run.created_at
+    return {
+        "job_id": _auto_run_job_id(auto_run),
+        "kind": "auto_run",
+        "auto_run_id": auto_run.id,
+        "auto_run": auto_run.to_dict(),
+        "comic_id": comic.id,
+        "stage": auto_run.current_stage,
+        "status": auto_run.status,
+        "title": comic.title or auto_run.title_snapshot,
+        "started_at": started_at.isoformat() if started_at else None,
+        "render_progress": auto_run.render_progress,
+    }
 
 
 def _handle_comic_generation(data: dict[str, Any]) -> tuple[dict[str, Any], int]:
@@ -388,8 +411,25 @@ def create_job() -> Any:
 @swag_from(JOB_STATUS_DOC)
 def get_job_status(job_id: str) -> Any:
     try:
+        auto_run = None
+        if job_id.startswith("auto-run-"):
+            try:
+                auto_run_id = int(job_id.removeprefix("auto-run-"))
+            except ValueError:
+                auto_run_id = None
+            if auto_run_id is not None:
+                auto_run = ComicAutoRun.query.filter_by(
+                    id=auto_run_id,
+                    user_id=current_user.id,
+                ).first()
+        if not auto_run:
+            auto_run = ComicAutoRun.query.filter_by(
+                job_id=job_id,
+                user_id=current_user.id,
+            ).first()
+
         render_run = None
-        if job_id.startswith("render-run-"):
+        if not auto_run and job_id.startswith("render-run-"):
             try:
                 render_run_id = int(job_id.removeprefix("render-run-"))
             except ValueError:
@@ -399,13 +439,13 @@ def get_job_status(job_id: str) -> Any:
                     id=render_run_id,
                     user_id=current_user.id,
                 ).first()
-        if not render_run:
+        if not auto_run and not render_run:
             render_run = ComicRenderRun.query.filter_by(
                 job_id=job_id,
                 user_id=current_user.id,
             ).first()
 
-        comic = render_run.comic if render_run else None
+        comic = auto_run.comic if auto_run else render_run.comic if render_run else None
         if not comic:
             comic = Comic.query.filter_by(job_id=job_id, user_id=current_user.id).first()
         if not comic:
@@ -431,11 +471,13 @@ def get_job_status(job_id: str) -> Any:
                 ),
             ).first()
 
-        if not comic and not character and not render_run:
+        if not comic and not character and not render_run and not auto_run:
             return jsonify({"error": "Job not found"}), 404
 
         try:
-            if render_run and job_id.startswith("render-run-"):
+            if auto_run and job_id.startswith("auto-run-"):
+                rq_status = auto_run.status
+            elif render_run and job_id.startswith("render-run-"):
                 rq_status = render_run.status
             else:
                 job = Job.fetch(job_id, connection=current_app.extensions["redis_conn"])
@@ -452,6 +494,8 @@ def get_job_status(job_id: str) -> Any:
         }
         if comic:
             response["comic"] = comic.to_dict()
+        if auto_run:
+            response["auto_run"] = auto_run.to_dict()
         if render_run:
             response["render_run"] = render_run.to_dict()
         if worker_snapshot.get("active", 0) == 0:
@@ -468,6 +512,21 @@ def get_job_status(job_id: str) -> Any:
 @login_required
 def list_active_jobs() -> Any:
     """Return in-flight background jobs owned by the current user."""
+    auto_runs = (
+        ComicAutoRun.query.filter_by(user_id=current_user.id)
+        .filter(ComicAutoRun.status.in_(ComicAutoRun.ACTIVE_STATUSES))
+        .order_by(ComicAutoRun.created_at.asc())
+        .all()
+    )
+    auto_run_render_run_ids = {
+        auto_run.render_run_id for auto_run in auto_runs if auto_run.render_run_id
+    }
+    auto_run_render_job_ids = {
+        auto_run.render_run.job_id
+        for auto_run in auto_runs
+        if auto_run.render_run and auto_run.render_run.job_id
+    }
+
     rows = (
         db.session.query(ComicWorkflowStage, Comic)
         .join(Comic, ComicWorkflowStage.comic_id == Comic.id)
@@ -481,12 +540,13 @@ def list_active_jobs() -> Any:
     render_runs = (
         ComicRenderRun.query.filter_by(user_id=current_user.id)
         .filter(ComicRenderRun.status.in_(("queued", "running")))
+        .filter(ComicRenderRun.id.notin_(auto_run_render_run_ids))
         .order_by(ComicRenderRun.created_at.asc())
         .all()
     )
     active_render_job_ids = {
         render_run.job_id for render_run in render_runs if render_run.job_id
-    }
+    } | auto_run_render_job_ids
 
     active = [
         {
@@ -500,6 +560,11 @@ def list_active_jobs() -> Any:
         for stage, comic in rows
         if stage.job_id not in active_render_job_ids
     ]
+
+    for auto_run in auto_runs:
+        payload = _auto_run_active_payload(auto_run)
+        if payload:
+            active.append(payload)
 
     for render_run in render_runs:
         comic = render_run.comic

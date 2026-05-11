@@ -10,7 +10,7 @@ from flask import Flask
 from mangasuperb.extensions import db
 from mangasuperb.routes import jobs as job_routes
 from mangasuperb.services import jobs as job_services
-from models import Character, Comic, ComicWorkflowStage, Script, User
+from models import Character, Comic, ComicAutoRun, ComicRenderRun, ComicWorkflowStage, Script, User
 
 
 def _create_comic(app: Flask, user_id: int) -> Comic:
@@ -179,6 +179,45 @@ def _create_stage(comic_id: int, stage: str, status: str, job_id: str | None) ->
     return row
 
 
+def _create_auto_run(
+    user_id: int,
+    *,
+    title: str = "Auto Job",
+    status: str = "running",
+    current_stage: str = "render",
+    job_id: str | None = "real-auto-job",
+    with_render_run: bool = False,
+) -> ComicAutoRun:
+    comic = _create_comic_simple(user_id, title=title)
+    auto_run = ComicAutoRun.create(
+        comic_id=comic.id,
+        user_id=user_id,
+        story_snapshot="A courier enters a sky city.",
+        title_snapshot=title,
+        preferences_snapshot={"image_provider": "gemini"},
+    )
+    auto_run.status = status
+    auto_run.current_stage = current_stage
+    auto_run.job_id = job_id
+    auto_run.started_at = datetime.utcnow()
+    if with_render_run:
+        render_run = ComicRenderRun.create(
+            comic_id=comic.id,
+            user_id=user_id,
+            mode="all_pages",
+            requested_pages=[1, 2, 3],
+        )
+        render_run.status = "running"
+        render_run.mark_completed_page(1)
+        render_run.job_id = "render-job-for-auto"
+        db.session.add(render_run)
+        db.session.flush()
+        auto_run.render_run_id = render_run.id
+    db.session.add(auto_run)
+    db.session.commit()
+    return auto_run
+
+
 def _patch_rq_fetch(monkeypatch, expected_job_id: str | None = None) -> list[str]:
     calls: list[str] = []
 
@@ -295,6 +334,61 @@ def test_active_jobs_handles_orphan_when_comic_deleted(app, auth_client, user):
     assert res.get_json()["active"] == []
 
 
+def test_active_jobs_includes_current_users_active_auto_runs(
+    app,
+    auth_client,
+    user,
+):
+    with app.app_context():
+        auto_run = _create_auto_run(
+            user.id,
+            title="Auto Adventure",
+            status="running",
+            current_stage="render",
+            job_id="auto-real-job",
+            with_render_run=True,
+        )
+        other = User(username="auto-other", email="auto-other@example.com", password_hash="x")
+        db.session.add(other)
+        db.session.commit()
+        _create_auto_run(
+            other.id,
+            title="Private Auto",
+            status="running",
+            current_stage="render",
+            job_id="other-auto-job",
+            with_render_run=True,
+        )
+        auto_run_id = auto_run.id
+        comic_id = auto_run.comic_id
+        started_at = auto_run.started_at.isoformat()
+        _create_stage(comic_id, "render", "in_progress", "render-job-for-auto")
+
+    response = auth_client.get("/api/jobs/active")
+
+    assert response.status_code == 200
+    active = response.get_json()["active"]
+    assert "render-job-for-auto" not in {entry["job_id"] for entry in active}
+    auto_entries = [entry for entry in active if entry.get("kind") == "auto_run"]
+    assert len(auto_entries) == 1
+    entry = auto_entries[0]
+    assert entry["job_id"] == "auto-real-job"
+    assert entry["kind"] == "auto_run"
+    assert entry["auto_run_id"] == auto_run_id
+    assert entry["auto_run"]["id"] == auto_run_id
+    assert entry["comic_id"] == comic_id
+    assert entry["stage"] == "render"
+    assert entry["status"] == "running"
+    assert entry["title"] == "Auto Adventure"
+    assert entry["started_at"] == started_at
+    assert entry["render_progress"] == {
+        "completed": 1,
+        "failed": 0,
+        "total": 3,
+        "current_page_number": None,
+    }
+
+
 def test_job_status_requires_login(client):
     response = client.get("/api/jobs/job-secret")
     assert response.status_code == 401
@@ -403,6 +497,65 @@ def test_job_status_unknown_job_returns_404_without_worker_snapshot(auth_client,
     payload = response.get_json()
     assert payload["error"] == "Job not found"
     assert "worker_snapshot" not in payload
+
+
+def test_job_status_returns_owned_auto_run_by_synthetic_id(
+    app,
+    auth_client,
+    user,
+    monkeypatch,
+):
+    rq_fetch_calls = _forbid_rq_fetch(monkeypatch)
+    with app.app_context():
+        auto_run = _create_auto_run(
+            user.id,
+            title="Synthetic Auto",
+            status="running",
+            current_stage="characters",
+            job_id="real-synthetic-auto-job",
+        )
+        auto_run_id = auto_run.id
+        comic_id = auto_run.comic_id
+
+    response = auth_client.get(f"/api/jobs/auto-run-{auto_run_id}")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert rq_fetch_calls == []
+    assert payload["job_id"] == f"auto-run-{auto_run_id}"
+    assert payload["rq_status"] == "running"
+    assert payload["auto_run"]["id"] == auto_run_id
+    assert payload["auto_run"]["current_stage"] == "characters"
+    assert payload["comic"]["id"] == comic_id
+
+
+def test_job_status_returns_owned_auto_run_by_real_job_id(
+    app,
+    auth_client,
+    user,
+    monkeypatch,
+):
+    rq_fetch_calls = _patch_rq_fetch(monkeypatch, "owned-real-auto-job")
+    with app.app_context():
+        auto_run = _create_auto_run(
+            user.id,
+            title="Real Auto",
+            status="queued",
+            current_stage="story",
+            job_id="owned-real-auto-job",
+        )
+        auto_run_id = auto_run.id
+        comic_id = auto_run.comic_id
+
+    response = auth_client.get("/api/jobs/owned-real-auto-job")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert rq_fetch_calls == ["owned-real-auto-job"]
+    assert payload["job_id"] == "owned-real-auto-job"
+    assert payload["rq_status"] == "queued"
+    assert payload["auto_run"]["id"] == auto_run_id
+    assert payload["comic"]["id"] == comic_id
 
 
 def test_job_status_returns_owned_comic_job(app, auth_client, user, monkeypatch):

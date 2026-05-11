@@ -83,6 +83,15 @@ def _current_job_id() -> str:
     return job.id if job else "inline"
 
 
+def _sync_auto_run_from_render_run(render_run: ComicRenderRun | None) -> None:
+    if not render_run or not render_run.auto_runs:
+        return
+
+    from mangasuperb.services.auto_runs import sync_auto_run_from_render_run
+
+    sync_auto_run_from_render_run(render_run)
+
+
 def _extract_dialogue(summary: str | None) -> str | None:
     if not summary:
         return None
@@ -1364,6 +1373,7 @@ def process_page_render_stage(
             render_run.status = "aborted"
             render_run.completed_at = datetime.utcnow()
             _set_stage_status(comic, "render", "aborted")
+            _sync_auto_run_from_render_run(render_run)
             db.session.commit()
             return {
                 "status": "aborted",
@@ -1581,6 +1591,7 @@ def process_page_render_stage(
                     render_run.status = "aborted"
                     render_run.completed_at = datetime.utcnow()
                     _set_stage_status(comic, "render", "aborted")
+                    _sync_auto_run_from_render_run(render_run)
                 elif remaining_pages:
                     queue = current_app.extensions.get("rq_queue")
                     if queue:
@@ -1611,6 +1622,7 @@ def process_page_render_stage(
                 else:
                     render_run.status = "completed"
                     render_run.completed_at = datetime.utcnow()
+                    _sync_auto_run_from_render_run(render_run)
 
             db.session.commit()
 
@@ -1651,6 +1663,7 @@ def process_page_render_stage(
                     render_run.error_message = str(exc)
                     render_run.mark_failed_page(page_number)
                     render_run.completed_at = datetime.utcnow()
+                    _sync_auto_run_from_render_run(render_run)
                 db.session.commit()
 
             return {

@@ -194,6 +194,85 @@ describe('useActiveJobs', () => {
     })
   })
 
+  it('hydrates active Auto-run jobs with detail status and progress', async () => {
+    listActiveMock.mockResolvedValue({
+      active: [
+        {
+          job_id: 'auto-run-job-7',
+          kind: 'auto_run',
+          auto_run_id: 7,
+          comic_id: 70,
+          stage: 'render',
+          status: 'running',
+          title: 'Auto Run Shelf',
+          started_at: '2026-05-11T00:00:00.000Z',
+          render_progress: { completed: 1, failed: 0, total: 4, current_page_number: 2 },
+          auto_run: {
+            id: 7,
+            comic_id: 70,
+            title_snapshot: 'Auto Run Shelf',
+            status: 'running',
+            current_stage: 'render',
+            render_progress: { completed: 1, failed: 0, total: 4, current_page_number: 2 },
+          },
+        },
+      ],
+    } as any)
+
+    getJobMock.mockResolvedValue({
+      job_id: 'auto-run-job-7',
+      rq_status: 'running',
+      auto_run: {
+        id: 7,
+        comic_id: 70,
+        title_snapshot: 'Auto Run Shelf',
+        status: 'needs_review',
+        current_stage: 'characters',
+        render_progress: null,
+      },
+      comic: {
+        id: 70,
+        title: 'Auto Run Shelf',
+        workflow_stages: [],
+        pages: [],
+        page_layouts: [],
+        panel_shots: [],
+      },
+    } as any)
+
+    getComicMock.mockResolvedValue({
+      id: 70,
+      title: 'Auto Run Shelf',
+      workflow_stages: [],
+      pages: [],
+      page_layouts: [],
+      panel_shots: [],
+    } as any)
+
+    const { result } = renderHook(() => useActiveJobs())
+
+    await waitFor(() => {
+      expect(result.current.jobs).toHaveLength(1)
+    })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+
+    await waitFor(() => {
+      expect(result.current.jobs[0]).toMatchObject({
+        job_id: 'auto-run-job-7',
+        kind: 'auto_run',
+        auto_run_id: 7,
+        comic_id: 70,
+        stage: 'characters',
+        status: 'needs_review',
+        title: 'Auto Run Shelf',
+        auto_run: expect.objectContaining({ id: 7 }),
+      })
+    })
+  })
+
   it('prefers detail render-run page progress over comic-derived render counts', async () => {
     listActiveMock.mockResolvedValue({
       active: [
@@ -260,7 +339,12 @@ describe('useActiveJobs', () => {
     })
 
     await waitFor(() => {
-      expect(result.current.jobs[0]?.render_progress).toEqual({ completed: 2, total: 4 })
+      expect(result.current.jobs[0]?.render_progress).toEqual({
+        completed: 2,
+        failed: 0,
+        total: 4,
+        current_page_number: 3,
+      })
       expect(result.current.jobs[0]?.render_run?.current_page_number).toBe(3)
     })
   })

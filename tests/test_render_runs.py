@@ -6,6 +6,7 @@ from mangasuperb.extensions import db
 from mangasuperb.services import jobs
 from models import (
     Comic,
+    ComicAutoRun,
     ComicPage,
     ComicPageLayout,
     ComicPanelShot,
@@ -222,6 +223,42 @@ def test_aborted_render_run_skips_page_without_enqueueing_next(
         assert called is False
 
 
+def test_aborted_render_run_syncs_linked_auto_run(app, user, dummy_queue, monkeypatch):
+    sync_calls: list[int] = []
+    monkeypatch.setattr(
+        jobs,
+        "_sync_auto_run_from_render_run",
+        lambda render_run: sync_calls.append(render_run.id),
+        raising=False,
+    )
+
+    with app.app_context():
+        comic = _comic_with_pages(user.id, page_count=2)
+        run = ComicRenderRun.create(
+            comic_id=comic.id,
+            user_id=user.id,
+            mode="all_pages",
+            requested_pages=[1, 2],
+        )
+        run.abort_requested = True
+        auto_run = ComicAutoRun.create(
+            comic_id=comic.id,
+            user_id=user.id,
+            story_snapshot="Run",
+            title_snapshot="Run Story",
+        )
+        db.session.add(run)
+        db.session.flush()
+        auto_run.render_run_id = run.id
+        db.session.add(auto_run)
+        db.session.commit()
+
+        result = jobs.process_page_render_stage(comic.id, page_number=1, render_run_id=run.id)
+
+        assert result["status"] == "aborted"
+        assert sync_calls == [run.id]
+
+
 def test_page_failure_marks_run_failed_and_stops_later_pages(app, user, dummy_queue, monkeypatch):
     class FailingProvider:
         def generate_image(self, *args, **kwargs):
@@ -248,6 +285,89 @@ def test_page_failure_marks_run_failed_and_stops_later_pages(app, user, dummy_qu
         assert persisted.failed_pages == [1]
         assert persisted.completed_pages == []
         assert dummy_queue.jobs == []
+
+
+def test_failed_render_run_syncs_linked_auto_run(app, user, dummy_queue, monkeypatch):
+    sync_calls: list[int] = []
+
+    class FailingProvider:
+        def generate_image(self, *args, **kwargs):
+            raise RuntimeError("image provider unavailable")
+
+    monkeypatch.setattr(jobs, "get_image_provider", lambda provider=None: FailingProvider())
+    monkeypatch.setattr(
+        jobs,
+        "_sync_auto_run_from_render_run",
+        lambda render_run: sync_calls.append(render_run.id),
+        raising=False,
+    )
+
+    with app.app_context():
+        comic = _comic_with_pages(user.id, page_count=2)
+        run = ComicRenderRun.create(
+            comic_id=comic.id,
+            user_id=user.id,
+            mode="all_pages",
+            requested_pages=[1, 2],
+        )
+        auto_run = ComicAutoRun.create(
+            comic_id=comic.id,
+            user_id=user.id,
+            story_snapshot="Run",
+            title_snapshot="Run Story",
+        )
+        db.session.add(run)
+        db.session.flush()
+        auto_run.render_run_id = run.id
+        db.session.add(auto_run)
+        db.session.commit()
+
+        result = jobs.process_page_render_stage(comic.id, page_number=1, render_run_id=run.id)
+
+        assert result["status"] == "failed"
+        assert sync_calls == [run.id]
+
+
+def test_completed_render_run_syncs_linked_auto_run(app, user, dummy_queue, monkeypatch):
+    sync_calls: list[int] = []
+
+    class SuccessfulProvider:
+        def generate_image(self, *args, **kwargs):
+            return b"\x89PNG\r\n\x1a\nfake-image"
+
+    monkeypatch.setattr(jobs, "get_image_provider", lambda provider=None: SuccessfulProvider())
+    monkeypatch.setattr(
+        jobs,
+        "_sync_auto_run_from_render_run",
+        lambda render_run: sync_calls.append(render_run.id),
+        raising=False,
+    )
+
+    with app.app_context():
+        comic = _comic_with_pages(user.id, page_count=1)
+        run = ComicRenderRun.create(
+            comic_id=comic.id,
+            user_id=user.id,
+            mode="all_pages",
+            requested_pages=[1],
+        )
+        auto_run = ComicAutoRun.create(
+            comic_id=comic.id,
+            user_id=user.id,
+            story_snapshot="Run",
+            title_snapshot="Run Story",
+        )
+        db.session.add(run)
+        db.session.flush()
+        auto_run.render_run_id = run.id
+        db.session.add(auto_run)
+        db.session.commit()
+
+        jobs.process_page_render_stage(comic.id, page_number=1, render_run_id=run.id)
+
+        persisted = db.session.get(ComicRenderRun, run.id)
+        assert persisted.status == "completed"
+        assert sync_calls == [run.id]
 
 
 def test_render_run_appears_in_active_jobs(app, auth_client, user):

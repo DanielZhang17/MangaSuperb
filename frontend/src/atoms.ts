@@ -1,6 +1,6 @@
 import { atom, getDefaultStore } from 'jotai'
 
-import type { IComic, IUser, RenderRun } from '@/service/types'
+import type { AutoRun, IComic, IUser, RenderRun } from '@/service/types'
 
 // Global user session atom
 export const userAtom = atom<IUser | null>(null)
@@ -16,6 +16,8 @@ export interface ActiveJobStage {
 export interface ActiveJobRenderProgress {
   completed: number
   total: number
+  failed?: number
+  current_page_number?: number | null
 }
 
 export type ActiveJobRqStatus =
@@ -31,7 +33,9 @@ export type ActiveJobRqStatus =
 
 export interface ActiveJobEntry {
   job_id: string
-  kind?: 'comic' | 'render_run' | 'character_image' | 'character_optimization' | string
+  kind?: 'comic' | 'render_run' | 'character_image' | 'character_optimization' | 'auto_run' | string
+  auto_run_id?: number | null
+  auto_run?: AutoRun | null
   render_run_id?: number | null
   character_id?: number | null
   comic_id?: number | null
