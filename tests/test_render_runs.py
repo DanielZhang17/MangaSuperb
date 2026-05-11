@@ -287,6 +287,78 @@ def test_page_failure_marks_run_failed_and_stops_later_pages(app, user, dummy_qu
         assert dummy_queue.jobs == []
 
 
+def test_page_failure_preserves_failed_page_number_after_rollback(
+    app,
+    user,
+    dummy_queue,
+    monkeypatch,
+):
+    class FailingProvider:
+        def generate_image(self, *args, **kwargs):
+            raise RuntimeError("image provider unavailable")
+
+    monkeypatch.setattr(jobs, "get_image_provider", lambda provider=None: FailingProvider())
+
+    with app.app_context():
+        comic = _comic_with_pages(user.id, page_count=2)
+        run = ComicRenderRun.create(
+            comic_id=comic.id,
+            user_id=user.id,
+            mode="all_pages",
+            requested_pages=[1, 2],
+        )
+        run.status = "running"
+        run.current_page_number = 1
+        run.mark_completed_page(1)
+        db.session.add(run)
+        db.session.commit()
+
+        result = jobs.process_page_render_stage(comic.id, page_number=2, render_run_id=run.id)
+
+        db.session.expire_all()
+        persisted = db.session.get(ComicRenderRun, run.id)
+        assert result["status"] == "failed"
+        assert result["page_number"] == 2
+        assert persisted.status == "failed"
+        assert persisted.current_page_number == 2
+        assert persisted.failed_pages == [2]
+        assert persisted.completed_pages == [1]
+        assert dummy_queue.jobs == []
+
+
+def test_missing_layout_marks_render_run_failed_instead_of_leaving_it_queued(
+    app,
+    user,
+    dummy_queue,
+):
+    with app.app_context():
+        comic = _comic_with_pages(user.id, page_count=2)
+        ComicPageLayout.query.filter_by(comic_id=comic.id, page_number=2).delete()
+        run = ComicRenderRun.create(
+            comic_id=comic.id,
+            user_id=user.id,
+            mode="all_pages",
+            requested_pages=[1, 2],
+        )
+        run.status = "running"
+        run.current_page_number = 1
+        run.mark_completed_page(1)
+        db.session.add(run)
+        db.session.commit()
+
+        result = jobs.process_page_render_stage(comic.id, page_number=2, render_run_id=run.id)
+
+        persisted = db.session.get(ComicRenderRun, run.id)
+        assert result["status"] == "failed"
+        assert result["page_number"] == 2
+        assert "Layout for comic" in result["error"]
+        assert persisted.status == "failed"
+        assert persisted.current_page_number == 2
+        assert persisted.failed_pages == [2]
+        assert persisted.completed_pages == [1]
+        assert dummy_queue.jobs == []
+
+
 def test_failed_render_run_syncs_linked_auto_run(app, user, dummy_queue, monkeypatch):
     sync_calls: list[int] = []
 

@@ -106,6 +106,12 @@ const RENDER_RUN_MODE_LABELS: Record<RenderRunMode, string> = {
   all_pages: 'image.mode.allPages',
 }
 
+function singlePageModeLabel(pageNumber: number, t: (key: string, options?: any) => unknown): string {
+  if (pageNumber === 1) return String(t('image.mode.firstPage'))
+
+  return String(t('image.mode.pageNumber', { page: pageNumber }))
+}
+
 function isActiveRenderRun(renderRun: RenderRun | null) {
   return Boolean(
     renderRun
@@ -1077,6 +1083,7 @@ export function ImageGeneration() {
     }
 
     const targetPageNumber = selectedScene
+    const targetModeLabel = singlePageModeLabel(targetPageNumber, t)
     let previousImageUrl = pages.find((p) => p.page_number === targetPageNumber)?.image_url ?? null
 
     try {
@@ -1087,7 +1094,7 @@ export function ImageGeneration() {
       renderStartedAtRef.current = Date.now()
       updateRenderProgress({
         status: 'submitting',
-        message: String(t('image.run.submitting', { mode: String(t('image.mode.firstPage')) })),
+        message: String(t('image.run.submitting', { mode: targetModeLabel })),
         elapsedMs: 0,
         pollTries: 0,
         error: null,
@@ -1190,7 +1197,7 @@ export function ImageGeneration() {
                 ? String(t('image.error.renderFailed'))
                 : failureMessage
               const message = String(t('image.run.failedWithError', {
-                mode: String(t('image.mode.firstPage')),
+                mode: targetModeLabel,
                 message: translatedFailure,
               }))
               setComicDetail(detail)

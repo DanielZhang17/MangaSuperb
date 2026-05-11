@@ -534,6 +534,46 @@ describe('ImageGeneration render polling', () => {
     expect(screen.getByRole('button', { name: '生图' })).toBeEnabled()
   })
 
+  it('uses the selected page number in single-page render failure messages', async () => {
+    listImagesMock.mockResolvedValue({ pages: [
+      { page_id: 11, page_number: 1, image_url: 'https://cdn.example.com/page-1.png' },
+      { page_id: 12, page_number: 2, image_url: null },
+    ] } as any)
+    getComicMock
+      .mockResolvedValueOnce({ id: 7, workflow_status: 'in_progress' } as any)
+      .mockResolvedValueOnce({
+        id: 7,
+        workflow_status: 'failed',
+        workflow_stages: [
+          {
+            stage: 'render',
+            status: 'failed',
+            error_message: 'Provider failed on page 2',
+          },
+        ],
+      } as any)
+    const store = createStore()
+    store.set(currentComicIdAtom, 7)
+    store.set(selectedPageAtom, 2)
+
+    render(
+      <Provider store={store}>
+        <ImageGeneration />
+      </Provider>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '生图' }))
+
+    await waitFor(() => expect(renderPageMock).toHaveBeenCalledWith(7, 2, expect.any(Object)))
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000)
+    })
+
+    expect(toast.error).toHaveBeenCalledWith('第2页渲染失败：Provider failed on page 2')
+    expect(screen.getByRole('alert')).toHaveTextContent('第2页渲染失败：Provider failed on page 2')
+  })
+
   it('passes the selected image provider to the render endpoint', async () => {
     renderImageGenerationWithProvider('third_party')
 

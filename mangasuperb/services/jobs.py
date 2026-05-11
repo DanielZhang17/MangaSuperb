@@ -1382,19 +1382,19 @@ def process_page_render_stage(
                 "render_run_id": render_run.id,
             }
 
-        script: Script | None = db.session.get(Script, comic.script_id)
-        if not script:
-            raise ValueError(f"Script for comic {comic_id} not found")
-
-        layout = (
-            ComicPageLayout.query.filter_by(comic_id=comic_id, page_number=page_number)
-            .order_by(ComicPageLayout.id)
-            .first()
-        )
-        if not layout:
-            raise ValueError(f"Layout for comic {comic_id} page {page_number} not found")
-
         try:
+            script: Script | None = db.session.get(Script, comic.script_id)
+            if not script:
+                raise ValueError(f"Script for comic {comic_id} not found")
+
+            layout = (
+                ComicPageLayout.query.filter_by(comic_id=comic_id, page_number=page_number)
+                .order_by(ComicPageLayout.id)
+                .first()
+            )
+            if not layout:
+                raise ValueError(f"Layout for comic {comic_id} page {page_number} not found")
+
             _set_stage_status(comic, "render", "in_progress")
             if render_run:
                 render_run.status = "running"
@@ -1661,6 +1661,8 @@ def process_page_render_stage(
                 if render_run:
                     render_run.status = "failed"
                     render_run.error_message = str(exc)
+                    render_run.current_page_number = page_number
+                    render_run.started_at = render_run.started_at or datetime.utcnow()
                     render_run.mark_failed_page(page_number)
                     render_run.completed_at = datetime.utcnow()
                     _sync_auto_run_from_render_run(render_run)
