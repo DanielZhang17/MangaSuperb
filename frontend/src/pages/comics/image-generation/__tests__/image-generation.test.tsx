@@ -211,6 +211,25 @@ describe('ImageGeneration render polling', () => {
     expect(screen.getByText('剩余页渲染正在后台运行。')).toBeInTheDocument()
   })
 
+  it('uses the failed render-run page number instead of the run mode label', async () => {
+    const failedRun = makeRenderRun({
+      mode: 'first_page',
+      status: 'failed',
+      current_page_number: 3,
+      requested_pages: [3],
+      failed_pages: [3],
+      error_message: 'Layout for comic 7 page 3 not found',
+    })
+    startRenderRunMock.mockResolvedValueOnce({ render_run: failedRun, comic: { id: 7 } } as any)
+    renderImageGeneration()
+
+    fireEvent.click(screen.getByRole('button', { name: '生成第一页' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('第3页渲染失败：Layout for comic 7 page 3 not found')
+    })
+  })
+
   it('aborts the active render run and disables the active run UI', async () => {
     const runningRun = makeRenderRun({ id: 202, status: 'running', mode: 'all_pages' })
     const abortedRun = makeRenderRun({
@@ -572,6 +591,50 @@ describe('ImageGeneration render polling', () => {
 
     expect(toast.error).toHaveBeenCalledWith('第2页渲染失败：Provider failed on page 2')
     expect(screen.getByRole('alert')).toHaveTextContent('第2页渲染失败：Provider failed on page 2')
+  })
+
+  it('uses a clicked sidebar page number in single-page render failure messages', async () => {
+    listImagesMock.mockResolvedValue({ pages: [
+      { page_id: 11, page_number: 1, image_url: 'https://cdn.example.com/page-1.png' },
+      { page_id: 12, page_number: 2, image_url: 'https://cdn.example.com/page-2.png' },
+      { page_id: -3, page_number: 3, image_url: null },
+    ] } as any)
+    getComicMock
+      .mockResolvedValueOnce({ id: 7, workflow_status: 'in_progress' } as any)
+      .mockResolvedValueOnce({
+        id: 7,
+        workflow_status: 'failed',
+        workflow_stages: [
+          {
+            stage: 'render',
+            status: 'failed',
+            error_message: 'Layout for comic 7 page 3 not found',
+          },
+        ],
+      } as any)
+    const store = createStore()
+    store.set(currentComicIdAtom, 7)
+
+    render(
+      <Provider store={store}>
+        <ImageGeneration />
+      </Provider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '03' })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: '03' }))
+    fireEvent.click(screen.getByRole('button', { name: '生图' }))
+
+    await waitFor(() => expect(renderPageMock).toHaveBeenCalledWith(7, 3, expect.any(Object)))
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000)
+    })
+
+    expect(toast.error).toHaveBeenCalledWith('第3页渲染失败：Layout for comic 7 page 3 not found')
+    expect(screen.getByRole('alert')).toHaveTextContent('第3页渲染失败：Layout for comic 7 page 3 not found')
   })
 
   it('passes the selected image provider to the render endpoint', async () => {

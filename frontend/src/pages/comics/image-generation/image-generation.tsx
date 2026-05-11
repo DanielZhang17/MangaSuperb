@@ -112,6 +112,36 @@ function singlePageModeLabel(pageNumber: number, t: (key: string, options?: any)
   return String(t('image.mode.pageNumber', { page: pageNumber }))
 }
 
+function renderRunPageNumber(renderRun: RenderRun): number | null {
+  if (typeof renderRun.current_page_number === 'number' && renderRun.current_page_number > 0) {
+    return renderRun.current_page_number
+  }
+
+  const failedPage = Array.isArray(renderRun.failed_pages)
+    ? renderRun.failed_pages.find((page) => typeof page === 'number' && page > 0)
+    : undefined
+  if (typeof failedPage === 'number') return failedPage
+
+  const requestedPages = Array.isArray(renderRun.requested_pages) ? renderRun.requested_pages : []
+  if (requestedPages.length === 1 && typeof requestedPages[0] === 'number' && requestedPages[0] > 0) {
+    return requestedPages[0]
+  }
+
+  return null
+}
+
+function renderRunModeLabel(renderRun: RenderRun, t: (key: string, options?: any) => unknown): string {
+  const pageNumber = renderRunPageNumber(renderRun)
+  if (
+    pageNumber
+    && (renderRun.status === 'failed' || (renderRun.mode === 'first_page' && pageNumber !== 1))
+  ) {
+    return singlePageModeLabel(pageNumber, t)
+  }
+
+  return String(t(RENDER_RUN_MODE_LABELS[renderRun.mode]))
+}
+
 function isActiveRenderRun(renderRun: RenderRun | null) {
   return Boolean(
     renderRun
@@ -134,7 +164,7 @@ function renderRunProgressStatus(renderRun: RenderRun): RenderProgressState['sta
 }
 
 function renderRunStatusMessage(renderRun: RenderRun, t: (key: string, options?: any) => unknown) {
-  const modeLabel = String(t(RENDER_RUN_MODE_LABELS[renderRun.mode]))
+  const modeLabel = renderRunModeLabel(renderRun, t)
 
   if (renderRun.status === 'aborted') {
     return String(t('image.run.aborted'))
