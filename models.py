@@ -608,6 +608,161 @@ class ComicRenderRun(db.Model):
         }
 
 
+class ComicAutoRun(db.Model):
+    """Durable state for one-click Auto Mode generation."""
+
+    __tablename__ = 'comic_auto_runs'
+
+    ACTIVE_STATUSES = {'queued', 'running', 'needs_review'}
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    comic_id = db.Column(
+        db.Integer,
+        db.ForeignKey('comics.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey('users.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
+    status = db.Column(db.String(32), nullable=False, default='queued', index=True)
+    current_stage = db.Column(db.String(32), nullable=False, default='story', index=True)
+    story_snapshot = db.Column(db.Text, nullable=False)
+    title_snapshot = db.Column(db.String(255), nullable=False)
+    preferences_snapshot_json = db.Column(db.Text, nullable=False, default='{}')
+    character_review_json = db.Column(db.Text, nullable=True)
+    selected_character_ids_json = db.Column(db.Text, nullable=False, default='[]')
+    render_run_id = db.Column(
+        db.Integer,
+        db.ForeignKey('comic_render_runs.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    abort_requested = db.Column(db.Boolean, nullable=False, default=False)
+    job_id = db.Column(db.String(128), nullable=True, index=True)
+    error_message = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    started_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    updated_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    comic = db.relationship('Comic', backref=db.backref('auto_runs', lazy=True))
+    render_run = db.relationship('ComicRenderRun', backref=db.backref('auto_runs', lazy=True))
+
+    @staticmethod
+    def _loads_json(raw, fallback):
+        try:
+            parsed = json.loads(raw or '')
+        except (TypeError, ValueError):
+            return fallback
+        return parsed
+
+    @staticmethod
+    def _dumps_json(value) -> str:
+        return json.dumps(value, ensure_ascii=False)
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        comic_id: int,
+        user_id: int,
+        story_snapshot: str,
+        title_snapshot: str,
+        preferences_snapshot: dict[str, Any] | None = None,
+    ):
+        return cls(
+            comic_id=comic_id,
+            user_id=user_id,
+            status='queued',
+            current_stage='story',
+            story_snapshot=story_snapshot,
+            title_snapshot=title_snapshot,
+            preferences_snapshot_json=cls._dumps_json(preferences_snapshot or {}),
+            selected_character_ids_json='[]',
+        )
+
+    @property
+    def preferences_snapshot(self) -> dict[str, Any]:
+        parsed = self._loads_json(self.preferences_snapshot_json, {})
+        return parsed if isinstance(parsed, dict) else {}
+
+    @preferences_snapshot.setter
+    def preferences_snapshot(self, value: dict[str, Any] | None) -> None:
+        self.preferences_snapshot_json = self._dumps_json(value or {})
+
+    @property
+    def character_review(self) -> dict[str, Any] | None:
+        parsed = self._loads_json(self.character_review_json, None)
+        return parsed if isinstance(parsed, dict) else None
+
+    @character_review.setter
+    def character_review(self, value: dict[str, Any] | None) -> None:
+        self.character_review_json = self._dumps_json(value) if value is not None else None
+
+    @property
+    def selected_character_ids(self) -> list[int]:
+        parsed = self._loads_json(self.selected_character_ids_json, [])
+        if not isinstance(parsed, list):
+            return []
+        ids: list[int] = []
+        for item in parsed:
+            if isinstance(item, int) or str(item).isdigit():
+                ids.append(int(item))
+        return ids
+
+    @selected_character_ids.setter
+    def selected_character_ids(self, value: list[int] | None) -> None:
+        self.selected_character_ids_json = self._dumps_json([
+            int(item)
+            for item in (value or [])
+            if isinstance(item, int) or str(item).isdigit()
+        ])
+
+    @property
+    def render_progress(self) -> dict[str, int] | None:
+        if not self.render_run:
+            return None
+        requested = self.render_run.requested_pages
+        return {
+            'completed': len(self.render_run.completed_pages),
+            'failed': len(self.render_run.failed_pages),
+            'total': len(requested),
+        }
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'comic_id': self.comic_id,
+            'user_id': self.user_id,
+            'status': self.status,
+            'current_stage': self.current_stage,
+            'story_snapshot': self.story_snapshot,
+            'title_snapshot': self.title_snapshot,
+            'preferences_snapshot': self.preferences_snapshot,
+            'character_review': self.character_review,
+            'selected_character_ids': self.selected_character_ids,
+            'render_run_id': self.render_run_id,
+            'render_run': self.render_run.to_dict() if self.render_run else None,
+            'render_progress': self.render_progress,
+            'abort_requested': self.abort_requested,
+            'job_id': self.job_id,
+            'error_message': self.error_message,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class ComicWorkflowStage(db.Model):
     """Track status and timing of each workflow stage for a comic."""
 
