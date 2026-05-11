@@ -11,6 +11,7 @@ import type { AutoRun } from '@/service/types'
 import { currentComicDetailAtom } from '../atoms'
 import { ComicsWorkflowShell, WorkflowContent, WorkflowPanel } from '../components/workflow-layout'
 import { GeneratedImage } from '../image-generation/generated-image'
+import { extractComicStory } from '../lib/workflow-hydration'
 
 function copy(value: unknown, fallback: string) {
   const text = String(value)
@@ -43,7 +44,7 @@ export function AutoPreview({
   const [comicDetail] = useAtom(currentComicDetailAtom)
   const [selectedTab, setSelectedTab] = useState('preview')
   const title = autoRun?.title_snapshot || comicDetail?.title || 'Untitled manga'
-  const story = autoRun?.story_snapshot || ''
+  const story = autoRun?.story_snapshot || (comicDetail ? extractComicStory(comicDetail) : '')
   const renderedPages = useMemo(() => getRenderedPages(comicDetail?.pages ?? []), [comicDetail?.pages])
   const exportUrl = comicDetail?.pdf_url || comicDetail?.zip_url || null
 

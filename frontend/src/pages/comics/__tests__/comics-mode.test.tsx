@@ -277,6 +277,37 @@ describe('ComicsPage mode shell', () => {
     expect(screen.getByText('A pilot finds a hidden mech.')).toBeInTheDocument()
   })
 
+  it('shows Auto preview for a restored comic with rendered pages even without an Auto run record', () => {
+    mockAutoRunState()
+    const store = createStore()
+    store.set(currentComicDetailAtom, {
+      id: 7,
+      title: 'Restored Manga',
+      script: {
+        content: JSON.stringify({
+          story: 'Restored story from saved comic pages.',
+        }),
+      },
+      pages: [
+        { id: 1, page_number: 1, image_url: '/static/restored-page-1.png' },
+      ],
+    } as any)
+
+    render(
+      <Provider store={store}>
+        <ComicsPage />
+      </Provider>,
+    )
+
+    expect(screen.getByText('Generated manga preview')).toBeInTheDocument()
+    expect(screen.getByAltText('Restored Manga page 1')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Generate manga' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Story' }))
+
+    expect(screen.getByText('Restored story from saved comic pages.')).toBeInTheDocument()
+  })
+
   it('shows the Auto snapshot banner in Pro mode during active generation', async () => {
     mockAutoRunState({
       autoRun: makeAutoRun({

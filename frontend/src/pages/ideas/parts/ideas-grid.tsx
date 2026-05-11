@@ -25,7 +25,6 @@ import {
   selectedCharacterRolesAtom,
   storyCompletedAtom,
   styleAtom,
-  workflowModeAtom,
 } from '@/pages/comics/atoms'
 import { getComicWorkflowHydration } from '@/pages/comics/lib/workflow-hydration'
 
@@ -45,7 +44,6 @@ export default function IdeasGrid() {
   const setSelectedCharacterRoles = useSetAtom(selectedCharacterRolesAtom)
   const setStoryCompleted = useSetAtom(storyCompletedAtom)
   const setStyle = useSetAtom(styleAtom)
-  const setWorkflowMode = useSetAtom(workflowModeAtom)
 
   const { data, isLoading, error } = useSWR('comics:list:mine', () => ComicsApi.list())
   const comics = data?.comics ?? []
@@ -102,7 +100,6 @@ export default function IdeasGrid() {
           setCharactersCompleted(hydration.characterIds.length > 0)
           setSelectedCharacterIds(hydration.characterIds)
           setSelectedCharacterRoles(hydration.characterRoles)
-          setWorkflowMode('pro')
           setActiveTab(hydration.resumeTab)
           navigate('/comics')
         }

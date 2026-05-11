@@ -8,7 +8,45 @@ export type StoryStep = 'input' | 'panels' | 'generate'
 
 export type WorkflowMode = 'auto' | 'pro'
 
-export const workflowModeAtom = atom<WorkflowMode>('auto')
+export const WORKFLOW_MODE_STORAGE_KEY = 'mangasuperb.comics.workflowMode'
+
+function isWorkflowMode(value: unknown): value is WorkflowMode {
+  return value === 'auto' || value === 'pro'
+}
+
+function readStoredWorkflowMode(): WorkflowMode {
+  if (typeof window === 'undefined') return 'auto'
+
+  try {
+    const storedMode = window.localStorage.getItem(WORKFLOW_MODE_STORAGE_KEY)
+
+    return isWorkflowMode(storedMode) ? storedMode : 'auto'
+  } catch {
+    return 'auto'
+  }
+}
+
+function persistWorkflowMode(mode: WorkflowMode) {
+  if (typeof window === 'undefined') return
+
+  try {
+    window.localStorage.setItem(WORKFLOW_MODE_STORAGE_KEY, mode)
+  } catch {
+    // Browser storage can be unavailable in private or restricted contexts.
+  }
+}
+
+const workflowModeValueAtom = atom<WorkflowMode>(readStoredWorkflowMode())
+
+export const workflowModeAtom = atom<WorkflowMode, [WorkflowMode], void>(
+  (get) => get(workflowModeValueAtom),
+  (_get, set, nextMode) => {
+    const mode = isWorkflowMode(nextMode) ? nextMode : 'auto'
+
+    set(workflowModeValueAtom, mode)
+    persistWorkflowMode(mode)
+  },
+)
 
 export type CurrentComicOverrides = Partial<WorkflowPreferenceFields> & {
   color_mode?: AutoPreference<ColorMode>

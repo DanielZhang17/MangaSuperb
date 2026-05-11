@@ -14,6 +14,7 @@ import {
   selectedCharacterRolesAtom,
   storyCompletedAtom,
   styleAtom,
+  workflowModeAtom,
 } from '@/pages/comics/atoms'
 
 import IdeasGrid from '../ideas-grid'
@@ -86,6 +87,7 @@ describe('IdeasGrid', () => {
       error: null,
     } as any)
     const store = createStore()
+    store.set(workflowModeAtom, 'auto')
 
     render(
       <Provider store={store}>
@@ -105,6 +107,7 @@ describe('IdeasGrid', () => {
     expect(store.get(charactersCompletedAtom)).toBe(true)
     expect(store.get(selectedCharacterIdsAtom)).toEqual([7])
     expect(store.get(selectedCharacterRolesAtom)).toEqual({ 7: 'protagonist' })
+    expect(store.get(workflowModeAtom)).toBe('auto')
     expect(store.get(activeTabAtom)).toBe('image-generation')
     expect(navigateMock).toHaveBeenCalledWith('/comics')
   })
