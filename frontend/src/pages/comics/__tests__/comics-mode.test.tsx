@@ -14,10 +14,20 @@ import {
 import ComicsPage from '../index'
 
 const useAutoRunMock = vi.hoisted(() => vi.fn())
+const suggestTitleMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/hooks/use-auto-run', () => ({
   default: useAutoRunMock,
   useAutoRun: useAutoRunMock,
+}))
+
+vi.mock('@/apis/auto', () => ({
+  AutoApi: {
+    suggestTitle: suggestTitleMock,
+  },
+  default: {
+    suggestTitle: suggestTitleMock,
+  },
 }))
 
 vi.mock('../story/story-tab', () => ({
@@ -54,6 +64,12 @@ vi.mock('@/hooks/use-i18n', () => ({
       'auto.generating': 'Generating...',
       'auto.error.addStory': 'Add a story before generating manga.',
       'auto.error.startFailed': 'Auto run failed to start',
+      'auto.titleDialog.title': 'Confirm comic title',
+      'auto.titleDialog.description': 'Review the generated title before rendering.',
+      'auto.titleDialog.label': 'Comic title',
+      'auto.titleDialog.confirm': 'Start generation',
+      'auto.titleDialog.suggesting': 'Generating title...',
+      'auto.error.titleSuggestionFailed': 'Could not generate a title. Review the fallback title.',
       'autoProgress.title': 'Auto run in progress',
       'autoProgress.abort': 'Abort run',
       'autoProgress.progress': `${options?.completed ?? 0} of ${options?.total ?? 0} pages rendered`,
@@ -68,10 +84,15 @@ vi.mock('@/hooks/use-i18n', () => ({
       'autoPreview.exportPdf': 'Export PDF',
       'autoPreview.regeneratePage': 'Regenerate current page',
       'autoPreview.noPages': 'Generated pages will appear here.',
+      'autoPreview.currentPage': `Page ${options?.page ?? ''}`,
+      'autoPreview.pageCount': `${options?.count ?? 0} pages`,
       'autoReviewPrompt.title': 'Character review needed',
       'autoReviewPrompt.openPro': 'Open Pro editor',
       'autoRunBanner.title': 'Auto generation is running',
       'autoRunBanner.return': 'Return to Auto progress',
+      'editor.placeholderTitle': 'Enter title',
+      'editor.save': 'Save',
+      'editor.untitled': 'Untitled',
     }[key] ?? key),
   }),
 }))
@@ -157,6 +178,8 @@ function mockAutoRunState(overrides: Record<string, unknown> = {}) {
 describe('ComicsPage mode shell', () => {
   beforeEach(() => {
     useAutoRunMock.mockReset()
+    suggestTitleMock.mockReset()
+    suggestTitleMock.mockResolvedValue({ title: 'Generated Hidden Mech' })
     mockAutoRunState()
     ;(globalThis as any).__mockPreferences = undefined
     ;(globalThis as any).__mockProviderDefaults = undefined
@@ -188,7 +211,7 @@ describe('ComicsPage mode shell', () => {
     const autoRunState = mockAutoRunState()
     const store = createStore()
     store.set(currentComicIdAtom, 7)
-    store.set(mangaTitleAtom, 'Hidden Mech')
+    store.set(mangaTitleAtom, '')
     store.set(fullStoryAtom, 'A pilot finds a hidden mech.')
     store.set(currentComicOverridesAtom, {
       image_provider: { mode: 'manual', value: 'third_party' },
@@ -203,10 +226,18 @@ describe('ComicsPage mode shell', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Generate manga' }))
 
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Confirm comic title')
+    expect(screen.getByLabelText('Comic title')).toHaveValue('Generated Hidden Mech')
+    fireEvent.click(screen.getByRole('button', { name: 'Start generation' }))
+
     await waitFor(() => {
+      expect(suggestTitleMock).toHaveBeenCalledWith({
+        story: 'A pilot finds a hidden mech.',
+        text_provider: 'gemini',
+      })
       expect(autoRunState.startRun).toHaveBeenCalledWith({
         comic_id: 7,
-        title: 'Hidden Mech',
+        title: 'Generated Hidden Mech',
         story: 'A pilot finds a hidden mech.',
         preferences: {
           image_provider: 'third_party',
@@ -269,6 +300,7 @@ describe('ComicsPage mode shell', () => {
 
     expect(screen.getByText('Generated manga preview')).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Preview' })).toHaveAttribute('data-state', 'active')
+    expect(screen.getByRole('button', { name: 'Page 01' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByAltText('Hidden Mech page 1')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Export PDF' })).toHaveAttribute('href', '/exports/hidden-mech.pdf')
 
@@ -292,6 +324,7 @@ describe('ComicsPage mode shell', () => {
         { id: 1, page_number: 1, image_url: '/static/restored-page-1.png' },
       ],
     } as any)
+    store.set(mangaTitleAtom, 'Restored Manga')
 
     render(
       <Provider store={store}>
@@ -300,12 +333,42 @@ describe('ComicsPage mode shell', () => {
     )
 
     expect(screen.getByText('Generated manga preview')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Page 01' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByAltText('Restored Manga page 1')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Generate manga' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: 'Story' }))
 
     expect(screen.getByText('Restored story from saved comic pages.')).toBeInTheDocument()
+  })
+
+  it('keeps the comic title rename control in Auto preview', () => {
+    mockAutoRunState()
+    const store = createStore()
+    store.set(mangaTitleAtom, 'Restored Manga')
+    store.set(currentComicDetailAtom, {
+      id: 7,
+      title: 'Restored Manga',
+      pages: [
+        { id: 1, page_number: 1, image_url: '/static/restored-page-1.png' },
+      ],
+    } as any)
+
+    render(
+      <Provider store={store}>
+        <ComicsPage />
+      </Provider>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+    fireEvent.change(screen.getByDisplayValue('Restored Manga'), {
+      target: { value: 'Renamed Manga' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(store.get(mangaTitleAtom)).toBe('Renamed Manga')
+    expect(store.get(currentComicDetailAtom)?.title).toBe('Renamed Manga')
+    expect(screen.getByText('Renamed Manga')).toBeInTheDocument()
   })
 
   it('shows the Auto snapshot banner in Pro mode during active generation', async () => {

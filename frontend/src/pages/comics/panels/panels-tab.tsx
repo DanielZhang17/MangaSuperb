@@ -28,6 +28,7 @@ import {
   mangaTitleAtom,
   selectedCharacterIdsAtom,
   selectedCharacterRolesAtom,
+  selectedPageAtom,
   styleAtom,
 } from '../atoms'
 import { AutoSelectControl } from '../components/auto-select-control'
@@ -97,6 +98,7 @@ export function PanelsTab() {
   // 直接使用当前详情
   const [comicDetail, setComicDetail] = useAtom(currentComicDetailAtom)
   const [, setActiveTab] = useAtom(activeTabAtom)
+  const [, setSelectedPage] = useAtom(selectedPageAtom)
   const [title] = useAtom(mangaTitleAtom)
   const [story] = useAtom(fullStoryAtom)
   const [style] = useAtom(styleAtom)
@@ -155,7 +157,12 @@ export function PanelsTab() {
     return Array.from(set).sort((a, b) => a - b)
   }, [shots])
   const scenes: Scene[] = pageNumbers.length ? pageNumbers.map((n: number) => ({ id: n, label: String(n).padStart(2, '0') })) : [{ id: 1, label: '01' }]
-  const [selectedScene, setSelectedScene] = useState<number>(scenes[0].id)
+  const [selectedScene, setSelectedSceneState] = useState<number>(scenes[0].id)
+
+  const setSelectedScene = (pageNumber: number) => {
+    setSelectedSceneState(pageNumber)
+    setSelectedPage(pageNumber)
+  }
 
   useEffect(() => {
     // 当 shots 更新时，修正选中页
@@ -488,7 +495,10 @@ export function PanelsTab() {
               </Button>
               <Button
                 size="lg"
-                onClick={() => setActiveTab('image-generation')}
+                onClick={() => {
+                  setSelectedPage(selectedScene)
+                  setActiveTab('image-generation')
+                }}
                 disabled={!hasShotsForPage}
               >
                 {String(t('common.next'))}

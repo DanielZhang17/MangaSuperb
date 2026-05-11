@@ -37,7 +37,10 @@ export function InlineInput({
       if (pending) return;
       try {
         setPending(true);
-        await Promise.resolve(onSubmit?.(local));
+        const result = onSubmit?.(local);
+        if (result && typeof (result as Promise<void>).then === 'function') {
+          await result;
+        }
         setEditing(false);
       } finally {
         setPending(false);

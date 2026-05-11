@@ -1,6 +1,8 @@
 """Auto-mode preparation endpoints."""
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -28,6 +30,7 @@ from mangasuperb.services.auto_runs import (
 bp = Blueprint("auto", __name__, url_prefix="/api/auto")
 
 ALLOWED_AI_PROVIDER_VALUES = {"gemini", "third_party", "openai"}
+TITLE_MAX_LENGTH = 80
 
 
 def _normalise_ai_provider(value: Any, field: str) -> str | None:
@@ -68,6 +71,73 @@ def _auto_run_payload(auto_run) -> dict[str, Any]:
     if auto_run.comic:
         payload["comic"] = auto_run.comic.to_dict()
     return payload
+
+
+def _fallback_title_from_story(story: str) -> str:
+    first_line = next((line.strip() for line in story.splitlines() if line.strip()), "")
+    if not first_line:
+        return "Untitled manga"
+    return first_line[:TITLE_MAX_LENGTH].strip()
+
+
+def _clean_suggested_title(raw_title: str, story: str) -> str:
+    cleaned = raw_title.strip()
+    cleaned = re.sub(r"^```(?:json|text)?", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"```$", "", cleaned).strip()
+
+    try:
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, Mapping):
+            cleaned = str(parsed.get("title") or "")
+        elif isinstance(parsed, str):
+            cleaned = parsed
+    except Exception:
+        pass
+
+    cleaned = cleaned.splitlines()[0].strip()
+    cleaned = re.sub(r"^(title|name)\s*[:：]\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = cleaned.strip().strip("\"'“”‘’")
+
+    if not cleaned:
+        cleaned = _fallback_title_from_story(story)
+
+    return cleaned[:TITLE_MAX_LENGTH].strip() or "Untitled manga"
+
+
+@bp.post("/title")
+@login_required
+def suggest_title() -> Any:
+    payload, error = _json_object()
+    if error:
+        return error
+    assert payload is not None
+
+    story = _required_text(payload, "story")
+    if not isinstance(story, str):
+        return story
+
+    try:
+        text_provider_id = _normalise_ai_provider(
+            payload.get("text_provider"),
+            "text_provider",
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    prompt = (
+        "Suggest one concise manga title for the story below. "
+        "Return only the title, no commentary, no markdown, no quotes. "
+        "Keep it memorable and under 8 words.\n\n"
+        f"Story:\n{story}"
+    )
+
+    try:
+        raw_title = get_text_provider(text_provider_id).generate_text(prompt)
+    except Exception:
+        current_app.logger.exception("Auto title suggestion failed")
+        return jsonify({"error": "Failed to suggest title"}), 502
+
+    return jsonify({"title": _clean_suggested_title(raw_title, story)}), 200
 
 
 @bp.post("/characters/prepare")

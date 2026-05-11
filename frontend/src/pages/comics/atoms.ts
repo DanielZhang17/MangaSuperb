@@ -65,9 +65,13 @@ export const storyStepAtom = atom<StoryStep>('input')
 export type CharacterStep = 'selection' | 'generate'
 export const characterStepAtom = atom<CharacterStep>('selection')
 
-export const mangaTitleAtom = atom('不灭战神')
+export const mangaTitleAtom = atom('')
 
 export const activeTabAtom = atom('story')
+
+export const selectedPageAtom = atom<number>(1)
+
+export const customPagesAtom = atom<number[]>([])
 
 export const storyCompletedAtom = atom(false)
 export const charactersCompletedAtom = atom(false)

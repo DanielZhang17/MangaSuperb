@@ -9,7 +9,14 @@ import PanelsApi from '@/apis/panels'
 import { activeJobsAtom } from '@/atoms'
 import type { RenderRun } from '@/service/types'
 
-import { activeRenderRunAtom, currentComicIdAtom, currentComicOverridesAtom, imageProviderAtom } from '../../atoms'
+import {
+  activeRenderRunAtom,
+  activeTabAtom,
+  currentComicIdAtom,
+  currentComicOverridesAtom,
+  imageProviderAtom,
+  selectedPageAtom,
+} from '../../atoms'
 import { ImageGeneration } from '../image-generation'
 
 vi.mock('react-hot-toast', () => ({
@@ -535,6 +542,72 @@ describe('ImageGeneration render polling', () => {
     await waitFor(() => {
       expect(renderPageMock).toHaveBeenCalledWith(7, 1, expect.objectContaining({
         image_provider: 'third_party',
+        text_provider: 'gemini',
+      }))
+    })
+  })
+
+  it('renders the shared selected storyboard page', async () => {
+    listImagesMock.mockResolvedValueOnce({
+      pages: [
+        { page_id: 11, page_number: 1, image_url: 'https://cdn.example.com/page-1.png' },
+        { page_id: 12, page_number: 2, image_url: null },
+      ],
+    } as any)
+    const store = createStore()
+    store.set(currentComicIdAtom, 7)
+    store.set(selectedPageAtom, 2)
+
+    render(
+      <Provider store={store}>
+        <ImageGeneration />
+      </Provider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '02' })).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '生图' }))
+
+    await waitFor(() => {
+      expect(renderPageMock).toHaveBeenCalledWith(7, 2, expect.objectContaining({
+        image_provider: 'gemini',
+        text_provider: 'gemini',
+      }))
+    })
+  })
+
+  it('adds a new image page in place and renders that new page', async () => {
+    listImagesMock.mockResolvedValueOnce({
+      pages: [
+        { page_id: 11, page_number: 1, image_url: 'https://cdn.example.com/page-1.png' },
+      ],
+    } as any)
+    const store = createStore()
+    store.set(currentComicIdAtom, 7)
+    store.set(activeTabAtom, 'image-generation')
+
+    render(
+      <Provider store={store}>
+        <ImageGeneration />
+      </Provider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '01' })).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '添加第02页' }))
+
+    expect(store.get(activeTabAtom)).toBe('image-generation')
+    expect(store.get(selectedPageAtom)).toBe(2)
+
+    fireEvent.click(screen.getByRole('button', { name: '生图' }))
+
+    await waitFor(() => {
+      expect(renderPageMock).toHaveBeenCalledWith(7, 2, expect.objectContaining({
+        image_provider: 'gemini',
         text_provider: 'gemini',
       }))
     })

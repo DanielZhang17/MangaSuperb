@@ -221,6 +221,29 @@ def test_create_auto_run_route_enqueues_worker_job(
     assert payload["auto_run"]["job_id"] == dummy_queue.jobs[-1].id
 
 
+def test_suggest_title_route_uses_text_provider(
+    auth_client: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DummyTextProvider:
+        def generate_text(self, prompt: str) -> str:
+            assert "A pilot finds a hidden mech." in prompt
+            return '"Hidden Mech Days"'
+
+    monkeypatch.setattr(
+        "mangasuperb.routes.auto.get_text_provider",
+        lambda provider=None: DummyTextProvider(),
+    )
+
+    response = auth_client.post(
+        "/api/auto/title",
+        json={"story": "A pilot finds a hidden mech.", "text_provider": "gemini"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["title"] == "Hidden Mech Days"
+
+
 def test_active_auto_run_route_returns_current_user_run(
     app: Any,
     auth_client: Any,

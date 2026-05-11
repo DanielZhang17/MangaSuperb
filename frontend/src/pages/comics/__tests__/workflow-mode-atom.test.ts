@@ -16,6 +16,13 @@ describe('workflowModeAtom', () => {
     expect(store.get(workflowModeAtom)).toBe('auto')
   })
 
+  it('starts new comics without the old fixed default title', async () => {
+    const { mangaTitleAtom } = await import('../atoms')
+    const store = createStore()
+
+    expect(store.get(mangaTitleAtom)).toBe('')
+  })
+
   it('hydrates from the last browser-selected workflow mode', async () => {
     window.localStorage.setItem(STORAGE_KEY, 'pro')
 

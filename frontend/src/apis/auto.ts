@@ -6,9 +6,20 @@ import type {
   AutoRunResponse,
   ResolveAutoRunRequest,
   StartAutoRunRequest,
+  SuggestAutoTitleRequest,
+  SuggestAutoTitleResponse,
 } from '@/service/types'
 
 export const AutoApi = {
+  suggestTitle(body: SuggestAutoTitleRequest) {
+    return request<SuggestAutoTitleRequest, SuggestAutoTitleResponse>({
+      url: '/api/auto/title',
+      method: 'POST',
+      data: body,
+      timeout: 60000,
+    })
+  },
+
   prepareCharacters(body: AutoCharacterPrepareRequest) {
     return request<AutoCharacterPrepareRequest, AutoCharacterPrepareResponse>({
       url: '/api/auto/characters/prepare',

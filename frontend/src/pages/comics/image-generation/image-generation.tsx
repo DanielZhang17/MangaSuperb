@@ -35,6 +35,7 @@ import {
   currentComicIdAtom,
   currentComicOverridesAtom,
   imageProviderAtom,
+  selectedPageAtom,
   storyStepAtom,
   styleAtom,
   textProviderAtom,
@@ -207,14 +208,43 @@ function parseImagePages(imagesRes: unknown): PageImage[] {
   return Array.isArray(pagesArr) ? pagesArr as PageImage[] : []
 }
 
-function pagesToScenes(pagesArr: PageImage[]): Scene[] {
-  return [...pagesArr]
-    .sort((a, b) => a.page_number - b.page_number)
-    .map((page) => ({
-      id: page.page_number,
-      label: String(page.page_number).padStart(2, '0'),
-      pageId: page.page_id,
-    }))
+function normalisePageNumbers(pageNumbers: number[]): number[] {
+  return Array.from(
+    new Set(pageNumbers.filter((pageNumber) => Number.isFinite(pageNumber) && pageNumber > 0)),
+  ).sort((a, b) => a - b)
+}
+
+function pagesToScenes(pagesArr: PageImage[], extraPageNumbers: number[] = []): Scene[] {
+  const pageByNumber = new Map<number, PageImage>()
+  for (const page of pagesArr) {
+    if (Number.isFinite(page?.page_number) && page.page_number > 0) {
+      pageByNumber.set(page.page_number, page)
+    }
+  }
+
+  return normalisePageNumbers([
+    ...pagesArr.map((page) => page.page_number),
+    ...extraPageNumbers,
+  ]).map((pageNumber) => ({
+    id: pageNumber,
+    label: String(pageNumber).padStart(2, '0'),
+    pageId: pageByNumber.get(pageNumber)?.page_id,
+  }))
+}
+
+function pagesWithPlaceholders(pagesArr: PageImage[], scenes: Scene[]): PageImage[] {
+  const pageByNumber = new Map<number, PageImage>()
+  for (const page of pagesArr) {
+    if (Number.isFinite(page?.page_number) && page.page_number > 0) {
+      pageByNumber.set(page.page_number, page)
+    }
+  }
+
+  return scenes.map((scene) => pageByNumber.get(scene.id) ?? {
+    page_id: -(scene.id),
+    page_number: scene.id,
+    image_url: null,
+  })
 }
 
 function renderFailureMessage(comic: any): string | null {
@@ -238,12 +268,16 @@ function SceneSidebar({
   selectedScene,
   onSelectScene,
   onAddScene,
+  addSceneLabel,
+  addSceneAriaLabel,
 }: {
   scenes: Scene[]
   pages: { page_id: number; page_number: number; image_url: string | null }[]
   selectedScene: number
   onSelectScene: (sceneId: number) => void
   onAddScene: () => void
+  addSceneLabel: string
+  addSceneAriaLabel: string
 }) {
   const hasAnyPage = Array.isArray(pages) && pages.length > 0
   const canScrollUp = false
@@ -274,11 +308,12 @@ function SceneSidebar({
         <button
           type="button"
           onClick={onAddScene}
+          aria-label={addSceneAriaLabel}
           className="group relative flex h-20 w-24 shrink-0 items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 bg-muted/60 text-muted-foreground transition-colors hover:border-muted-foreground/50 xl:w-28"
         >
           {hasAnyPage && (
             <span className="absolute -left-6 text-xs font-medium text-muted-foreground">
-              {String(scenes.length + 1).padStart(2, '0')}
+              {addSceneLabel}
             </span>
           )}
           <Plus className="h-6 w-6" />
@@ -365,6 +400,8 @@ function SceneThumbnail({
     <button
       type="button"
       onClick={onClick}
+      aria-label={label}
+      aria-current={isActive ? 'page' : undefined}
       className={cn(
         'relative h-20 w-24 shrink-0 cursor-pointer rounded-lg border border-input bg-card p-2 text-left transition-all hover:border-primary xl:w-28',
         isActive && 'border-primary shadow-[0_0_0_3px] shadow-primary/10',
@@ -600,8 +637,9 @@ function createRenderProgress(maxPollTries: number, message: string): RenderProg
  */
 export function ImageGeneration() {
   const { t } = useI18n('comics')
+  const [selectedPage, setSelectedPage] = useAtom(selectedPageAtom)
   const [scenes, setScenes] = useState(INITIAL_SCENES)
-  const [selectedScene, setSelectedScene] = useState(INITIAL_SCENES[0]?.id ?? 1)
+  const [selectedScene, setSelectedSceneState] = useState(selectedPage || (INITIAL_SCENES[0]?.id ?? 1))
   // Pages data from images API
   const [pages, setPages] = useState<PageImage[]>([])
   const [fontFamily, setFontFamily] = useState(DEFAULT_FONT_FAMILY)
@@ -763,24 +801,52 @@ export function ImageGeneration() {
     resolvedStyle,
     resolvedTextProvider,
   ])
+  const selectScene = useCallback((sceneId: number) => {
+    setSelectedSceneState(sceneId)
+    setSelectedPage(sceneId)
+  }, [setSelectedPage])
+
   const applyImagePages = useCallback((pagesArr: PageImage[]) => {
     if (!Array.isArray(pagesArr) || pagesArr.length === 0) return
 
     const sortedPages = [...pagesArr].sort((a, b) => a.page_number - b.page_number)
-    const newScenes = pagesToScenes(sortedPages)
+    const newScenes = pagesToScenes(sortedPages, [selectedPage])
+    const nextPages = pagesWithPlaceholders(sortedPages, newScenes)
 
-    setPages(sortedPages)
+    setPages(nextPages)
     setScenes(newScenes)
-    setSelectedScene((current) => (
-      newScenes.some((scene) => scene.id === current) ? current : newScenes[0].id
-    ))
-  }, [])
+    setSelectedSceneState((current) => {
+      const preferred = newScenes.some((scene) => scene.id === selectedPage) ? selectedPage : current
+      const nextScene = newScenes.some((scene) => scene.id === preferred) ? preferred : newScenes[0].id
+      setSelectedPage(nextScene)
+
+      return nextScene
+    })
+  }, [selectedPage, setSelectedPage])
 
   const fetchImagePages = useCallback(async (targetComicId: number) => {
     const imagesRes = await ComicsApi.listImages(targetComicId)
 
     return parseImagePages(imagesRes)
   }, [])
+
+  useEffect(() => {
+    if (!selectedPage || selectedPage === selectedScene) return
+
+    setScenes((currentScenes) => pagesToScenes(pages, [
+      ...currentScenes.map((scene) => scene.id),
+      selectedPage,
+    ]))
+    setPages((currentPages) => {
+      const nextScenes = pagesToScenes(currentPages, [
+        ...scenes.map((scene) => scene.id),
+        selectedPage,
+      ])
+
+      return pagesWithPlaceholders(currentPages, nextScenes)
+    })
+    setSelectedSceneState(selectedPage)
+  }, [pages, scenes, selectedPage, selectedScene])
 
   const activeJobs = useAtomValue(activeJobsAtom)
   const lightweightActiveRenderJobForComic = useMemo(() => {
@@ -917,10 +983,22 @@ export function ImageGeneration() {
   const [, setStoryStep] = useAtom(storyStepAtom)
 
   const handleAddScene = () => {
-    // 回到故事流程继续编辑；保持当前 comicId 不变
-    setActiveTab('story')
-    setStoryStep('input')
-    toast.success(String(t('image.backToStory')))
+    const nextSceneId = scenes.length > 0
+      ? Math.max(...scenes.map((scene) => scene.id)) + 1
+      : 1
+    const nextScenes = pagesToScenes(pages, [
+      ...scenes.map((scene) => scene.id),
+      nextSceneId,
+    ])
+
+    setScenes(nextScenes)
+    setPages((currentPages) => pagesWithPlaceholders(currentPages, nextScenes))
+    selectScene(nextSceneId)
+    setActiveTab('image-generation')
+    setStoryStep('generate')
+    toast.success(String(t('image.pageAdded', {
+      page: String(nextSceneId).padStart(2, '0'),
+    })))
   }
 
   // 进入生图页时，如已有 comicId，则预载该漫画的已生成页面，供左侧缩略图展示
@@ -1076,15 +1154,15 @@ export function ImageGeneration() {
 
           if (hasFreshTargetImage) {
             // 更新本地 pages 数据 & 同步侧边栏场景
-            setPages(displayPagesArr)
             if (displayPagesArr.length > 0) {
-              const newScenes: Scene[] = displayPagesArr
-                .sort((a: any, b: any) => a.page_number - b.page_number)
-                .map((p: any) => ({ id: p.page_number, label: String(p.page_number).padStart(2, '0'), pageId: p.page_id }))
+              const newScenes = pagesToScenes(displayPagesArr, [targetPageNumber])
               setScenes(newScenes)
+              setPages(pagesWithPlaceholders(displayPagesArr, newScenes))
               if (!newScenes.some((s) => s.id === targetPageNumber)) {
-                setSelectedScene(newScenes[0].id)
+                selectScene(newScenes[0].id)
               }
+            } else {
+              setPages(displayPagesArr)
             }
 
             toast.success(String(t('image.success.completed')))
@@ -1382,6 +1460,8 @@ export function ImageGeneration() {
     [pages, selectedScene],
   )
   const renderProgressHelperText = renderRunHelperText(activeRenderRunForComic, t)
+  const nextSceneId = scenes.length > 0 ? Math.max(...scenes.map((scene) => scene.id)) + 1 : 1
+  const nextSceneLabel = String(nextSceneId).padStart(2, '0')
 
   return (
     <ComicsWorkflowShell>
@@ -1390,10 +1470,12 @@ export function ImageGeneration() {
           scenes={scenes}
           pages={pages}
           selectedScene={selectedScene}
-          onSelectScene={setSelectedScene}
+          onSelectScene={selectScene}
           onAddScene={() => {
             handleAddScene()
           }}
+          addSceneLabel={nextSceneLabel}
+          addSceneAriaLabel={String(t('image.addPage', { page: nextSceneLabel }))}
         />
         <section className="flex min-w-0 flex-col gap-4 rounded-lg border border-border/60 bg-card p-4 shadow-sm sm:p-5">
           <GenerationStatusPanel progress={renderProgress} helperText={renderProgressHelperText} />

@@ -286,6 +286,15 @@ export interface StartAutoRunRequest {
   preferences?: Record<string, unknown>
 }
 
+export interface SuggestAutoTitleRequest {
+  story: string
+  text_provider?: AiProviderId
+}
+
+export interface SuggestAutoTitleResponse {
+  title: string
+}
+
 export interface AutoRunResponse {
   auto_run: AutoRun | null
   comic?: IComic | null

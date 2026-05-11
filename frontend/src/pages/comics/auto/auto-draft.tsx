@@ -1,9 +1,13 @@
 import { useAtom } from 'jotai'
 import { Sparkles } from 'lucide-react'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 
+import AutoApi from '@/apis/auto'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { useAiProviders } from '@/hooks/use-ai-providers'
 import { useI18n } from '@/hooks/use-i18n'
 import { usePreferences } from '@/hooks/use-preferences'
@@ -27,14 +31,28 @@ function copy(value: unknown, fallback: string) {
   return text.includes('.') ? fallback : text
 }
 
+function fallbackTitleFromStory(story: string) {
+  const firstLine = story
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .find(Boolean)
+
+  if (!firstLine) return 'Untitled manga'
+
+  return firstLine.length > 48 ? `${firstLine.slice(0, 45).trim()}...` : firstLine
+}
+
 export function AutoDraft({ autoRunState }: { autoRunState: AutoRunController }) {
   const { t } = useI18n('comics')
   const [story] = useAtom(fullStoryAtom)
-  const [title] = useAtom(mangaTitleAtom)
+  const [title, setTitle] = useAtom(mangaTitleAtom)
   const [comicId, setComicId] = useAtom(currentComicIdAtom)
   const [, setComicDetail] = useAtom(currentComicDetailAtom)
   const [style] = useAtom(styleAtom)
   const [overrides] = useAtom(currentComicOverridesAtom)
+  const [titleDialogOpen, setTitleDialogOpen] = useState(false)
+  const [titleDraft, setTitleDraft] = useState('')
+  const [suggestingTitle, setSuggestingTitle] = useState(false)
   const { providers, imageProviders, textProviders } = useAiProviders()
   const { preferences } = usePreferences()
   const hasStory = story.trim().length > 0
@@ -70,10 +88,37 @@ export function AutoDraft({ autoRunState }: { autoRunState: AutoRunController })
       return
     }
 
+    setSuggestingTitle(true)
+    try {
+      const existingTitle = title.trim()
+      const nextTitle = existingTitle || (await AutoApi.suggestTitle({
+        story,
+        text_provider: textProvider,
+      })).title
+
+      setTitleDraft(nextTitle.trim() || fallbackTitleFromStory(story))
+      setTitleDialogOpen(true)
+    } catch (error: any) {
+      setTitleDraft(title.trim() || fallbackTitleFromStory(story))
+      setTitleDialogOpen(true)
+      toast.error(error?.message || copy(t('auto.error.titleSuggestionFailed'), 'Could not generate a title. Review the fallback title.'))
+    } finally {
+      setSuggestingTitle(false)
+    }
+  }
+
+  const handleConfirmGenerate = async () => {
+    const confirmedTitle = titleDraft.trim()
+    if (!confirmedTitle) {
+      toast.error(copy(t('auto.titleDialog.label'), 'Comic title'))
+
+      return
+    }
+
     try {
       const response = await autoRunState.startRun({
         comic_id: comicId,
-        title: title.trim() || 'Untitled manga',
+        title: confirmedTitle,
         story,
         preferences: {
           image_provider: imageProvider,
@@ -81,6 +126,8 @@ export function AutoDraft({ autoRunState }: { autoRunState: AutoRunController })
           text_provider: textProvider,
         },
       })
+      setTitle(confirmedTitle)
+      setTitleDialogOpen(false)
       if (response?.comic?.id) {
         setComicId(response.comic.id)
         setComicDetail(response.comic)
@@ -104,16 +151,51 @@ export function AutoDraft({ autoRunState }: { autoRunState: AutoRunController })
         <Button
           type="button"
           onClick={handleGenerate}
-          disabled={autoRunState.isLoading || !hasStory}
+          disabled={autoRunState.isLoading || suggestingTitle || !hasStory}
           className="shrink-0"
         >
           <Sparkles className="size-4" />
-          {autoRunState.isLoading
+          {autoRunState.isLoading || suggestingTitle
             ? copy(t('auto.generating'), 'Generating...')
             : copy(t('auto.generateManga'), 'Generate manga')}
         </Button>
       </div>
       <StoryEditor />
+
+      <Dialog open={titleDialogOpen} onOpenChange={setTitleDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{copy(t('auto.titleDialog.title'), 'Confirm comic title')}</DialogTitle>
+            <DialogDescription>
+              {copy(t('auto.titleDialog.description'), 'Review the generated title before rendering.')}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="auto-title-draft">
+                {copy(t('auto.titleDialog.label'), 'Comic title')}
+              </Label>
+              <Input
+                id="auto-title-draft"
+                value={titleDraft}
+                onChange={(event) => setTitleDraft(event.target.value)}
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              onClick={() => void handleConfirmGenerate()}
+              disabled={autoRunState.isLoading || !titleDraft.trim()}
+            >
+              {autoRunState.isLoading
+                ? copy(t('auto.titleDialog.suggesting'), 'Generating title...')
+                : copy(t('auto.titleDialog.confirm'), 'Start generation')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </ComicsWorkflowShell>
   )
 }

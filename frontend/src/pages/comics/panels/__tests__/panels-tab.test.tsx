@@ -8,9 +8,11 @@ import { JobsApi } from '@/apis/jobs'
 import PanelsApi from '@/apis/panels'
 
 import {
+  activeTabAtom,
   currentComicDetailAtom,
   currentComicIdAtom,
   currentComicOverridesAtom,
+  selectedPageAtom,
 } from '../../atoms'
 import { PanelsTab } from '../panels-tab'
 
@@ -183,5 +185,47 @@ describe('PanelsTab', () => {
       expect(screen.getByText('Page two reveal')).toBeInTheDocument()
     })
     expect(screen.queryByText('Page one opening')).not.toBeInTheDocument()
+  })
+
+  it('keeps the selected storyboard page when entering image generation', async () => {
+    const store = createStore()
+    store.set(currentComicIdAtom, 12)
+    store.set(currentComicDetailAtom, {
+      id: 12,
+      panel_shots: [
+        {
+          id: 101,
+          page_number: 1,
+          panel_number: 1,
+          sequence_index: 1,
+          description: 'Page one opening',
+        },
+        {
+          id: 201,
+          page_number: 2,
+          panel_number: 1,
+          sequence_index: 2,
+          description: 'Page two reveal',
+        },
+      ],
+    } as any)
+
+    render(
+      <Provider store={store}>
+        <PanelsTab />
+      </Provider>,
+    )
+
+    fireEvent.keyDown(screen.getAllByRole('combobox')[0], { key: 'ArrowDown' })
+    fireEvent.click(screen.getByRole('option', { name: '第02页' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Page two reveal')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '下一步' }))
+
+    expect(store.get(activeTabAtom)).toBe('image-generation')
+    expect(store.get(selectedPageAtom)).toBe(2)
   })
 })
