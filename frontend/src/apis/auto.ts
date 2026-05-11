@@ -35,6 +35,14 @@ export const AutoApi = {
     })
   },
 
+  getLatestRun(comicId: number) {
+    return request<void, AutoRunResponse>({
+      url: '/api/auto/runs/latest',
+      method: 'GET',
+      params: { comic_id: comicId },
+    })
+  },
+
   getRun(autoRunId: number) {
     return request<void, AutoRunResponse>({
       url: `/api/auto/runs/${autoRunId}`,

@@ -53,6 +53,14 @@ def get_active_auto_run(user_id: int, comic_id: int | None = None) -> ComicAutoR
     return query.order_by(ComicAutoRun.created_at.desc(), ComicAutoRun.id.desc()).first()
 
 
+def get_latest_auto_run(user_id: int, comic_id: int) -> ComicAutoRun | None:
+    return (
+        ComicAutoRun.query.filter_by(user_id=user_id, comic_id=comic_id)
+        .order_by(ComicAutoRun.created_at.desc(), ComicAutoRun.id.desc())
+        .first()
+    )
+
+
 def get_auto_run_for_user(user_id: int, auto_run_id: int) -> ComicAutoRun | None:
     return ComicAutoRun.query.filter_by(id=auto_run_id, user_id=user_id).first()
 

@@ -54,6 +54,15 @@ export function useAutoRun() {
     return response.auto_run
   }, [setComicDetail, setComicId])
 
+  const loadRunForComic = useCallback(async (targetComicId: number | null) => {
+    const activeResponse = await AutoApi.getActiveRun(targetComicId)
+    if (activeResponse.auto_run || !targetComicId) {
+      return activeResponse
+    }
+
+    return AutoApi.getLatestRun(targetComicId)
+  }, [])
+
   const refresh = useCallback(async (runId?: number) => {
     setIsLoading(true)
     setError(null)
@@ -67,7 +76,7 @@ export function useAutoRun() {
         return applyRunResponse(response)
       }
 
-      const response = await AutoApi.getActiveRun(comicIdRef.current)
+      const response = await loadRunForComic(comicIdRef.current)
 
       return applyRunResponse(response)
     } catch (caught) {
@@ -76,7 +85,7 @@ export function useAutoRun() {
     } finally {
       setIsLoading(false)
     }
-  }, [applyRunResponse])
+  }, [applyRunResponse, loadRunForComic])
 
   useEffect(() => {
     clearPollingTimer()
@@ -88,7 +97,7 @@ export function useAutoRun() {
       setError(null)
 
       try {
-        const response = await AutoApi.getActiveRun(comicId)
+        const response = await loadRunForComic(comicId)
         if (cancelled) return
         applyRunResponse(response)
       } catch (caught) {
@@ -105,7 +114,7 @@ export function useAutoRun() {
       cancelled = true
       clearPollingTimer()
     }
-  }, [applyRunResponse, clearPollingTimer, comicId])
+  }, [applyRunResponse, clearPollingTimer, comicId, loadRunForComic])
 
   useEffect(() => {
     clearPollingTimer()

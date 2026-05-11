@@ -382,14 +382,9 @@ function SceneThumbnail({
   )
 }
 
-function StoryboardCanvas({ onPreview, imageUrl }: { onPreview: () => void; imageUrl?: string | null }) {
-  const { t } = useI18n('comics')
-
+function StoryboardCanvas({ imageUrl }: { imageUrl?: string | null }) {
   return (
-    <main className="flex min-h-[420px] flex-1 flex-col items-center gap-4 lg:min-h-[540px]">
-      <Button variant="secondary" onClick={onPreview} className="px-8">
-        {String(t('image.preview'))}
-      </Button>
+    <main className="flex min-h-[420px] flex-1 flex-col items-center lg:min-h-[540px]">
       <div className="flex w-full flex-1 items-center justify-center overflow-hidden rounded-lg border border-dashed border-muted-foreground/40 bg-muted/80 p-3">
         {imageUrl ? (
           <GeneratedImage alt="page preview" src={imageUrl} aspectRatio="16 / 10" className="max-h-full max-w-full border-0 bg-transparent" />
@@ -928,11 +923,6 @@ export function ImageGeneration() {
     toast.success(String(t('image.backToStory')))
   }
 
-  const previewHandler = () => {
-    // 预览动作由后续业务接入，此处占位方便绑定
-    console.info('preview scene', selectedScene)
-  }
-
   // 进入生图页时，如已有 comicId，则预载该漫画的已生成页面，供左侧缩略图展示
   // 这样即使重新走流程，左侧依然能看到上一流程的漫画内容
   useEffect(() => {
@@ -1436,7 +1426,6 @@ export function ImageGeneration() {
             )}
           </WorkflowActionBar>
           <StoryboardCanvas
-            onPreview={previewHandler}
             imageUrl={selectedImageUrl}
           />
         </section>

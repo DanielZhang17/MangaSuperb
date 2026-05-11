@@ -20,6 +20,7 @@ from mangasuperb.services.auto_runs import (
     enqueue_auto_run,
     get_active_auto_run,
     get_auto_run_for_user,
+    get_latest_auto_run,
     resolve_auto_run,
     retry_auto_run,
 )
@@ -213,6 +214,24 @@ def get_active_auto_run_endpoint() -> Any:
             return jsonify({"error": "comic_id must be an integer"}), 400
 
     auto_run = get_active_auto_run(current_user.id, comic_id)
+    if not auto_run:
+        return jsonify({"auto_run": None}), 200
+    return jsonify(_auto_run_payload(auto_run)), 200
+
+
+@bp.get("/runs/latest")
+@login_required
+def get_latest_auto_run_endpoint() -> Any:
+    comic_id_raw = request.args.get("comic_id")
+    if not comic_id_raw:
+        return jsonify({"error": "comic_id is required"}), 400
+
+    try:
+        comic_id = int(comic_id_raw)
+    except (TypeError, ValueError):
+        return jsonify({"error": "comic_id must be an integer"}), 400
+
+    auto_run = get_latest_auto_run(current_user.id, comic_id)
     if not auto_run:
         return jsonify({"auto_run": None}), 200
     return jsonify(_auto_run_payload(auto_run)), 200

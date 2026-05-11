@@ -121,6 +121,12 @@ describe('ImageGeneration render polling', () => {
     } as any)
   })
 
+  it('does not show the placeholder preview button in Pro image generation', () => {
+    renderImageGeneration()
+
+    expect(screen.queryByRole('button', { name: /preview|预览/i })).not.toBeInTheDocument()
+  })
+
   it('starts an all-pages render run with resolved render preferences', async () => {
     ;(globalThis as any).__mockPreferences = {
       version: 2,

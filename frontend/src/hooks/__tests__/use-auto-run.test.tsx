@@ -15,6 +15,7 @@ vi.mock('@/apis/auto', () => ({
     prepareCharacters: vi.fn(),
     startRun: vi.fn(),
     getActiveRun: vi.fn(),
+    getLatestRun: vi.fn(),
     getRun: vi.fn(),
     abortRun: vi.fn(),
     retryRun: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock('@/apis/auto', () => ({
 }))
 
 const getActiveRunMock = vi.mocked(AutoApi.getActiveRun)
+const getLatestRunMock = vi.mocked(AutoApi.getLatestRun)
 const getRunMock = vi.mocked(AutoApi.getRun)
 const abortRunMock = vi.mocked(AutoApi.abortRun)
 
@@ -65,6 +67,7 @@ describe('useAutoRun', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     getActiveRunMock.mockReset()
+    getLatestRunMock.mockReset()
     getRunMock.mockReset()
     abortRunMock.mockReset()
   })
@@ -93,6 +96,25 @@ describe('useAutoRun', () => {
 
     expect(getActiveRunMock).toHaveBeenCalledWith(null)
     expect(result.current.isActive).toBe(true)
+  })
+
+  it('hydrates the latest completed Auto run when no active run exists for the current comic', async () => {
+    getActiveRunMock.mockResolvedValue({ auto_run: null })
+    getLatestRunMock.mockResolvedValue({
+      auto_run: makeAutoRun({
+        status: 'completed',
+        current_stage: 'preview',
+      }),
+      comic: { id: 7, title: 'Book' } as never,
+    })
+
+    const { result } = renderHook(() => useAutoRun(), { wrapper: wrapperWithComic(7) })
+
+    await waitFor(() => expect(result.current.autoRun?.status).toBe('completed'))
+
+    expect(getActiveRunMock).toHaveBeenCalledWith(7)
+    expect(getLatestRunMock).toHaveBeenCalledWith(7)
+    expect(result.current.isComplete).toBe(true)
   })
 
   it('polls active runs and stops polling after terminal status', async () => {

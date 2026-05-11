@@ -463,6 +463,35 @@ def test_get_auto_run_route_scopes_to_current_user(
     assert response.status_code == 404
 
 
+def test_latest_auto_run_route_returns_completed_run_for_current_comic(
+    app: Any,
+    auth_client: Any,
+    user: Any,
+) -> None:
+    with app.app_context():
+        comic = create_comic(user.id)
+        run = ComicAutoRun.create(
+            comic_id=comic.id,
+            user_id=user.id,
+            story_snapshot="Done story",
+            title_snapshot="Completed Draft",
+        )
+        run.status = "completed"
+        run.current_stage = "preview"
+        db.session.add(run)
+        db.session.commit()
+        comic_id = comic.id
+        run_id = run.id
+
+    response = auth_client.get(f"/api/auto/runs/latest?comic_id={comic_id}")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["auto_run"]["id"] == run_id
+    assert payload["auto_run"]["status"] == "completed"
+    assert payload["comic"]["id"] == comic_id
+
+
 def test_sync_auto_run_from_terminal_render_run(app: Any, user: Any) -> None:
     from mangasuperb.services.auto_runs import sync_auto_run_from_render_run
 
